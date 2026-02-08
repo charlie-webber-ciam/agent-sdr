@@ -14,6 +14,7 @@ export async function GET(request: Request) {
       useCase: searchParams.get('useCase') || undefined,
       minPriority: searchParams.get('minPriority') ? parseInt(searchParams.get('minPriority')!) : undefined,
       revenue: searchParams.get('revenue') || undefined,
+      accountOwner: searchParams.get('accountOwner') || undefined,
       sortBy: searchParams.get('sortBy') || undefined,
       limit: parseInt(searchParams.get('limit') || '100'),
       offset: parseInt(searchParams.get('offset') || '0'),
@@ -26,10 +27,12 @@ export async function GET(request: Request) {
     const allTiers = new Set<string>();
     const allSkus = new Set<string>();
     const allUseCases = new Set<string>();
+    const allAccountOwners = new Set<string>();
 
     accounts.forEach(acc => {
       if (acc.industry) allIndustries.add(acc.industry);
       if (acc.tier) allTiers.add(acc.tier);
+      if (acc.auth0_account_owner) allAccountOwners.add(acc.auth0_account_owner);
 
       if (acc.auth0_skus) {
         try {
@@ -82,6 +85,7 @@ export async function GET(request: Request) {
           auth0Skus,
           priorityScore: acc.priority_score,
           lastEditedAt: acc.last_edited_at,
+          auth0AccountOwner: acc.auth0_account_owner,
         };
       }),
       total: accounts.length,
@@ -90,6 +94,7 @@ export async function GET(request: Request) {
         availableTiers: Array.from(allTiers).sort(),
         availableSkus: Array.from(allSkus).sort(),
         availableUseCases: Array.from(allUseCases).sort(),
+        availableAccountOwners: Array.from(allAccountOwners).sort(),
       },
     });
   } catch (error) {

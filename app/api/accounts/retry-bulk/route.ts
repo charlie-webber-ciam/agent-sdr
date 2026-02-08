@@ -30,13 +30,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate all accounts are failed
-    const nonFailedAccounts = accounts.filter((a) => a.research_status !== 'failed');
-    if (nonFailedAccounts.length > 0) {
+    // Validate all accounts are failed or pending
+    const invalidAccounts = accounts.filter((a) =>
+      a.research_status !== 'failed' && a.research_status !== 'pending'
+    );
+    if (invalidAccounts.length > 0) {
       return NextResponse.json(
         {
-          error: 'Only failed accounts can be retried',
-          nonFailedAccountIds: nonFailedAccounts.map((a) => a.id),
+          error: 'Only failed or pending accounts can be retried',
+          invalidAccountIds: invalidAccounts.map((a) => a.id),
         },
         { status: 400 }
       );

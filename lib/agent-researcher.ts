@@ -1,4 +1,15 @@
-import { Agent, run, webSearchTool } from '@openai/agents';
+import { Agent, run, webSearchTool, setDefaultOpenAIClient } from '@openai/agents';
+import OpenAI from 'openai';
+
+// Configure OpenAI client with custom base URL for agents SDK
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: process.env.OPENAI_BASE_URL,
+});
+
+// Set the OpenAI client for the agents SDK
+setDefaultOpenAIClient(openai);
+
 
 export interface ResearchResult {
   current_auth_solution: string;
@@ -12,7 +23,7 @@ export interface ResearchResult {
 
 export interface CompanyInfo {
   company_name: string;
-  domain: string;
+  domain: string | null;
   industry: string;
 }
 
@@ -20,6 +31,7 @@ export async function researchCompany(company: CompanyInfo): Promise<ResearchRes
   const agent = new Agent({
     model: 'gpt-5.2',
     name: 'Auth0 SDR Researcher - ANZ',
+
     instructions: `You are an expert SDR (Sales Development Representative) researcher working for Auth0 in the Australia/New Zealand region. Your role is to build comprehensive account profiles for CIAM (Customer Identity and Access Management) opportunities.
 
 **Your Perspective:**
@@ -49,8 +61,10 @@ Format all responses in markdown with bold text, bullet points, and links to sou
   });
 
   try {
+    const companyIdentifier = company.domain ? `${company.company_name} (${company.domain})` : company.company_name;
+
     // Research current authentication solution
-    const authPrompt = `Research ${company.company_name} (${company.domain}) and identify their current authentication and identity management solution. Look for:
+    const authPrompt = `Research ${companyIdentifier} and identify their current authentication and identity management solution. Look for:
 - What authentication providers or platforms they use (Auth0, Okta, Firebase, custom, etc.)
 - How they handle user authentication (SSO, MFA, social login)
 - Any public information about their identity infrastructure

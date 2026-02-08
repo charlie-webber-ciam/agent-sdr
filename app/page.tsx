@@ -117,7 +117,7 @@ export default function DashboardPage() {
           </div>
           <h2 className="text-2xl font-bold mb-2">Upload New Batch</h2>
           <p className="text-blue-100">
-            Upload a CSV file with up to 100 accounts to research
+            Upload a CSV file with up to 500 accounts to research
           </p>
         </button>
 

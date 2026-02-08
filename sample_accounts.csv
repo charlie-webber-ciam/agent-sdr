@@ -1,11 +1,11 @@
-company_name,domain,industry
-Acme Corporation,acme.com,SaaS
-TechVentures Inc,techventures.io,Technology
-Global Finance Solutions,globalfinance.com,Financial Services
-HealthCare Systems,healthcaresys.org,Healthcare
-Retail Innovation Co,retailinnovate.com,Retail
-EdTech Partners,edtechpartners.edu,Education
-Manufacturing Plus,mfgplus.com,Manufacturing
-Cloud Services Ltd,cloudservices.io,Technology
-Enterprise Solutions,enterprisesol.com,Enterprise Software
-Digital Media Group,digitalmedia.com,Media
+company_name,domain,industry,auth0_account_owner
+Acme Corporation,acme.com,SaaS,John Smith
+TechVentures Inc,techventures.io,Technology,Sarah Johnson
+Global Finance Solutions,globalfinance.com,Financial Services,John Smith
+HealthCare Systems,healthcaresys.org,Healthcare,Mike Davis
+Retail Innovation Co,retailinnovate.com,Retail,Sarah Johnson
+EdTech Partners,edtechpartners.edu,Education,Mike Davis
+Manufacturing Plus,mfgplus.com,Manufacturing,John Smith
+Cloud Services Ltd,cloudservices.io,Technology,Sarah Johnson
+Enterprise Solutions,enterprisesol.com,Enterprise Software,John Smith
+Private Holdings LLC,,Investment,Mike Davis

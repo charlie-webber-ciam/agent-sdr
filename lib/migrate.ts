@@ -16,6 +16,7 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'priority_score', type: 'INTEGER', default: '5', constraint: 'CHECK(priority_score BETWEEN 1 AND 10)' },
     { name: 'last_edited_at', type: 'TEXT' },
     { name: 'ai_suggestions', type: 'TEXT' },
+    { name: 'auth0_account_owner', type: 'TEXT' },
   ];
 
   // Get existing columns
@@ -67,4 +68,6 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Could not add unique constraint - duplicates may exist:', error);
     console.log('ℹ️  Run duplicate cleanup first if needed');
   }
+
+  console.log('ℹ️  Domain field uses NOT NULL constraint with dummy values for accounts without domains');
 }

@@ -34,7 +34,7 @@ export function getDb(): Database.Database {
 export interface Account {
   id: number;
   company_name: string;
-  domain: string;
+  domain: string | null;
   industry: string;
   research_status: 'pending' | 'processing' | 'completed' | 'failed';
   current_auth_solution: string | null;
@@ -59,6 +59,7 @@ export interface Account {
   priority_score: number | null;
   last_edited_at: string | null;
   ai_suggestions: string | null; // JSON
+  auth0_account_owner: string | null;
 }
 
 export interface ProcessingJob {
@@ -77,16 +78,26 @@ export interface ProcessingJob {
 // Account operations
 export function createAccount(
   companyName: string,
-  domain: string,
+  domain: string | null,
   industry: string,
-  jobId: number
+  jobId: number,
+  auth0AccountOwner?: string
 ): number {
   const db = getDb();
+
+  // Generate a unique dummy domain if none provided
+  let finalDomain = domain;
+  if (!finalDomain) {
+    const sanitizedName = companyName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const timestamp = Date.now();
+    finalDomain = `no-domain-${sanitizedName}-${timestamp}.placeholder`;
+  }
+
   const stmt = db.prepare(`
-    INSERT INTO accounts (company_name, domain, industry, job_id)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO accounts (company_name, domain, industry, job_id, auth0_account_owner)
+    VALUES (?, ?, ?, ?, ?)
   `);
-  const result = stmt.run(companyName, domain, industry, jobId);
+  const result = stmt.run(companyName, finalDomain, industry, jobId, auth0AccountOwner || null);
   return result.lastInsertRowid as number;
 }
 
@@ -397,6 +408,7 @@ export function getAccountsWithFilters(filters: {
   useCase?: string;
   minPriority?: number;
   revenue?: string;
+  accountOwner?: string;
   sortBy?: string;
   limit?: number;
   offset?: number;
@@ -450,6 +462,11 @@ export function getAccountsWithFilters(filters: {
     params.push(`%${filters.revenue}%`);
   }
 
+  if (filters.accountOwner) {
+    query += ' AND auth0_account_owner LIKE ?';
+    params.push(`%${filters.accountOwner}%`);
+  }
+
   // Sorting (default to priority_score)
   const sortBy = filters.sortBy || 'priority_score';
   const validSortFields = ['processed_at', 'priority_score', 'tier', 'company_name', 'created_at'];
@@ -477,6 +494,53 @@ export function resetAccountToPending(accountId: number): void {
     WHERE id = ?
   `);
   stmt.run(accountId);
+}
+
+// Reset multiple accounts to pending (useful for reprocessing)
+export function resetAccountsToPending(accountIds: number[]): number {
+  if (accountIds.length === 0) return 0;
+
+  const db = getDb();
+  const placeholders = accountIds.map(() => '?').join(',');
+  const stmt = db.prepare(`
+    UPDATE accounts
+    SET research_status = 'pending',
+        error_message = NULL,
+        updated_at = datetime('now')
+    WHERE id IN (${placeholders})
+  `);
+  const result = stmt.run(...accountIds);
+  return result.changes;
+}
+
+// Get all pending accounts (optionally by job)
+export function getPendingAccounts(jobId?: number): Account[] {
+  const db = getDb();
+  let query = 'SELECT * FROM accounts WHERE research_status = \'pending\'';
+  const params: any[] = [];
+
+  if (jobId !== undefined) {
+    query += ' AND job_id = ?';
+    params.push(jobId);
+  }
+
+  query += ' ORDER BY id';
+
+  const stmt = db.prepare(query);
+  return stmt.all(...params) as Account[];
+}
+
+// Reset job to allow reprocessing
+export function resetJobToPending(jobId: number): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE processing_jobs
+    SET status = 'pending',
+        current_account_id = NULL,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `);
+  stmt.run(jobId);
 }
 
 export function getAccountsByIds(ids: number[]): Account[] {

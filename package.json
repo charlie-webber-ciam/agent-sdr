@@ -9,7 +9,8 @@
     "lint": "eslint",
     "verify": "node scripts/verify-setup.js",
     "clean": "rm -rf .next",
-    "reset-db": "rm -f data/accounts.db && echo 'Database reset. Will be recreated on next start.'"
+    "reset-db": "rm -f data/accounts.db && echo 'Database reset. Will be recreated on next start.'",
+    "reprocess-pending": "tsx scripts/reprocess-pending.ts"
   },
   "dependencies": {
     "@openai/agents": "^0.4.6",
@@ -34,6 +35,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.19.2",
     "typescript": "^5"
   }
 }

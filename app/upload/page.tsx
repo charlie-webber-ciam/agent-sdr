@@ -102,7 +102,7 @@ export default function UploadPage() {
       <div className="mb-8">
         <h1 className="text-4xl font-bold mb-2">Upload Accounts</h1>
         <p className="text-gray-600">
-          Upload a CSV file with up to 100 accounts to research
+          Upload a CSV file with up to 500 accounts to research
         </p>
       </div>
 
@@ -110,13 +110,15 @@ export default function UploadPage() {
         <div className="mb-6">
           <h2 className="text-xl font-semibold mb-2">CSV Format Requirements</h2>
           <p className="text-gray-600 mb-4">
-            Your CSV file must include the following columns:
+            Required columns: <strong>company_name</strong>, <strong>industry</strong><br/>
+            Optional columns: <em>domain</em>, <em>auth0_account_owner</em>
           </p>
           <div className="bg-gray-50 p-4 rounded border border-gray-200 font-mono text-sm">
-            company_name,domain,industry
+            company_name,domain,industry,auth0_account_owner
           </div>
           <p className="text-sm text-gray-500 mt-2">
-            Example: "Acme Corp,acme.com,Technology"
+            Example: "Acme Corp,acme.com,Technology,John Smith"<br/>
+            Leave domain blank if not available: "Private Co,,Finance,Jane Doe"
           </p>
         </div>
 
@@ -165,7 +167,7 @@ export default function UploadPage() {
                   </label>
                   {' '}or drag and drop
                 </p>
-                <p className="text-sm text-gray-500">CSV file (max 100 accounts)</p>
+                <p className="text-sm text-gray-500">CSV file (max 500 accounts)</p>
               </div>
             ) : (
               <div>

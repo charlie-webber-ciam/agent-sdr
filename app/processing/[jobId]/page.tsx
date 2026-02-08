@@ -4,6 +4,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
 
+// Utility to format domain display
+const formatDomain = (domain: string | null) => {
+  if (!domain || domain.includes('.placeholder')) {
+    return 'No domain';
+  }
+  return domain;
+};
+
 interface JobData {
   job: {
     id: number;
@@ -189,7 +197,7 @@ export default function ProcessingPage({
                 <div className="flex-1">
                   <h4 className="font-medium text-lg">{account.companyName}</h4>
                   <p className="text-sm text-gray-600">
-                    {account.domain} • {account.industry}
+                    {formatDomain(account.domain)} • {account.industry}
                   </p>
                   {account.errorMessage && (
                     <p className="text-sm text-red-600 mt-1">

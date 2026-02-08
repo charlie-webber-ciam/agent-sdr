@@ -13,7 +13,7 @@ interface Account {
   status: string;
   researchSummary: string | null;
   processedAt: string | null;
-  tier?: string | null;
+  tier?: 'A' | 'B' | 'C' | null;
   priorityScore?: number | null;
 }
 
@@ -26,6 +26,7 @@ const DEFAULT_FILTERS: FilterState = {
   useCase: '',
   minPriority: null,
   revenue: '',
+  accountOwner: '',
   sortBy: 'priority_score',
 };
 
@@ -36,6 +37,7 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [industries, setIndustries] = useState<string[]>([]);
+  const [accountOwners, setAccountOwners] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 
   // Selection and bulk retry state
@@ -101,6 +103,11 @@ export default function AccountsPage() {
         new Set(data.accounts.map((a: Account) => a.industry))
       ) as string[];
       setIndustries(uniqueIndustries);
+
+      // Set available account owners from API
+      if (data.filters?.availableAccountOwners) {
+        setAccountOwners(data.filters.availableAccountOwners);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load accounts');
     } finally {
@@ -212,6 +219,7 @@ export default function AccountsPage() {
       active.push({ key: 'minPriority', label: 'Min Priority', value: `≥ ${filters.minPriority}` });
     }
     if (filters.revenue) active.push({ key: 'revenue', label: 'Revenue', value: filters.revenue });
+    if (filters.accountOwner) active.push({ key: 'accountOwner', label: 'Account Owner', value: filters.accountOwner });
     if (filters.sortBy && filters.sortBy !== 'priority_score') {
       const sortLabels: Record<string, string> = {
         processed_at: 'Recently Processed',
@@ -227,14 +235,18 @@ export default function AccountsPage() {
 
   const activeFilters = getActiveFilters();
   const failedAccounts = accounts.filter((a) => a.status === 'failed');
-  const showSelectionMode = currentStatusFilter === 'failed' && failedAccounts.length > 0;
+  const pendingAccounts = accounts.filter((a) => a.status === 'pending');
+  const retryableAccounts = (currentStatusFilter === 'failed') ? failedAccounts :
+                            (currentStatusFilter === 'pending') ? pendingAccounts : [];
+  const showSelectionMode = (currentStatusFilter === 'failed' || currentStatusFilter === 'pending') &&
+                           retryableAccounts.length > 0;
 
   const handleSelectAll = () => {
-    const allFailedIds = failedAccounts.map(a => a.id);
-    setSelectedAccountIds(new Set(allFailedIds));
+    const allRetryableIds = retryableAccounts.map(a => a.id);
+    setSelectedAccountIds(new Set(allRetryableIds));
   };
 
-  const isAllSelected = failedAccounts.length > 0 && selectedAccountIds.size === failedAccounts.length;
+  const isAllSelected = retryableAccounts.length > 0 && selectedAccountIds.size === retryableAccounts.length;
 
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto pb-32">
@@ -246,17 +258,30 @@ export default function AccountsPage() {
               Browse and search all researched accounts
             </p>
           </div>
-          {failedAccounts.length > 0 && currentStatusFilter !== 'failed' && (
-            <button
-              onClick={handleShowFailedOnly}
-              className="px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded-lg font-semibold hover:bg-red-200 transition-colors flex items-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Show Failed Only ({failedAccounts.length})
-            </button>
-          )}
+          <div className="flex gap-2">
+            {failedAccounts.length > 0 && currentStatusFilter !== 'failed' && (
+              <button
+                onClick={handleShowFailedOnly}
+                className="px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded-lg font-semibold hover:bg-red-200 transition-colors flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Show Failed Only ({failedAccounts.length})
+              </button>
+            )}
+            {pendingAccounts.length > 0 && currentStatusFilter !== 'pending' && (
+              <button
+                onClick={() => handleFiltersChange({ ...filters, status: 'pending' })}
+                className="px-4 py-2 bg-yellow-100 text-yellow-700 border border-yellow-300 rounded-lg font-semibold hover:bg-yellow-200 transition-colors flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Show Pending Only ({pendingAccounts.length})
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -264,6 +289,7 @@ export default function AccountsPage() {
         filters={filters}
         onFiltersChange={handleFiltersChange}
         industries={industries}
+        accountOwners={accountOwners}
       />
 
       {/* Active Filter Chips */}
@@ -416,7 +442,7 @@ export default function AccountsPage() {
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                {isRetrying ? 'Retrying...' : 'Retry Selected'}
+                {isRetrying ? 'Processing...' : 'Reprocess Selected'}
               </button>
             </div>
           </div>

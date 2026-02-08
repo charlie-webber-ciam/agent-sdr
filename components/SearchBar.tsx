@@ -33,6 +33,7 @@ export interface FilterState {
   useCase: string;
   minPriority: number | null;
   revenue: string;
+  accountOwner: string;
   sortBy: string;
 }
 
@@ -40,14 +41,15 @@ interface SearchBarProps {
   filters: FilterState;
   onFiltersChange: (filters: FilterState) => void;
   industries?: string[];
+  accountOwners?: string[];
 }
 
-export default function SearchBar({ filters, onFiltersChange, industries = [] }: SearchBarProps) {
+export default function SearchBar({ filters, onFiltersChange, industries = [], accountOwners = [] }: SearchBarProps) {
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
 
   // Use refs to track debounce timers
-  const searchTimerRef = useRef<NodeJS.Timeout>();
-  const revenueTimerRef = useRef<NodeJS.Timeout>();
+  const searchTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const revenueTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const handleSearchChange = (value: string) => {
     if (searchTimerRef.current) {
@@ -88,6 +90,7 @@ export default function SearchBar({ filters, onFiltersChange, industries = [] }:
     filters.useCase,
     filters.minPriority !== null && filters.minPriority > 1,
     filters.revenue,
+    filters.accountOwner,
     filters.sortBy && filters.sortBy !== 'priority_score',
   ].filter(Boolean).length;
 
@@ -178,6 +181,26 @@ export default function SearchBar({ filters, onFiltersChange, industries = [] }:
       {isAdvancedOpen && (
         <div className="mt-4 pt-4 border-t border-gray-200">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Auth0 Account Owner Filter */}
+            <div>
+              <label htmlFor="accountOwner" className="block text-sm font-medium text-gray-700 mb-2">
+                Auth0 Account Owner
+              </label>
+              <select
+                id="accountOwner"
+                value={filters.accountOwner}
+                onChange={(e) => handleFilterChange('accountOwner', e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">All Owners</option>
+                {accountOwners.map((owner) => (
+                  <option key={owner} value={owner}>
+                    {owner}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* Tier Filter */}
             <div>
               <label htmlFor="tier" className="block text-sm font-medium text-gray-700 mb-2">

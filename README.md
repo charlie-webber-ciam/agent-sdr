@@ -5,7 +5,7 @@ An autonomous research agent that processes company accounts, conducts comprehen
 ## Overview
 
 This application automates the time-consuming research phase of SDR prospecting by:
-- Processing CSV files with up to 100 company accounts per batch
+- Processing CSV files with up to 500 company accounts per batch
 - Conducting 6 AI-powered research queries per company
 - Extracting authentication solutions, customer data, security compliance, and key decision-makers
 - Categorizing accounts by tier (A/B/C) and priority score
@@ -156,17 +156,27 @@ You should see:
 ### Uploading Accounts
 
 **CSV Format Requirements:**
-- Required columns: `company_name`, `domain`, `industry`
-- Maximum 100 rows per file
+- Required columns: `company_name`, `industry`
+- Optional columns: `domain`, `auth0_account_owner`
+- Maximum 500 rows per file
 - UTF-8 encoding
 - Header row required
 
 Example:
 ```csv
-company_name,domain,industry
-Acme Corp,acme.com,SaaS
-Tech Startup,techstartup.io,Technology
+company_name,domain,industry,auth0_account_owner
+Acme Corp,acme.com,SaaS,John Smith
+Tech Startup,techstartup.io,Technology,Sarah Johnson
+Private Company,,Financial Services,Mike Davis
 ```
+
+Note: Domain is optional - leave blank if not available. Accounts without domains will be assigned a unique placeholder for database purposes, but will display as "No domain" in the UI.
+
+**Duplicate Handling:**
+- CSV duplicates (same domain appears multiple times in uploaded file): Automatically removed, keeping first occurrence
+- Database duplicates (domain already exists in database): Automatically skipped
+- Upload continues with all valid, non-duplicate accounts
+- Detailed summary shows counts of each type of duplicate removed
 
 **Upload Process:**
 1. Navigate to Upload page
@@ -419,7 +429,7 @@ pm2 startup
 
 - **Sequential Processing**: Designed to process one account at a time to avoid OpenAI rate limits and maintain quality research
 - **Expected Speed**: 30-60 seconds per account (6 research queries + processing)
-- **Batch Size**: Up to 100 accounts per CSV (takes ~50-100 minutes)
+- **Batch Size**: Up to 500 accounts per CSV (takes ~4-8 hours)
 - **Memory Usage**: ~200-300MB during processing (normal for AI operations)
 
 ## Security Considerations

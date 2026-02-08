@@ -11,6 +11,14 @@ import SKUMultiSelect from '@/components/SKUMultiSelect';
 import AIAutoCategorizePanel from '@/components/AIAutoCategorizePanel';
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal';
 
+// Utility to format domain display
+const formatDomain = (domain: string | null) => {
+  if (!domain || domain.includes('.placeholder')) {
+    return 'No domain';
+  }
+  return domain;
+};
+
 interface AccountDetail {
   id: number;
   companyName: string;
@@ -311,7 +319,7 @@ export default function AccountDetailPage({
             <div className="flex-1">
               <h1 className="text-4xl font-bold mb-2 text-gray-900">{account.companyName}</h1>
               <div className="flex items-center gap-3 text-lg text-gray-600 mb-3">
-                <span className="font-medium">{account.domain}</span>
+                <span className="font-medium">{formatDomain(account.domain)}</span>
                 <span>•</span>
                 <span className="px-3 py-1 bg-gray-100 rounded-full text-sm">{account.industry}</span>
               </div>

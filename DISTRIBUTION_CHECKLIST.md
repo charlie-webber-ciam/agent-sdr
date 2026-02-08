@@ -308,7 +308,7 @@ The Auth0 SDR Research Agent is now available for internal use.
 
 What it does:
 - Automates company research from Auth0 CIAM perspective
-- Processes up to 100 accounts per batch
+- Processes up to 500 accounts per batch
 - AI-powered categorization and priority scoring
 - Searchable database of account profiles
 

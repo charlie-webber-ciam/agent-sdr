@@ -1,5 +1,17 @@
 import { NextResponse } from 'next/server';
-import { Agent, run, webSearchTool, fileSearchTool } from '@openai/agents';
+import { Agent, run, webSearchTool, fileSearchTool, setOpenAIAPI } from '@openai/agents';
+import { setDefaultOpenAIClient } from '@openai/agents';
+import OpenAI from 'openai';
+
+// Configure OpenAI client with custom base URL for agents SDK
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: process.env.OPENAI_BASE_URL,
+});
+
+setDefaultOpenAIClient(openai);
+// Set the OpenAI client for the agents SDK
+
 
 export async function POST(request: Request) {
   try {

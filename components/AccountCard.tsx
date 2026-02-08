@@ -55,6 +55,13 @@ export default function AccountCard({
     });
   };
 
+  const formatDomain = (domain: string | null) => {
+    if (!domain || domain.includes('.placeholder')) {
+      return 'No domain';
+    }
+    return domain;
+  };
+
   const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation();
     if (onSelectionChange) {
@@ -96,7 +103,7 @@ export default function AccountCard({
             {account.companyName}
           </h3>
           <p className="text-sm text-gray-600">
-            {account.domain} • {account.industry}
+            {formatDomain(account.domain)} • {account.industry}
           </p>
 
           {/* Tier and SKU Badges */}

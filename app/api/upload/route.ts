@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const requiredColumns = ['company_name', 'domain', 'industry'];
+    const requiredColumns = ['company_name', 'industry'];
     const firstRecord = records[0];
     const missingColumns = requiredColumns.filter(col => !(col in firstRecord));
 
@@ -48,71 +48,88 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: `Missing required columns: ${missingColumns.join(', ')}`,
-          hint: 'CSV must have columns: company_name, domain, industry'
+          hint: 'CSV must have columns: company_name, industry (domain is optional)'
         },
         { status: 400 }
       );
     }
 
-    // Validate max 100 accounts
-    if (records.length > 100) {
+    // Validate max 500 accounts
+    if (records.length > 500) {
       return NextResponse.json(
-        { error: `Too many accounts. Maximum is 100, got ${records.length}` },
+        { error: `Too many accounts. Maximum is 500, got ${records.length}` },
         { status: 400 }
       );
     }
 
-    // Validate each record has non-empty values
+    // Validate each record has non-empty required values
     for (let i = 0; i < records.length; i++) {
       const record = records[i];
-      if (!record.company_name || !record.domain || !record.industry) {
+      if (!record.company_name || !record.industry) {
         return NextResponse.json(
           {
-            error: `Row ${i + 2} has empty required fields (company_name, domain, or industry)`
+            error: `Row ${i + 2} has empty required fields (company_name or industry)`
           },
           { status: 400 }
         );
       }
     }
 
-    // Extract all domains from CSV and normalize them
-    const domains = records.map(r => r.domain.toLowerCase().trim());
+    // Remove duplicates within CSV (keep first occurrence)
+    const seenDomains = new Set<string>();
+    const deduplicatedRecords: any[] = [];
+    const csvDuplicateRecords: any[] = [];
 
-    // Check for duplicates within the CSV itself
-    const csvDuplicates = domains.filter((domain, index) =>
-      domains.indexOf(domain) !== index
-    );
+    for (const record of records) {
+      const domain = record.domain?.toLowerCase().trim();
 
-    if (csvDuplicates.length > 0) {
-      return NextResponse.json(
-        {
-          error: 'CSV contains duplicate domains',
-          duplicates: [...new Set(csvDuplicates)],
-          hint: 'Each domain should appear only once in the CSV'
-        },
-        { status: 400 }
-      );
+      if (domain) {
+        // Has a domain - check if we've seen it before in this CSV
+        if (seenDomains.has(domain)) {
+          csvDuplicateRecords.push(record);
+          continue; // Skip this duplicate
+        }
+        seenDomains.add(domain);
+      }
+
+      // Either no domain, or first occurrence of this domain
+      deduplicatedRecords.push(record);
     }
 
-    // Check for existing accounts with these domains
-    const existingDomains = findDuplicateDomains(domains);
+    // Extract domains from deduplicated records for database check
+    const domainsToCheck = deduplicatedRecords
+      .filter(r => r.domain && r.domain.trim())
+      .map(r => r.domain.toLowerCase().trim());
 
-    // Filter out records with existing domains
-    const newRecords = records.filter(
-      record => !existingDomains.includes(record.domain.toLowerCase().trim())
-    );
-    const skippedRecords = records.filter(
-      record => existingDomains.includes(record.domain.toLowerCase().trim())
-    );
+    // Check for existing accounts with these domains in database
+    const existingDomains = domainsToCheck.length > 0 ? findDuplicateDomains(domainsToCheck) : [];
+
+    // Filter out records with domains that exist in database
+    const newRecords = deduplicatedRecords.filter(record => {
+      const domain = record.domain?.toLowerCase().trim();
+      // Include if no domain or domain doesn't exist in database
+      return !domain || !existingDomains.includes(domain);
+    });
+
+    const dbDuplicateRecords = deduplicatedRecords.filter(record => {
+      const domain = record.domain?.toLowerCase().trim();
+      // Skip if domain exists in database
+      return domain && existingDomains.includes(domain);
+    });
+
+    // Calculate total skipped
+    const totalSkipped = csvDuplicateRecords.length + dbDuplicateRecords.length;
 
     if (newRecords.length === 0) {
       return NextResponse.json(
         {
-          error: 'All accounts already exist',
+          error: 'No new accounts to import',
           totalRecords: records.length,
-          skippedCount: skippedRecords.length,
-          skippedDomains: existingDomains,
-          message: 'No new accounts to import. All domains already exist in the database.'
+          csvDuplicates: csvDuplicateRecords.length,
+          dbDuplicates: dbDuplicateRecords.length,
+          totalSkipped: totalSkipped,
+          existingDomains: existingDomains,
+          message: `All ${records.length} accounts were duplicates (${csvDuplicateRecords.length} within CSV, ${dbDuplicateRecords.length} already in database).`
         },
         { status: 400 }
       );
@@ -123,11 +140,13 @@ export async function POST(request: Request) {
 
     // Insert only new accounts
     for (const record of newRecords) {
+      const domain = record.domain?.trim() ? record.domain.toLowerCase().trim() : null;
       createAccount(
         record.company_name,
-        record.domain.toLowerCase().trim(),
+        domain,
         record.industry,
-        jobId
+        jobId,
+        record.auth0_account_owner || undefined
       );
     }
 
@@ -141,16 +160,30 @@ export async function POST(request: Request) {
       console.error('Failed to trigger processing:', err);
     });
 
+    // Build detailed message
+    let message = `Successfully uploaded ${newRecords.length} new accounts`;
+    const messageParts: string[] = [];
+
+    if (csvDuplicateRecords.length > 0) {
+      messageParts.push(`${csvDuplicateRecords.length} CSV duplicates removed`);
+    }
+    if (dbDuplicateRecords.length > 0) {
+      messageParts.push(`${dbDuplicateRecords.length} already in database`);
+    }
+
+    if (messageParts.length > 0) {
+      message += `. Skipped: ${messageParts.join(', ')}.`;
+    }
+
     return NextResponse.json({
       success: true,
       jobId,
       totalRecords: records.length,
       newAccounts: newRecords.length,
-      skippedCount: skippedRecords.length,
-      skippedDomains: existingDomains,
-      message: skippedRecords.length > 0
-        ? `Successfully uploaded ${newRecords.length} new accounts. Skipped ${skippedRecords.length} duplicates.`
-        : `Successfully uploaded ${newRecords.length} accounts`,
+      csvDuplicates: csvDuplicateRecords.length,
+      dbDuplicates: dbDuplicateRecords.length,
+      totalSkipped: totalSkipped,
+      message: message,
     });
 
   } catch (error) {

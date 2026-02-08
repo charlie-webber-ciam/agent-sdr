@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   priority_score INTEGER DEFAULT 5 CHECK(priority_score BETWEEN 1 AND 10),
   last_edited_at TEXT,
   ai_suggestions TEXT, -- JSON: stores AI-generated suggestions
+  auth0_account_owner TEXT,
   FOREIGN KEY (job_id) REFERENCES processing_jobs(id)
 );
 

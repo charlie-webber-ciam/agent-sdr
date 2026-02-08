@@ -395,7 +395,7 @@ The application is ready for distribution when:
 - **Setup (Standard):** 10-15 minutes
 - **Setup (Docker):** 5-10 minutes
 - **First Test Run:** 5-10 minutes (10 sample accounts)
-- **Full Batch (100 accounts):** 50-100 minutes
+- **Full Batch (500 accounts):** 4-8 hours
 
 ## Contact
 
