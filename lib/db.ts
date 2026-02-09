@@ -75,6 +75,20 @@ export interface ProcessingJob {
   completed_at: string | null;
 }
 
+export interface CategorizationJob {
+  id: number;
+  name: string;
+  total_accounts: number;
+  processed_count: number;
+  failed_count: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  current_account_id: number | null;
+  filters: string | null; // JSON string
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
 // Account operations
 export function createAccount(
   companyName: string,
@@ -463,8 +477,12 @@ export function getAccountsWithFilters(filters: {
   }
 
   if (filters.accountOwner) {
-    query += ' AND auth0_account_owner LIKE ?';
-    params.push(`%${filters.accountOwner}%`);
+    if (filters.accountOwner === 'unassigned') {
+      query += " AND (auth0_account_owner IS NULL OR auth0_account_owner = '')";
+    } else {
+      query += ' AND auth0_account_owner LIKE ?';
+      params.push(`%${filters.accountOwner}%`);
+    }
   }
 
   // Sorting (default to priority_score)
@@ -564,4 +582,126 @@ export function updateAccountJobId(accountId: number, jobId: number): void {
     WHERE id = ?
   `);
   stmt.run(jobId, accountId);
+}
+
+// Categorization job operations
+export function createCategorizationJob(
+  name: string,
+  totalAccounts: number,
+  filters?: Record<string, any>
+): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO categorization_jobs (name, total_accounts, filters)
+    VALUES (?, ?, ?)
+  `);
+  const result = stmt.run(name, totalAccounts, filters ? JSON.stringify(filters) : null);
+  return result.lastInsertRowid as number;
+}
+
+export function getCategorizationJob(id: number): CategorizationJob | undefined {
+  const db = getDb();
+  const stmt = db.prepare('SELECT * FROM categorization_jobs WHERE id = ?');
+  return stmt.get(id) as CategorizationJob | undefined;
+}
+
+export function getAllCategorizationJobs(limit: number = 10): CategorizationJob[] {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT * FROM categorization_jobs
+    ORDER BY created_at DESC
+    LIMIT ?
+  `);
+  return stmt.all(limit) as CategorizationJob[];
+}
+
+export function updateCategorizationJobStatus(
+  id: number,
+  status: 'pending' | 'processing' | 'completed' | 'failed',
+  currentAccountId?: number | null
+) {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE categorization_jobs
+    SET status = ?,
+        current_account_id = ?,
+        updated_at = datetime('now'),
+        completed_at = CASE WHEN ? IN ('completed', 'failed') THEN datetime('now') ELSE completed_at END
+    WHERE id = ?
+  `);
+  stmt.run(status, currentAccountId || null, status, id);
+}
+
+export function updateCategorizationJobProgress(
+  id: number,
+  processedCount: number,
+  failedCount: number
+) {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE categorization_jobs
+    SET processed_count = ?,
+        failed_count = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `);
+  stmt.run(processedCount, failedCount, id);
+}
+
+// Get accounts for categorization based on filters
+export function getAccountsForCategorization(filters: {
+  uncategorizedOnly?: boolean;
+  industry?: string;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  accountIds?: number[];
+  limit?: number;
+}): Account[] {
+  const db = getDb();
+  let query = 'SELECT * FROM accounts WHERE 1=1';
+  const params: any[] = [];
+
+  // Specific account IDs take precedence
+  if (filters.accountIds && filters.accountIds.length > 0) {
+    const placeholders = filters.accountIds.map(() => '?').join(',');
+    query += ` AND id IN (${placeholders})`;
+    params.push(...filters.accountIds);
+  } else {
+    // Status filter (default to completed)
+    query += ' AND research_status = ?';
+    params.push(filters.status || 'completed');
+
+    // Uncategorized only
+    if (filters.uncategorizedOnly) {
+      query += ' AND tier IS NULL';
+    }
+
+    // Industry filter
+    if (filters.industry) {
+      query += ' AND industry = ?';
+      params.push(filters.industry);
+    }
+
+    // Date range filter
+    if (filters.dateFrom) {
+      query += ' AND processed_at >= ?';
+      params.push(filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      query += ' AND processed_at <= ?';
+      params.push(filters.dateTo);
+    }
+  }
+
+  query += ' ORDER BY processed_at DESC, id';
+
+  // Limit
+  if (filters.limit) {
+    query += ' LIMIT ?';
+    params.push(filters.limit);
+  }
+
+  const stmt = db.prepare(query);
+  return stmt.all(...params) as Account[];
 }

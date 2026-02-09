@@ -46,8 +46,25 @@ CREATE TABLE IF NOT EXISTS processing_jobs (
   FOREIGN KEY (current_account_id) REFERENCES accounts(id)
 );
 
+-- Categorization jobs table - tracks bulk categorization status
+CREATE TABLE IF NOT EXISTS categorization_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  total_accounts INTEGER NOT NULL,
+  processed_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending, processing, completed, failed
+  current_account_id INTEGER,
+  filters TEXT, -- JSON: stores filters used for this job
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT,
+  FOREIGN KEY (current_account_id) REFERENCES accounts(id)
+);
+
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(research_status);
 CREATE INDEX IF NOT EXISTS idx_accounts_job_id ON accounts(job_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_company_name ON accounts(company_name);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON processing_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_categorization_jobs_status ON categorization_jobs(status);

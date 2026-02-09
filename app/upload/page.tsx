@@ -102,7 +102,7 @@ export default function UploadPage() {
       <div className="mb-8">
         <h1 className="text-4xl font-bold mb-2">Upload Accounts</h1>
         <p className="text-gray-600">
-          Upload a CSV file with up to 500 accounts to research
+          Upload a CSV file with up to 10,000 accounts to research
         </p>
       </div>
 
@@ -167,7 +167,7 @@ export default function UploadPage() {
                   </label>
                   {' '}or drag and drop
                 </p>
-                <p className="text-sm text-gray-500">CSV file (max 500 accounts)</p>
+                <p className="text-sm text-gray-500">CSV file (max 10,000 accounts)</p>
               </div>
             ) : (
               <div>

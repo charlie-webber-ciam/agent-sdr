@@ -81,9 +81,36 @@ ${account.research_summary || 'Not available'}
 Analyze this data and provide the following categorizations:
 
 1. **Tier (A/B/C):**
-   - **Tier A**: Large enterprise, strong funding, high growth, sophisticated tech stack, clear CIAM needs, ideal Auth0 customer profile
-   - **Tier B**: Mid-market, moderate growth, some technical sophistication, decent fit for Auth0
-   - **Tier C**: Small company, early stage, limited budget, basic needs, or poor fit
+
+   **IMPORTANT: Tier A is ONLY for exceptional opportunities. Most accounts should be B or C.**
+
+   - **Tier A** (Rare - only ~5-10% of accounts):
+     * **Minimum $250K USD ARR potential** - Large user base (500K+ users) OR high-value B2B with complex auth needs
+     * **Near-term buying triggers present** (must have at least 2 of these):
+       - Recent significant funding ($20M+) or strong revenue growth
+       - Active tech transformation/platform modernization underway
+       - Security incident or compliance deadline creating urgency
+       - Current auth solution causing documented pain points
+       - Rapidly scaling user base requiring enterprise CIAM
+       - Public statements about security/identity priorities
+       - Recent leadership changes (new CTO/CISO) driving change
+       - Migration from legacy systems in progress
+     * Strong Auth0 fit: Enterprise scale, sophisticated needs, clear budget authority
+     * **High likelihood to purchase within 12 months**
+
+   - **Tier B** (Default - majority of accounts 60-70%):
+     * Mid-market companies with moderate CIAM needs
+     * $50K-$250K ARR potential
+     * Some growth indicators but no urgent buying triggers
+     * Good technical fit but longer sales cycle (12-24 months)
+     * Established company with budget, but no immediate catalyst
+
+   - **Tier C** (Lower priority - 20-30%):
+     * Small companies or early stage startups
+     * < $50K ARR potential
+     * Limited budget or poor fit for Auth0
+     * Basic auth needs that could use simpler solutions
+     * Long sales cycle with uncertain timeline
 
 2. **Estimated Annual Revenue**: Provide a range (e.g., "$50M-$100M", "$500M+", "< $10M") based on funding, company size signals, customer base
 
@@ -97,17 +124,18 @@ Analyze this data and provide the following categorizations:
    - **FGA**: Fine-Grained Authorization, Permissions as a Service, B2B multi-tenancy
    - **Auth for AI**: LLM app auth, AI agent security, chatbot authentication
 
-6. **Priority Score (1-10)**: How high priority is this account for outreach?
-   - 9-10: Hot lead, perfect fit, high urgency
-   - 7-8: Strong opportunity, good fit
-   - 4-6: Moderate fit, worth pursuing
-   - 1-3: Low priority, poor fit
+6. **Priority Score (1-10)**: How high priority is this account for SDR outreach? **BE CONSERVATIVE - high scores should be rare.**
+   - **9-10** (Very rare - <5%): Tier A with multiple strong buying triggers, immediate opportunity, $250K+ ARR potential
+   - **7-8** (Rare - ~10%): Tier A or strong Tier B with at least one clear buying trigger, $100K+ ARR potential
+   - **5-6** (Most common - ~50%): Tier B accounts, moderate fit, some potential but no urgent triggers
+   - **3-4** (Common - ~30%): Tier C or weak Tier B, longer-term opportunity, limited triggers
+   - **1-2** (Reserved - ~10%): Poor fit, very small, or no clear Auth0 use case
 
 **Response Format (JSON only):**
 \`\`\`json
 {
   "tier": "A|B|C",
-  "tierReasoning": "Brief explanation",
+  "tierReasoning": "For Tier A: List specific ARR potential ($XXX) AND buying triggers identified. For B/C: Explain why it doesn't meet Tier A criteria.",
   "estimatedAnnualRevenue": "$X-$Y",
   "revenueReasoning": "Brief explanation",
   "estimatedUserVolume": "X-Y users",
@@ -116,8 +144,8 @@ Analyze this data and provide the following categorizations:
   "useCasesReasoning": "Brief explanation",
   "auth0Skus": ["Core", "FGA", "Auth for AI"],
   "skuReasoning": "Brief explanation",
-  "priorityScore": 8,
-  "priorityReasoning": "Brief explanation",
+  "priorityScore": 5,
+  "priorityReasoning": "Justify score based on buying triggers, ARR potential, and timeline. High scores (8+) require specific evidence.",
   "confidence": {
     "tier": 0.9,
     "revenue": 0.7,
@@ -128,6 +156,12 @@ Analyze this data and provide the following categorizations:
 }
 \`\`\`
 
+**CRITICAL INSTRUCTIONS:**
+- Default to Tier B unless strong evidence supports A or C
+- Only assign Tier A if you can identify $250K+ ARR potential AND at least 2 specific buying triggers
+- Be conservative with priority scores - most should be 4-6
+- In tierReasoning, explicitly state the buying triggers if Tier A, or why it falls short if B/C
+
 Provide ONLY the JSON response, no additional text.`;
 
   try {
@@ -136,7 +170,7 @@ Provide ONLY the JSON response, no additional text.`;
       messages: [
         {
           role: 'system',
-          content: 'You are an Auth0 CIAM sales intelligence analyst. Respond with valid JSON only.',
+          content: 'You are an Auth0 CIAM sales intelligence analyst. Be highly selective with Tier A assignments - they require $250K+ ARR potential AND multiple buying triggers. Most accounts should be Tier B or C. Respond with valid JSON only.',
         },
         {
           role: 'user',

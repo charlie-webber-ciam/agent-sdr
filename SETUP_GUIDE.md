@@ -452,7 +452,7 @@ Once setup is complete:
 1. **Upload Your Own Data**
    - Prepare CSV with required columns: company_name, industry
    - Optional columns: domain, auth0_account_owner
-   - Maximum 500 rows per file
+   - Maximum 10,000 rows per file
    - Upload and process
 
 2. **Categorize Accounts**

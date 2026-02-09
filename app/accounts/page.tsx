@@ -15,6 +15,8 @@ interface Account {
   processedAt: string | null;
   tier?: 'A' | 'B' | 'C' | null;
   priorityScore?: number | null;
+  auth0Skus?: string[];
+  auth0AccountOwner?: string | null;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -44,6 +46,11 @@ export default function AccountsPage() {
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
   const [currentStatusFilter, setCurrentStatusFilter] = useState<string>('');
   const [isRetrying, setIsRetrying] = useState(false);
+
+  // Bulk account owner assignment state
+  const [showOwnerAssignment, setShowOwnerAssignment] = useState(false);
+  const [newOwnerName, setNewOwnerName] = useState('');
+  const [isAssigningOwner, setIsAssigningOwner] = useState(false);
 
   // Initialize filters from URL and localStorage on mount
   useEffect(() => {
@@ -202,6 +209,50 @@ export default function AccountsPage() {
     }
   };
 
+  const handleBulkAssignOwner = async () => {
+    if (selectedAccountIds.size === 0) {
+      alert('Please select at least one account');
+      return;
+    }
+
+    if (!newOwnerName.trim()) {
+      alert('Please enter an account owner name');
+      return;
+    }
+
+    setIsAssigningOwner(true);
+    try {
+      const res = await fetch('/api/accounts/bulk-update-owner', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          accountIds: Array.from(selectedAccountIds),
+          accountOwner: newOwnerName.trim(),
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to update account owners');
+      }
+
+      const data = await res.json();
+      alert(`Success! Updated ${data.successCount} account(s) with owner: ${data.accountOwner}`);
+
+      // Refresh the page to show updated data
+      setSelectedAccountIds(new Set());
+      setNewOwnerName('');
+      setShowOwnerAssignment(false);
+      fetchAccounts();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update account owners');
+    } finally {
+      setIsAssigningOwner(false);
+    }
+  };
+
   // Get active filter chips
   const getActiveFilters = () => {
     const active: Array<{ key: keyof FilterState; label: string; value: string }> = [];
@@ -219,7 +270,10 @@ export default function AccountsPage() {
       active.push({ key: 'minPriority', label: 'Min Priority', value: `≥ ${filters.minPriority}` });
     }
     if (filters.revenue) active.push({ key: 'revenue', label: 'Revenue', value: filters.revenue });
-    if (filters.accountOwner) active.push({ key: 'accountOwner', label: 'Account Owner', value: filters.accountOwner });
+    if (filters.accountOwner) {
+      const ownerValue = filters.accountOwner === 'unassigned' ? 'No Owner' : filters.accountOwner;
+      active.push({ key: 'accountOwner', label: 'Account Owner', value: ownerValue });
+    }
     if (filters.sortBy && filters.sortBy !== 'priority_score') {
       const sortLabels: Record<string, string> = {
         processed_at: 'Recently Processed',
@@ -236,17 +290,30 @@ export default function AccountsPage() {
   const activeFilters = getActiveFilters();
   const failedAccounts = accounts.filter((a) => a.status === 'failed');
   const pendingAccounts = accounts.filter((a) => a.status === 'pending');
+  const noOwnerAccounts = accounts.filter((a) => !a.auth0AccountOwner);
   const retryableAccounts = (currentStatusFilter === 'failed') ? failedAccounts :
                             (currentStatusFilter === 'pending') ? pendingAccounts : [];
-  const showSelectionMode = (currentStatusFilter === 'failed' || currentStatusFilter === 'pending') &&
-                           retryableAccounts.length > 0;
+  const showRetryMode = (currentStatusFilter === 'failed' || currentStatusFilter === 'pending') &&
+                        retryableAccounts.length > 0;
+  const showOwnerMode = filters.accountOwner === 'unassigned' && noOwnerAccounts.length > 0;
+  const showSelectionMode = showRetryMode || showOwnerMode;
 
   const handleSelectAll = () => {
-    const allRetryableIds = retryableAccounts.map(a => a.id);
-    setSelectedAccountIds(new Set(allRetryableIds));
+    let idsToSelect: number[] = [];
+
+    if (showRetryMode) {
+      idsToSelect = retryableAccounts.map(a => a.id);
+    } else if (showOwnerMode) {
+      idsToSelect = noOwnerAccounts.map(a => a.id);
+    }
+
+    setSelectedAccountIds(new Set(idsToSelect));
   };
 
-  const isAllSelected = retryableAccounts.length > 0 && selectedAccountIds.size === retryableAccounts.length;
+  const selectableAccounts = showRetryMode ? retryableAccounts :
+                            showOwnerMode ? noOwnerAccounts : [];
+  const isAllSelected = selectableAccounts.length > 0 &&
+                       selectedAccountIds.size === selectableAccounts.length;
 
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto pb-32">
@@ -279,6 +346,17 @@ export default function AccountsPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 Show Pending Only ({pendingAccounts.length})
+              </button>
+            )}
+            {noOwnerAccounts.length > 0 && filters.accountOwner !== 'unassigned' && (
+              <button
+                onClick={() => handleFiltersChange({ ...filters, accountOwner: 'unassigned' })}
+                className="px-4 py-2 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg font-semibold hover:bg-blue-200 transition-colors flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                Show No Owner ({noOwnerAccounts.length})
               </button>
             )}
           </div>
@@ -400,21 +478,29 @@ export default function AccountsPage() {
             )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {accounts.map((account) => (
-              <AccountCard
-                key={account.id}
-                account={account}
-                selectable={showSelectionMode}
-                selected={selectedAccountIds.has(account.id)}
-                onSelectionChange={handleSelectionChange}
-              />
-            ))}
+            {accounts.map((account) => {
+              const isSelectable = showRetryMode
+                ? (account.status === 'failed' || account.status === 'pending')
+                : showOwnerMode
+                ? !account.auth0AccountOwner
+                : false;
+
+              return (
+                <AccountCard
+                  key={account.id}
+                  account={account}
+                  selectable={isSelectable}
+                  selected={selectedAccountIds.has(account.id)}
+                  onSelectionChange={handleSelectionChange}
+                />
+              );
+            })}
           </div>
         </>
       )}
 
-      {/* Bulk Action Bar */}
-      {selectedAccountIds.size > 0 && (
+      {/* Bulk Action Bar - Retry Mode */}
+      {selectedAccountIds.size > 0 && showRetryMode && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-200 shadow-2xl">
           <div className="max-w-7xl mx-auto px-8 py-4">
             <div className="flex items-center justify-between">
@@ -444,6 +530,58 @@ export default function AccountsPage() {
                 </svg>
                 {isRetrying ? 'Processing...' : 'Reprocess Selected'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Action Bar - Owner Assignment Mode */}
+      {selectedAccountIds.size > 0 && showOwnerMode && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-blue-200 shadow-2xl">
+          <div className="max-w-7xl mx-auto px-8 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-lg font-semibold text-gray-900">
+                    {selectedAccountIds.size} account{selectedAccountIds.size !== 1 ? 's' : ''} selected
+                  </span>
+                </div>
+                <button
+                  onClick={handleClearSelection}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium transition-colors"
+                >
+                  Clear Selection
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <label htmlFor="owner-input" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                    Assign Owner:
+                  </label>
+                  <input
+                    id="owner-input"
+                    type="text"
+                    value={newOwnerName}
+                    onChange={(e) => setNewOwnerName(e.target.value)}
+                    placeholder="Enter owner name..."
+                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[250px]"
+                  />
+                </div>
+                <button
+                  onClick={handleBulkAssignOwner}
+                  disabled={isAssigningOwner || !newOwnerName.trim()}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                  {isAssigningOwner ? 'Assigning...' : 'Assign Owner'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

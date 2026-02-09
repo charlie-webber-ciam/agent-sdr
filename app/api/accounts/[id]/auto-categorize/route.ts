@@ -36,9 +36,16 @@ export async function POST(
     // Analyze the account data
     const suggestions = await analyzeAccountData(account);
 
-    // Store the suggestions in the database
+    // Store both the suggestions and apply the categorization
     updateAccountMetadata(accountId, {
+      tier: suggestions.tier,
+      estimated_annual_revenue: suggestions.estimatedAnnualRevenue,
+      estimated_user_volume: suggestions.estimatedUserVolume,
+      use_cases: JSON.stringify(suggestions.useCases),
+      auth0_skus: JSON.stringify(suggestions.auth0Skus),
+      priority_score: suggestions.priorityScore,
       ai_suggestions: JSON.stringify(suggestions),
+      last_edited_at: new Date().toISOString(),
     });
 
     return NextResponse.json({

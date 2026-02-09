@@ -80,7 +80,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <button
           onClick={() => router.push('/upload')}
           className="bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg shadow-lg hover:shadow-xl transition-shadow p-8 text-left"
@@ -117,7 +117,7 @@ export default function DashboardPage() {
           </div>
           <h2 className="text-2xl font-bold mb-2">Upload New Batch</h2>
           <p className="text-blue-100">
-            Upload a CSV file with up to 500 accounts to research
+            Upload a CSV file with up to 10,000 accounts to research
           </p>
         </button>
 
@@ -158,6 +158,46 @@ export default function DashboardPage() {
           <h2 className="text-2xl font-bold mb-2">Browse Accounts</h2>
           <p className="text-green-100">
             View and search all researched accounts
+          </p>
+        </button>
+
+        <button
+          onClick={() => router.push('/categorize')}
+          className="bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg shadow-lg hover:shadow-xl transition-shadow p-8 text-left"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div className="w-12 h-12 bg-white bg-opacity-20 rounded-lg flex items-center justify-center">
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+                />
+              </svg>
+            </div>
+            <svg
+              className="w-8 h-8"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 5l7 7-7 7"
+              />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold mb-2">Bulk Categorize</h2>
+          <p className="text-purple-100">
+            Auto-categorize accounts into tiers and identify SKU opportunities
           </p>
         </button>
       </div>
@@ -237,16 +277,24 @@ export default function DashboardPage() {
                   </div>
                   {(stats.uncategorized ?? 0) > 0 && (
                     <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-semibold text-yellow-800">Needs Categorization</span>
                         <span className="text-lg font-bold text-yellow-900">{stats.uncategorized}</span>
                       </div>
-                      <button
-                        onClick={() => router.push('/accounts?status=completed&tier=unassigned')}
-                        className="mt-2 text-sm text-yellow-700 hover:text-yellow-900 font-medium"
-                      >
-                        Review Now →
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => router.push('/categorize')}
+                          className="flex-1 px-3 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 text-sm font-medium"
+                        >
+                          Auto-Categorize
+                        </button>
+                        <button
+                          onClick={() => router.push('/accounts?status=completed&tier=unassigned')}
+                          className="flex-1 px-3 py-2 bg-white border border-yellow-600 text-yellow-700 rounded hover:bg-yellow-50 text-sm font-medium"
+                        >
+                          Review Manually
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

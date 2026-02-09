@@ -193,6 +193,7 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">All Owners</option>
+                <option value="unassigned">No Owner (Unassigned)</option>
                 {accountOwners.map((owner) => (
                   <option key={owner} value={owner}>
                     {owner}

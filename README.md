@@ -5,7 +5,7 @@ An autonomous research agent that processes company accounts, conducts comprehen
 ## Overview
 
 This application automates the time-consuming research phase of SDR prospecting by:
-- Processing CSV files with up to 500 company accounts per batch
+- Processing CSV files with up to 10,000 company accounts per batch
 - Conducting 6 AI-powered research queries per company
 - Extracting authentication solutions, customer data, security compliance, and key decision-makers
 - Categorizing accounts by tier (A/B/C) and priority score
@@ -158,7 +158,7 @@ You should see:
 **CSV Format Requirements:**
 - Required columns: `company_name`, `industry`
 - Optional columns: `domain`, `auth0_account_owner`
-- Maximum 500 rows per file
+- Maximum 10,000 rows per file
 - UTF-8 encoding
 - Header row required
 
@@ -429,7 +429,7 @@ pm2 startup
 
 - **Sequential Processing**: Designed to process one account at a time to avoid OpenAI rate limits and maintain quality research
 - **Expected Speed**: 30-60 seconds per account (6 research queries + processing)
-- **Batch Size**: Up to 500 accounts per CSV (takes ~4-8 hours)
+- **Batch Size**: Up to 10,000 accounts per CSV (processing time scales linearly, ~45-75 seconds per account)
 - **Memory Usage**: ~200-300MB during processing (normal for AI operations)
 
 ## Security Considerations

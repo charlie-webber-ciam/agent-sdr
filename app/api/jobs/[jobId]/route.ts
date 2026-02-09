@@ -65,6 +65,7 @@ export async function GET(
         status: acc.research_status,
         errorMessage: acc.error_message,
         processedAt: acc.processed_at,
+        auth0AccountOwner: acc.auth0_account_owner,
       })),
     });
   } catch (error) {

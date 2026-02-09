@@ -14,6 +14,7 @@ interface AccountCardProps {
     tier?: 'A' | 'B' | 'C' | null;
     auth0Skus?: string[];
     priorityScore?: number | null;
+    auth0AccountOwner?: string | null;
   };
   selectable?: boolean;
   selected?: boolean;
@@ -79,15 +80,15 @@ export default function AccountCard({
   return (
     <div
       onClick={handleCardClick}
-      className={`bg-white rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer p-6 border-2 ${
+      className={`bg-white rounded-lg shadow-md hover:shadow-lg transition-all p-6 border-2 ${
         selected
           ? 'border-blue-500 bg-blue-50'
           : 'border-gray-200 hover:border-blue-300'
-      }`}
+      } ${selectable ? 'cursor-pointer' : 'cursor-pointer'}`}
     >
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
-        {selectable && account.status === 'failed' && (
+        {selectable && (
           <div className="flex items-start mr-3">
             <input
               type="checkbox"
@@ -105,6 +106,14 @@ export default function AccountCard({
           <p className="text-sm text-gray-600">
             {formatDomain(account.domain)} • {account.industry}
           </p>
+          {account.auth0AccountOwner && (
+            <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              {account.auth0AccountOwner}
+            </p>
+          )}
 
           {/* Tier and SKU Badges */}
           <div className="flex flex-wrap gap-2 mt-2">

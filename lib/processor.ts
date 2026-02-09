@@ -5,8 +5,10 @@ import {
   updateAccountResearch,
   updateJobStatus,
   updateJobProgress,
+  updateAccountMetadata,
 } from './db';
 import { researchCompany } from './agent-researcher';
+import { analyzeAccountData } from './categorizer';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -66,11 +68,36 @@ export async function processJob(jobId: number): Promise<void> {
         // Update account with research results
         updateAccountResearch(account.id, research);
 
+        console.log(`Completed research for ${account.company_name}, starting categorization...`);
+
+        // Perform AI categorization
+        try {
+          const updatedAccount = { ...account, ...research, research_status: 'completed' as const };
+          const suggestions = await analyzeAccountData(updatedAccount);
+
+          // Store both the suggestions and apply the categorization
+          updateAccountMetadata(account.id, {
+            tier: suggestions.tier,
+            estimated_annual_revenue: suggestions.estimatedAnnualRevenue,
+            estimated_user_volume: suggestions.estimatedUserVolume,
+            use_cases: JSON.stringify(suggestions.useCases),
+            auth0_skus: JSON.stringify(suggestions.auth0Skus),
+            priority_score: suggestions.priorityScore,
+            ai_suggestions: JSON.stringify(suggestions),
+            last_edited_at: new Date().toISOString(),
+          });
+
+          console.log(`Categorized ${account.company_name} as Tier ${suggestions.tier} (Priority: ${suggestions.priorityScore})`);
+        } catch (categorizationError) {
+          console.error(`Failed to categorize ${account.company_name}:`, categorizationError);
+          // Continue even if categorization fails - the research is still valuable
+        }
+
         // Mark account as completed
         updateAccountStatus(account.id, 'completed');
         processedCount++;
 
-        console.log(`Completed research for ${account.company_name}`);
+        console.log(`Completed processing for ${account.company_name}`);
 
         // Update job progress
         updateJobProgress(jobId, processedCount, failedCount);

@@ -18,9 +18,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (accountIds.length > 500) {
+    if (accountIds.length > 10000) {
       return NextResponse.json(
-        { error: 'Cannot reprocess more than 500 accounts at once' },
+        { error: 'Cannot reprocess more than 10,000 accounts at once' },
         { status: 400 }
       );
     }

@@ -37,6 +37,7 @@ interface JobData {
     status: string;
     errorMessage: string | null;
     processedAt: string | null;
+    auth0AccountOwner: string | null;
   }>;
 }
 
@@ -199,6 +200,14 @@ export default function ProcessingPage({
                   <p className="text-sm text-gray-600">
                     {formatDomain(account.domain)} • {account.industry}
                   </p>
+                  {account.auth0AccountOwner && (
+                    <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      {account.auth0AccountOwner}
+                    </p>
+                  )}
                   {account.errorMessage && (
                     <p className="text-sm text-red-600 mt-1">
                       Error: {account.errorMessage}

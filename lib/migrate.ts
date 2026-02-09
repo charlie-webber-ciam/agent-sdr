@@ -70,4 +70,28 @@ export function migrateDatabase(db: Database.Database) {
   }
 
   console.log('ℹ️  Domain field uses NOT NULL constraint with dummy values for accounts without domains');
+
+  // Add categorization_jobs table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS categorization_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        total_accounts INTEGER NOT NULL,
+        processed_count INTEGER NOT NULL DEFAULT 0,
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        current_account_id INTEGER,
+        filters TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT,
+        FOREIGN KEY (current_account_id) REFERENCES accounts(id)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_categorization_jobs_status ON categorization_jobs(status)');
+    console.log('✓ Ensured categorization_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create categorization_jobs table:', error);
+  }
 }
