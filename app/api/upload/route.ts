@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
-import { createJob, createAccount, findDuplicateDomains } from '@/lib/db';
+import { createJob, createAccount, findDuplicateDomains, updateJobTotalAccounts } from '@/lib/db';
 
 export async function POST(request: Request) {
   try {
@@ -139,15 +139,44 @@ export async function POST(request: Request) {
     const jobId = createJob(file.name, newRecords.length);
 
     // Insert only new accounts
+    let lateSkipped = 0;
     for (const record of newRecords) {
       const domain = record.domain?.trim() ? record.domain.toLowerCase().trim() : null;
-      createAccount(
-        record.company_name,
-        domain,
-        record.industry,
-        jobId,
-        record.auth0_account_owner || undefined,
-        record.okta_account_owner || undefined
+      try {
+        createAccount(
+          record.company_name,
+          domain,
+          record.industry,
+          jobId,
+          record.auth0_account_owner || undefined,
+          record.okta_account_owner || undefined
+        );
+      } catch (err: any) {
+        if (err?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+          lateSkipped++;
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    // Adjust job total and counts if any were skipped at insert time
+    const actualInserted = newRecords.length - lateSkipped;
+    if (lateSkipped > 0) {
+      updateJobTotalAccounts(jobId, actualInserted);
+    }
+
+    if (actualInserted === 0) {
+      return NextResponse.json(
+        {
+          error: 'No new accounts to import',
+          totalRecords: records.length,
+          csvDuplicates: csvDuplicateRecords.length,
+          dbDuplicates: dbDuplicateRecords.length + lateSkipped,
+          totalSkipped: totalSkipped + lateSkipped,
+          message: `All ${records.length} accounts were duplicates.`
+        },
+        { status: 400 }
       );
     }
 
@@ -162,14 +191,15 @@ export async function POST(request: Request) {
     });
 
     // Build detailed message
-    let message = `Successfully uploaded ${newRecords.length} new accounts`;
+    const totalDbDuplicates = dbDuplicateRecords.length + lateSkipped;
+    let message = `Successfully uploaded ${actualInserted} new accounts`;
     const messageParts: string[] = [];
 
     if (csvDuplicateRecords.length > 0) {
       messageParts.push(`${csvDuplicateRecords.length} CSV duplicates removed`);
     }
-    if (dbDuplicateRecords.length > 0) {
-      messageParts.push(`${dbDuplicateRecords.length} already in database`);
+    if (totalDbDuplicates > 0) {
+      messageParts.push(`${totalDbDuplicates} already in database`);
     }
 
     if (messageParts.length > 0) {
@@ -180,10 +210,10 @@ export async function POST(request: Request) {
       success: true,
       jobId,
       totalRecords: records.length,
-      newAccounts: newRecords.length,
+      newAccounts: actualInserted,
       csvDuplicates: csvDuplicateRecords.length,
-      dbDuplicates: dbDuplicateRecords.length,
-      totalSkipped: totalSkipped,
+      dbDuplicates: totalDbDuplicates,
+      totalSkipped: totalSkipped + lateSkipped,
       message: message,
     });
 

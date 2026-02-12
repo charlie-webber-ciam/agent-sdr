@@ -426,6 +426,17 @@ export function createJob(filename: string, totalAccounts: number): number {
   return result.lastInsertRowid as number;
 }
 
+export function updateJobTotalAccounts(id: number, totalAccounts: number) {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE processing_jobs
+    SET total_accounts = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `);
+  stmt.run(totalAccounts, id);
+}
+
 export function getJob(id: number): ProcessingJob | undefined {
   const db = getDb();
   const stmt = db.prepare('SELECT * FROM processing_jobs WHERE id = ?');

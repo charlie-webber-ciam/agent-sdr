@@ -116,6 +116,27 @@ export default function ProcessingPage({
     }
   };
 
+  const handleStartProcessing = async () => {
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/process/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: Number(jobId) }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to start processing');
+      }
+      await fetchJobData();
+    } catch (err) {
+      console.error('Start processing error:', err);
+      alert(err instanceof Error ? err.message : 'Failed to start processing');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this job and all its data? This cannot be undone.')) {
       return;
@@ -190,11 +211,16 @@ export default function ProcessingPage({
   const { job, currentAccount, accounts } = data;
   const isComplete = job.status === 'completed';
   const isFailed = job.status === 'failed';
-  const isProcessing = job.status === 'processing' || job.status === 'pending';
+  const isPending = job.status === 'pending';
+  const isActivelyProcessing = job.status === 'processing';
+  const isProcessing = isActivelyProcessing || isPending;
   const isPaused = job.paused === 1;
 
   const completedAccounts = accounts.filter(a => a.status === 'completed');
   const failedAccounts = accounts.filter(a => a.status === 'failed');
+  const pendingAccounts = accounts.filter(a => a.status === 'pending');
+  // A pending job with no current account and accounts still pending is likely stuck
+  const isStuck = isPending && !currentAccount && pendingAccounts.length > 0 && job.processedCount === 0;
 
   return (
     <main className="min-h-screen p-8 max-w-6xl mx-auto">
@@ -210,6 +236,8 @@ export default function ProcessingPage({
             ? 'bg-green-50 border border-green-200'
             : isFailed
             ? 'bg-red-50 border border-red-200'
+            : isStuck
+            ? 'bg-orange-50 border border-orange-200'
             : isPaused
             ? 'bg-yellow-50 border border-yellow-200'
             : 'bg-blue-50 border border-blue-200'
@@ -222,14 +250,27 @@ export default function ProcessingPage({
                 ? 'Completed!'
                 : isFailed
                 ? 'Failed/Cancelled'
+                : isStuck
+                ? 'Pending'
                 : isPaused
-                ? '⏸️ Paused'
+                ? 'Paused'
                 : 'Processing...'}
             </h2>
             <p className="text-gray-700">
-              {job.processedCount} of {job.totalAccounts} accounts processed
-              {job.failedCount > 0 && ` (${job.failedCount} failed)`}
+              {isStuck
+                ? `${job.totalAccounts} account${job.totalAccounts !== 1 ? 's' : ''} waiting to be processed`
+                : (
+                  <>
+                    {job.processedCount} of {job.totalAccounts} accounts processed
+                    {job.failedCount > 0 && ` (${job.failedCount} failed)`}
+                  </>
+                )}
             </p>
+            {isStuck && (
+              <p className="text-sm text-orange-700 mt-1">
+                Processing did not start automatically. Click "Start Processing" to begin.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-3">
             {isComplete && (
@@ -240,7 +281,35 @@ export default function ProcessingPage({
                 View All Accounts
               </button>
             )}
-            {isProcessing && (
+            {isStuck && (
+              <>
+                <button
+                  onClick={handleStartProcessing}
+                  disabled={actionLoading}
+                  className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center gap-2 font-medium"
+                >
+                  {actionLoading ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Starting...
+                    </>
+                  ) : (
+                    'Start Processing'
+                  )}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={actionLoading}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
+                >
+                  Delete Job
+                </button>
+              </>
+            )}
+            {isProcessing && !isStuck && (
               <>
                 {isPaused ? (
                   <button
@@ -248,7 +317,6 @@ export default function ProcessingPage({
                     disabled={actionLoading}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
                   >
-                    <span>▶️</span>
                     {actionLoading ? 'Resuming...' : 'Resume'}
                   </button>
                 ) : (
@@ -257,7 +325,6 @@ export default function ProcessingPage({
                     disabled={actionLoading}
                     className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
                   >
-                    <span>⏸️</span>
                     {actionLoading ? 'Pausing...' : 'Pause'}
                   </button>
                 )}
@@ -266,7 +333,6 @@ export default function ProcessingPage({
                   disabled={actionLoading}
                   className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
                 >
-                  <span>✖️</span>
                   {actionLoading ? 'Cancelling...' : 'Cancel'}
                 </button>
               </>
@@ -277,7 +343,6 @@ export default function ProcessingPage({
                 disabled={actionLoading}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
               >
-                <span>🗑️</span>
                 {actionLoading ? 'Deleting...' : 'Delete Job'}
               </button>
             )}

@@ -3,16 +3,23 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+interface UploadResult {
+  jobId: number;
+  totalRecords: number;
+  newAccounts: number;
+  csvDuplicates: number;
+  dbDuplicates: number;
+  totalSkipped: number;
+  message: string;
+}
+
 export default function UploadPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [skipInfo, setSkipInfo] = useState<{
-    skippedCount: number;
-    skippedDomains: string[];
-  } | null>(null);
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -58,7 +65,7 @@ export default function UploadPage() {
 
     setUploading(true);
     setError(null);
-    setSkipInfo(null);
+    setUploadResult(null);
 
     try {
       const formData = new FormData();
@@ -72,30 +79,125 @@ export default function UploadPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to upload file');
+        throw new Error(data.message || data.error || 'Failed to upload file');
       }
 
-      // Capture skip information if any
-      if (data.skippedCount > 0) {
-        setSkipInfo({
-          skippedCount: data.skippedCount,
-          skippedDomains: data.skippedDomains,
-        });
-      }
-
-      // Redirect to processing page after a short delay to show skip message
-      if (data.skippedCount > 0) {
-        setTimeout(() => {
-          router.push(`/processing/${data.jobId}`);
-        }, 2000);
-      } else {
-        router.push(`/processing/${data.jobId}`);
-      }
+      setUploadResult(data);
+      setUploading(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload file');
       setUploading(false);
     }
   };
+
+  const handleReset = () => {
+    setFile(null);
+    setUploadResult(null);
+    setError(null);
+  };
+
+  // Upload complete view
+  if (uploadResult) {
+    return (
+      <main className="min-h-screen p-8 max-w-4xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold mb-2">Upload Accounts</h1>
+          <p className="text-gray-600">
+            Upload a CSV file with up to 10,000 accounts to research
+          </p>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-md p-8">
+          {/* Success header */}
+          <div className="flex items-center gap-3 mb-6">
+            <div className="flex-shrink-0 w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+              <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-green-800">Upload Complete</h2>
+              <p className="text-gray-600">{file?.name}</p>
+            </div>
+          </div>
+
+          {/* Stats grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+            <div className="bg-gray-50 rounded-lg p-4 text-center">
+              <p className="text-2xl font-bold text-gray-900">{uploadResult.totalRecords}</p>
+              <p className="text-sm text-gray-600">Total rows</p>
+            </div>
+            <div className="bg-green-50 rounded-lg p-4 text-center">
+              <p className="text-2xl font-bold text-green-700">{uploadResult.newAccounts}</p>
+              <p className="text-sm text-green-700">New accounts</p>
+            </div>
+            {uploadResult.csvDuplicates > 0 && (
+              <div className="bg-yellow-50 rounded-lg p-4 text-center">
+                <p className="text-2xl font-bold text-yellow-700">{uploadResult.csvDuplicates}</p>
+                <p className="text-sm text-yellow-700">CSV duplicates</p>
+              </div>
+            )}
+            {uploadResult.dbDuplicates > 0 && (
+              <div className="bg-yellow-50 rounded-lg p-4 text-center">
+                <p className="text-2xl font-bold text-yellow-700">{uploadResult.dbDuplicates}</p>
+                <p className="text-sm text-yellow-700">Already in DB</p>
+              </div>
+            )}
+          </div>
+
+          {uploadResult.totalSkipped > 0 && (
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <svg className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <p className="text-sm text-yellow-800">
+                  {uploadResult.totalSkipped} record{uploadResult.totalSkipped !== 1 ? 's' : ''} skipped
+                  {uploadResult.csvDuplicates > 0 && ` (${uploadResult.csvDuplicates} duplicate${uploadResult.csvDuplicates !== 1 ? 's' : ''} within CSV`}
+                  {uploadResult.csvDuplicates > 0 && uploadResult.dbDuplicates > 0 && ', '}
+                  {uploadResult.csvDuplicates === 0 && uploadResult.dbDuplicates > 0 && ' ('}
+                  {uploadResult.dbDuplicates > 0 && `${uploadResult.dbDuplicates} already in database`}
+                  {(uploadResult.csvDuplicates > 0 || uploadResult.dbDuplicates > 0) && ')'}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <p className="text-sm text-blue-800">
+              <strong>{uploadResult.newAccounts} account{uploadResult.newAccounts !== 1 ? 's' : ''}</strong> ready for research.
+              Research is already running in the background. View the progress page to monitor status.
+            </p>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-4">
+            <button
+              onClick={() => router.push(`/processing/${uploadResult.jobId}`)}
+              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              View Research Progress
+            </button>
+            <button
+              onClick={handleReset}
+              className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300"
+            >
+              Upload Another
+            </button>
+            <button
+              onClick={() => router.push('/')}
+              className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300"
+            >
+              Home
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen p-8 max-w-4xl mx-auto">
@@ -208,42 +310,23 @@ export default function UploadPage() {
             </div>
           )}
 
-          {skipInfo && skipInfo.skippedCount > 0 && (
-            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex items-start gap-2">
-                <svg className="w-5 h-5 text-yellow-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <div className="flex-1">
-                  <p className="text-yellow-800 font-semibold text-sm mb-1">
-                    Skipped {skipInfo.skippedCount} duplicate{skipInfo.skippedCount > 1 ? 's' : ''}
-                  </p>
-                  <p className="text-yellow-700 text-sm">
-                    The following domains already exist in the database:
-                  </p>
-                  <ul className="mt-2 text-yellow-700 text-sm list-disc list-inside">
-                    {skipInfo.skippedDomains.slice(0, 5).map((domain, idx) => (
-                      <li key={idx}>{domain}</li>
-                    ))}
-                    {skipInfo.skippedDomains.length > 5 && (
-                      <li>... and {skipInfo.skippedDomains.length - 5} more</li>
-                    )}
-                  </ul>
-                  <p className="text-yellow-700 text-xs mt-2">
-                    Redirecting to processing page...
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
           <div className="mt-6 flex gap-4">
             <button
               type="submit"
               disabled={!file || uploading}
-              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {uploading ? 'Uploading...' : 'Start Research'}
+              {uploading ? (
+                <>
+                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Uploading...
+                </>
+              ) : (
+                'Upload & Start Research'
+              )}
             </button>
             <button
               type="button"
