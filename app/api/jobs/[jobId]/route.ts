@@ -48,6 +48,7 @@ export async function GET(
         processedCount: job.processed_count,
         failedCount: job.failed_count,
         progressPercent,
+        paused: job.paused || 0,
         createdAt: job.created_at,
         updatedAt: job.updated_at,
         completedAt: job.completed_at,

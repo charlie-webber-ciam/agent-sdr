@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   last_edited_at TEXT,
   ai_suggestions TEXT, -- JSON: stores AI-generated suggestions
   auth0_account_owner TEXT,
+  okta_account_owner TEXT,
   FOREIGN KEY (job_id) REFERENCES processing_jobs(id)
 );
 
@@ -62,9 +63,45 @@ CREATE TABLE IF NOT EXISTS categorization_jobs (
   FOREIGN KEY (current_account_id) REFERENCES accounts(id)
 );
 
+-- Preprocessing jobs table - tracks bulk validation/cleaning jobs
+CREATE TABLE IF NOT EXISTS preprocessing_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  filename TEXT NOT NULL,
+  total_accounts INTEGER NOT NULL,
+  processed_count INTEGER NOT NULL DEFAULT 0,
+  removed_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending, processing, completed, failed
+  current_company TEXT,
+  output_filename TEXT, -- Generated CSV filename
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+-- Preprocessing results table - stores validation results for each company
+CREATE TABLE IF NOT EXISTS preprocessing_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL,
+  original_company_name TEXT NOT NULL,
+  original_domain TEXT,
+  original_industry TEXT,
+  validated_company_name TEXT,
+  validated_domain TEXT,
+  is_duplicate BOOLEAN DEFAULT 0,
+  is_active BOOLEAN DEFAULT 1, -- Still in business
+  should_include BOOLEAN DEFAULT 1,
+  validation_notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (job_id) REFERENCES preprocessing_jobs(id)
+);
+
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(research_status);
 CREATE INDEX IF NOT EXISTS idx_accounts_job_id ON accounts(job_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_company_name ON accounts(company_name);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON processing_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_categorization_jobs_status ON categorization_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_preprocessing_jobs_status ON preprocessing_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_preprocessing_results_job_id ON preprocessing_results(job_id);
+CREATE INDEX IF NOT EXISTS idx_preprocessing_results_domain ON preprocessing_results(validated_domain);

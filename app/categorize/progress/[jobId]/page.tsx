@@ -33,19 +33,6 @@ export default function CategorizationProgressPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchJobData();
-
-    // Auto-refresh while processing
-    const interval = setInterval(() => {
-      if (jobData?.job.status === 'processing' || jobData?.job.status === 'pending') {
-        fetchJobData();
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [unwrappedParams.jobId, jobData?.job.status]);
-
   const fetchJobData = async () => {
     try {
       const res = await fetch(`/api/categorization/jobs/${unwrappedParams.jobId}`);
@@ -54,18 +41,36 @@ export default function CategorizationProgressPage({
         const errorData = await res.json();
         setError(errorData.error || 'Failed to fetch job data');
         setLoading(false);
-        return;
+        return false;
       }
 
       const data = await res.json();
       setJobData(data);
       setLoading(false);
+      // Return whether job is still active
+      return data.job.status === 'processing' || data.job.status === 'pending';
     } catch (err) {
       console.error('Failed to fetch job data:', err);
       setError('Failed to load job data');
       setLoading(false);
+      return false;
     }
   };
+
+  useEffect(() => {
+    fetchJobData();
+
+    // Auto-refresh while processing
+    const interval = setInterval(async () => {
+      const isActive = await fetchJobData();
+      // Stop polling if job is complete
+      if (!isActive) {
+        clearInterval(interval);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [unwrappedParams.jobId]); // Only depend on jobId, not job status
 
   if (loading && !jobData) {
     return (

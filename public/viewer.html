@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account Research Reports - Offline Viewer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Account Research Reports</h1>
+      <div class="meta">
+        Offline Viewer | <span id="account-count">0</span> accounts loaded
+        <span id="export-date"></span>
+      </div>
+    </div>
+
+    <!-- List View -->
+    <div id="list-view">
+      <!-- Search Bar -->
+      <div class="search-bar">
+        <input
+          type="text"
+          id="search-input"
+          class="search-input"
+          placeholder="Search by company name, domain, or industry..."
+        >
+        <div class="filters">
+          <select id="tier-filter" class="filter-select">
+            <option value="">All Tiers</option>
+            <option value="A">Tier A</option>
+            <option value="B">Tier B</option>
+            <option value="C">Tier C</option>
+          </select>
+          <select id="industry-filter" class="filter-select">
+            <option value="">All Industries</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Account List -->
+      <div id="account-list" class="account-list"></div>
+
+      <!-- No Results -->
+      <div id="no-results" class="no-results" style="display: none;">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <h3>No accounts found</h3>
+        <p>Try adjusting your search or filters</p>
+      </div>
+    </div>
+
+    <!-- Detail View -->
+    <div id="detail-view" class="detail-view">
+      <div>
+        <button class="back-button" onclick="showList()">← Back to List</button>
+        <button class="print-button" onclick="window.print()">🖨️ Print / Save PDF</button>
+      </div>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+
+  <!-- Load Data -->
+  <script src="data.js"></script>
+
+  <!-- Application Logic -->
+  <script>
+    let accounts = [];
+    let filteredAccounts = [];
+    let currentAccount = null;
+
+    // Initialize
+    function init() {
+      if (typeof MyData === 'undefined') {
+        document.querySelector('.container').innerHTML = `
+          <div class="header">
+            <h1>⚠️ Data File Not Found</h1>
+            <p style="margin-top: 1rem; color: #6b7280;">
+              Please make sure both <code>data.js</code> and <code>styles.css</code> are in the same folder as this HTML file.
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      accounts = MyData.accounts || [];
+      filteredAccounts = accounts;
+
+      // Update meta info
+      document.getElementById('account-count').textContent = accounts.length;
+      if (MyData.export_metadata?.export_date) {
+        const date = new Date(MyData.export_metadata.export_date);
+        document.getElementById('export-date').textContent =
+          ` | Exported ${date.toLocaleDateString()}`;
+      }
+
+      // Populate industry filter
+      const industries = [...new Set(accounts.map(a => a.industry))].sort();
+      const industryFilter = document.getElementById('industry-filter');
+      industries.forEach(industry => {
+        const option = document.createElement('option');
+        option.value = industry;
+        option.textContent = industry;
+        industryFilter.appendChild(option);
+      });
+
+      // Event listeners
+      document.getElementById('search-input').addEventListener('input', filterAccounts);
+      document.getElementById('tier-filter').addEventListener('change', filterAccounts);
+      document.getElementById('industry-filter').addEventListener('change', filterAccounts);
+
+      // Initial render
+      renderAccounts();
+    }
+
+    // Filter accounts
+    function filterAccounts() {
+      const searchTerm = document.getElementById('search-input').value.toLowerCase();
+      const tierFilter = document.getElementById('tier-filter').value;
+      const industryFilter = document.getElementById('industry-filter').value;
+
+      filteredAccounts = accounts.filter(account => {
+        const matchesSearch = !searchTerm ||
+          account.company_name.toLowerCase().includes(searchTerm) ||
+          (account.domain && account.domain.toLowerCase().includes(searchTerm)) ||
+          account.industry.toLowerCase().includes(searchTerm);
+
+        const matchesTier = !tierFilter || account.tier === tierFilter;
+        const matchesIndustry = !industryFilter || account.industry === industryFilter;
+
+        return matchesSearch && matchesTier && matchesIndustry;
+      });
+
+      renderAccounts();
+    }
+
+    // Render account list
+    function renderAccounts() {
+      const listContainer = document.getElementById('account-list');
+      const noResults = document.getElementById('no-results');
+
+      if (filteredAccounts.length === 0) {
+        listContainer.innerHTML = '';
+        noResults.style.display = 'block';
+        return;
+      }
+
+      noResults.style.display = 'none';
+      listContainer.innerHTML = filteredAccounts.map(account => `
+        <div class="account-card" onclick="showDetail(${account.id})">
+          <div class="company-name">${escapeHtml(account.company_name)}</div>
+          <div class="domain">${escapeHtml(account.domain || 'No domain')}</div>
+          <div class="badges">
+            ${account.tier ? `<span class="badge tier-${account.tier.toLowerCase()}">Tier ${account.tier}</span>` : ''}
+            <span class="badge industry">${escapeHtml(account.industry)}</span>
+            ${account.priority_score ? `<span class="badge priority">Priority: ${account.priority_score}/10</span>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Show account detail
+    function showDetail(accountId) {
+      currentAccount = accounts.find(a => a.id === accountId);
+      if (!currentAccount) return;
+
+      const detailContent = document.getElementById('detail-content');
+      const prospects = currentAccount.prospects || [];
+
+      detailContent.innerHTML = `
+        <div class="detail-header">
+          <h2>${escapeHtml(currentAccount.company_name)}</h2>
+          <div class="domain">${escapeHtml(currentAccount.domain || 'No domain')}</div>
+          <div class="badges">
+            ${currentAccount.tier ? `<span class="badge tier-${currentAccount.tier.toLowerCase()}">Tier ${currentAccount.tier}</span>` : ''}
+            <span class="badge industry">${escapeHtml(currentAccount.industry)}</span>
+            ${currentAccount.priority_score ? `<span class="badge priority">Priority: ${currentAccount.priority_score}/10</span>` : ''}
+            ${currentAccount.estimated_annual_revenue ? `<span class="badge">ARR: ${escapeHtml(currentAccount.estimated_annual_revenue)}</span>` : ''}
+            ${currentAccount.estimated_user_volume ? `<span class="badge">Users: ${escapeHtml(currentAccount.estimated_user_volume)}</span>` : ''}
+          </div>
+        </div>
+
+        ${currentAccount.research?.summary ? `
+        <div class="summary-box">
+          <h3>📋 Executive Summary</h3>
+          <div class="content">${formatContent(currentAccount.research.summary)}</div>
+        </div>
+        ` : ''}
+
+        ${renderSection('🔐', 'Current Authentication Solution', currentAccount.research?.current_auth_solution)}
+        ${renderSection('👥', 'Customer Base & Growth', currentAccount.research?.customer_base_info)}
+        ${renderSection('🛡️', 'Security & Compliance', currentAccount.research?.security_incidents)}
+        ${renderSection('📰', 'Recent News & Funding', currentAccount.research?.news_and_funding)}
+        ${renderSection('🚀', 'Tech Transformation Initiatives', currentAccount.research?.tech_transformation)}
+
+        ${prospects.length > 0 ? `
+        <div class="detail-section">
+          <h3><span class="icon">👤</span> Key Decision Maker Prospects</h3>
+          <ul class="prospects-list">
+            ${prospects.map(p => `
+              <li>
+                <div class="name">${escapeHtml(p.name || 'Unknown')}</div>
+                <div class="title">${escapeHtml(p.title || 'No title')}</div>
+                ${p.reasoning ? `<div style="margin-top: 0.5rem; color: #6b7280; font-size: 0.875rem;">${escapeHtml(p.reasoning)}</div>` : ''}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+        ` : ''}
+
+        ${currentAccount.use_cases && currentAccount.use_cases.length > 0 ? `
+        <div class="detail-section">
+          <h3><span class="icon">💼</span> Relevant Use Cases</h3>
+          <div class="badges">
+            ${currentAccount.use_cases.map(uc => `<span class="badge">${escapeHtml(uc)}</span>`).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        ${currentAccount.auth0_skus && currentAccount.auth0_skus.length > 0 ? `
+        <div class="detail-section">
+          <h3><span class="icon">📦</span> Recommended Auth0 SKUs</h3>
+          <div class="badges">
+            ${currentAccount.auth0_skus.map(sku => `<span class="badge tier-a">${escapeHtml(sku)}</span>`).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        ${currentAccount.sdr_notes ? `
+        <div class="detail-section">
+          <h3><span class="icon">📝</span> SDR Notes</h3>
+          <div class="content">${formatContent(currentAccount.sdr_notes)}</div>
+        </div>
+        ` : ''}
+      `;
+
+      document.getElementById('list-view').style.display = 'none';
+      document.getElementById('detail-view').classList.add('active');
+      window.scrollTo(0, 0);
+    }
+
+    // Show list view
+    function showList() {
+      document.getElementById('detail-view').classList.remove('active');
+      document.getElementById('list-view').style.display = 'block';
+      window.scrollTo(0, 0);
+    }
+
+    // Render section helper
+    function renderSection(icon, title, content) {
+      if (!content) return '';
+      return `
+        <div class="detail-section">
+          <h3><span class="icon">${icon}</span> ${title}</h3>
+          <div class="content">${formatContent(content)}</div>
+        </div>
+      `;
+    }
+
+    // Format content - convert URLs to links and preserve formatting
+    function formatContent(text) {
+      if (!text) return '';
+
+      let html = escapeHtml(text);
+
+      // Convert URLs to clickable links
+      html = html.replace(
+        /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g,
+        '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+      );
+
+      return html;
+    }
+
+    // Escape HTML helper
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

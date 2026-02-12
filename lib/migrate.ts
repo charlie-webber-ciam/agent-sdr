@@ -17,6 +17,28 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'last_edited_at', type: 'TEXT' },
     { name: 'ai_suggestions', type: 'TEXT' },
     { name: 'auth0_account_owner', type: 'TEXT' },
+    // Okta Workforce Identity Research Fields
+    { name: 'okta_current_iam_solution', type: 'TEXT' },
+    { name: 'okta_workforce_info', type: 'TEXT' },
+    { name: 'okta_security_incidents', type: 'TEXT' },
+    { name: 'okta_news_and_funding', type: 'TEXT' },
+    { name: 'okta_tech_transformation', type: 'TEXT' },
+    { name: 'okta_ecosystem', type: 'TEXT' },
+    { name: 'okta_prospects', type: 'TEXT' },
+    { name: 'okta_research_summary', type: 'TEXT' },
+    { name: 'okta_opportunity_type', type: 'TEXT', constraint: "CHECK(okta_opportunity_type IN ('net_new', 'competitive_displacement', 'expansion', 'unknown', NULL))" },
+    { name: 'okta_priority_score', type: 'INTEGER', constraint: 'CHECK(okta_priority_score BETWEEN 1 AND 10)' },
+    { name: 'okta_processed_at', type: 'TEXT' },
+    // Okta Categorization Fields
+    { name: 'okta_tier', type: 'TEXT', constraint: "CHECK(okta_tier IN ('A', 'B', 'C', NULL))" },
+    { name: 'okta_estimated_annual_revenue', type: 'TEXT' },
+    { name: 'okta_estimated_user_volume', type: 'TEXT' },
+    { name: 'okta_use_cases', type: 'TEXT' }, // JSON array
+    { name: 'okta_skus', type: 'TEXT' }, // JSON array: Okta products
+    { name: 'okta_sdr_notes', type: 'TEXT' },
+    { name: 'okta_last_edited_at', type: 'TEXT' },
+    { name: 'okta_ai_suggestions', type: 'TEXT' }, // JSON: stores AI-generated suggestions for Okta
+    { name: 'okta_account_owner', type: 'TEXT' },
   ];
 
   // Get existing columns
@@ -47,7 +69,9 @@ export function migrateDatabase(db: Database.Database) {
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_tier ON accounts(tier)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_priority ON accounts(priority_score)');
-    console.log('✓ Added indexes for tier and priority_score');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_processed ON accounts(okta_processed_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_tier ON accounts(okta_tier)');
+    console.log('✓ Added indexes for tier, priority_score, okta_processed_at, and okta_tier');
   } catch (error) {
     console.error('Failed to add indexes:', error);
   }
@@ -93,5 +117,34 @@ export function migrateDatabase(db: Database.Database) {
     console.log('✓ Ensured categorization_jobs table exists');
   } catch (error) {
     console.error('Failed to create categorization_jobs table:', error);
+  }
+
+  // Add paused column to processing_jobs
+  try {
+    const processingJobsCols = db.prepare('PRAGMA table_info(processing_jobs)').all() as any[];
+    const hasProcessingPaused = processingJobsCols.some((col: any) => col.name === 'paused');
+
+    if (!hasProcessingPaused) {
+      db.exec('ALTER TABLE processing_jobs ADD COLUMN paused INTEGER DEFAULT 0');
+      console.log('✓ Added paused column to processing_jobs');
+    }
+  } catch (error) {
+    console.error('Failed to add paused column to processing_jobs:', error);
+  }
+
+  // Add paused column to preprocessing_jobs if table exists
+  try {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='preprocessing_jobs'").all() as any[];
+    if (tables.length > 0) {
+      const preprocessingJobsCols = db.prepare('PRAGMA table_info(preprocessing_jobs)').all() as any[];
+      const hasPreprocessingPaused = preprocessingJobsCols.some((col: any) => col.name === 'paused');
+
+      if (!hasPreprocessingPaused) {
+        db.exec('ALTER TABLE preprocessing_jobs ADD COLUMN paused INTEGER DEFAULT 0');
+        console.log('✓ Added paused column to preprocessing_jobs');
+      }
+    }
+  } catch (error) {
+    console.error('Failed to add paused column to preprocessing_jobs:', error);
   }
 }

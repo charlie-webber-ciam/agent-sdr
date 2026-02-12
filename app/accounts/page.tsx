@@ -4,6 +4,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AccountCard from '@/components/AccountCard';
 import SearchBar, { FilterState } from '@/components/SearchBar';
+import ExportModal from '@/components/ExportModal';
+import { usePerspective } from '@/lib/perspective-context';
+import { Suspense } from 'react';
 
 interface Account {
   id: number;
@@ -17,6 +20,10 @@ interface Account {
   priorityScore?: number | null;
   auth0Skus?: string[];
   auth0AccountOwner?: string | null;
+  oktaTier?: 'A' | 'B' | 'C' | null;
+  oktaPriorityScore?: number | null;
+  oktaSkus?: string[];
+  oktaAccountOwner?: string | null;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -30,48 +37,51 @@ const DEFAULT_FILTERS: FilterState = {
   revenue: '',
   accountOwner: '',
   sortBy: 'priority_score',
+  freshness: '',
 };
 
-export default function AccountsPage() {
+const ITEMS_PER_PAGE = 30;
+
+function AccountsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { perspective } = usePerspective();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [industries, setIndustries] = useState<string[]>([]);
   const [accountOwners, setAccountOwners] = useState<string[]>([]);
+  const [oktaAccountOwners, setOktaAccountOwners] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+
+  // Pagination state
+  const [totalAccounts, setTotalAccounts] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
 
   // Selection and bulk retry state
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
   const [currentStatusFilter, setCurrentStatusFilter] = useState<string>('');
   const [isRetrying, setIsRetrying] = useState(false);
+  const [reprocessMode, setReprocessMode] = useState<'both' | 'auth0' | 'okta'>('both');
 
   // Bulk account owner assignment state
-  const [showOwnerAssignment, setShowOwnerAssignment] = useState(false);
   const [newOwnerName, setNewOwnerName] = useState('');
   const [isAssigningOwner, setIsAssigningOwner] = useState(false);
 
-  // Initialize filters from URL and localStorage on mount
+  // Export modal state
+  const [showExportModal, setShowExportModal] = useState(false);
+
+  // Initialize filters and page from URL params (URL is source of truth)
   useEffect(() => {
     const initFilters = { ...DEFAULT_FILTERS };
+    let page = 1;
 
-    // First try localStorage (for returning users)
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('accountFilters');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          Object.assign(initFilters, parsed);
-        } catch (e) {
-          console.error('Failed to parse saved filters:', e);
-        }
-      }
-    }
-
-    // URL params override localStorage (for shared links)
+    // Load from URL params
     searchParams.forEach((value, key) => {
-      if (key in initFilters) {
+      if (key === 'page') {
+        page = Math.max(1, parseInt(value) || 1);
+      } else if (key in initFilters) {
         if (key === 'minPriority') {
           initFilters[key] = value ? parseInt(value) : null;
         } else {
@@ -81,7 +91,8 @@ export default function AccountsPage() {
     });
 
     setFilters(initFilters);
-  }, []);
+    setCurrentPage(page);
+  }, [searchParams]);
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
@@ -97,6 +108,10 @@ export default function AccountsPage() {
         }
       });
 
+      // Add pagination
+      params.set('limit', String(ITEMS_PER_PAGE));
+      params.set('offset', String((currentPage - 1) * ITEMS_PER_PAGE));
+
       const res = await fetch(`/api/accounts?${params.toString()}`);
       if (!res.ok) {
         throw new Error('Failed to fetch accounts');
@@ -104,6 +119,8 @@ export default function AccountsPage() {
 
       const data = await res.json();
       setAccounts(data.accounts);
+      setTotalAccounts(data.total);
+      setTotalPages(data.pagination.totalPages);
 
       // Extract unique industries for filter dropdown
       const uniqueIndustries = Array.from(
@@ -115,12 +132,15 @@ export default function AccountsPage() {
       if (data.filters?.availableAccountOwners) {
         setAccountOwners(data.filters.availableAccountOwners);
       }
+      if (data.filters?.availableOktaAccountOwners) {
+        setOktaAccountOwners(data.filters.availableOktaAccountOwners);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load accounts');
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, currentPage]);
 
   // Fetch accounts when filters change (with debouncing handled by SearchBar)
   useEffect(() => {
@@ -136,22 +156,31 @@ export default function AccountsPage() {
     setCurrentStatusFilter(newFilters.status);
     setSelectedAccountIds(new Set()); // Clear selection when filters change
 
-    // Save to localStorage
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('accountFilters', JSON.stringify(newFilters));
-    }
-
-    // Update URL params
+    // Update URL params (reset to page 1 when filters change)
     const params = new URLSearchParams();
     Object.entries(newFilters).forEach(([key, value]) => {
       if (value !== null && value !== '' && value !== DEFAULT_FILTERS[key as keyof FilterState]) {
         params.set(key, String(value));
       }
     });
+    params.set('page', '1'); // Reset to first page on filter change
 
     const newUrl = params.toString() ? `/accounts?${params.toString()}` : '/accounts';
     router.push(newUrl, { scroll: false });
   }, [router]);
+
+  const handlePageChange = useCallback((newPage: number) => {
+    // Update URL with new page number
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== null && value !== '' && value !== DEFAULT_FILTERS[key as keyof FilterState]) {
+        params.set(key, String(value));
+      }
+    });
+    params.set('page', String(newPage));
+
+    router.push(`/accounts?${params.toString()}`, { scroll: true });
+  }, [filters, router]);
 
   const handleClearAllFilters = () => {
     handleFiltersChange(DEFAULT_FILTERS);
@@ -186,25 +215,26 @@ export default function AccountsPage() {
 
     setIsRetrying(true);
     try {
-      const res = await fetch('/api/accounts/retry-bulk', {
+      const res = await fetch('/api/accounts/reprocess-bulk', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           accountIds: Array.from(selectedAccountIds),
+          researchType: reprocessMode,
         }),
       });
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || 'Failed to retry accounts');
+        throw new Error(data.error || 'Failed to reprocess accounts');
       }
 
       const data = await res.json();
       router.push(data.redirectUrl);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to retry accounts');
+      alert(err instanceof Error ? err.message : 'Failed to reprocess accounts');
       setIsRetrying(false);
     }
   };
@@ -230,6 +260,7 @@ export default function AccountsPage() {
         body: JSON.stringify({
           accountIds: Array.from(selectedAccountIds),
           accountOwner: newOwnerName.trim(),
+          ownerType: perspective,
         }),
       });
 
@@ -244,7 +275,6 @@ export default function AccountsPage() {
       // Refresh the page to show updated data
       setSelectedAccountIds(new Set());
       setNewOwnerName('');
-      setShowOwnerAssignment(false);
       fetchAccounts();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to update account owners');
@@ -274,6 +304,14 @@ export default function AccountsPage() {
       const ownerValue = filters.accountOwner === 'unassigned' ? 'No Owner' : filters.accountOwner;
       active.push({ key: 'accountOwner', label: 'Account Owner', value: ownerValue });
     }
+    if (filters.freshness) {
+      const freshnessLabels: Record<string, string> = {
+        fresh: 'Fresh (<30d)',
+        aging: 'Aging (30-60d)',
+        stale: 'Stale (>60d)',
+      };
+      active.push({ key: 'freshness', label: 'Freshness', value: freshnessLabels[filters.freshness] || filters.freshness });
+    }
     if (filters.sortBy && filters.sortBy !== 'priority_score') {
       const sortLabels: Record<string, string> = {
         processed_at: 'Recently Processed',
@@ -290,12 +328,14 @@ export default function AccountsPage() {
   const activeFilters = getActiveFilters();
   const failedAccounts = accounts.filter((a) => a.status === 'failed');
   const pendingAccounts = accounts.filter((a) => a.status === 'pending');
-  const noOwnerAccounts = accounts.filter((a) => !a.auth0AccountOwner);
+  const isOkta = perspective === 'okta';
+  const noOwnerAccounts = accounts.filter((a) => isOkta ? !a.oktaAccountOwner : !a.auth0AccountOwner);
   const retryableAccounts = (currentStatusFilter === 'failed') ? failedAccounts :
                             (currentStatusFilter === 'pending') ? pendingAccounts : [];
   const showRetryMode = (currentStatusFilter === 'failed' || currentStatusFilter === 'pending') &&
                         retryableAccounts.length > 0;
-  const showOwnerMode = filters.accountOwner === 'unassigned' && noOwnerAccounts.length > 0;
+  const ownerFilterActive = isOkta ? filters.oktaAccountOwner === 'unassigned' : filters.accountOwner === 'unassigned';
+  const showOwnerMode = ownerFilterActive && noOwnerAccounts.length > 0;
   const showSelectionMode = showRetryMode || showOwnerMode;
 
   const handleSelectAll = () => {
@@ -348,9 +388,15 @@ export default function AccountsPage() {
                 Show Pending Only ({pendingAccounts.length})
               </button>
             )}
-            {noOwnerAccounts.length > 0 && filters.accountOwner !== 'unassigned' && (
+            {noOwnerAccounts.length > 0 && !ownerFilterActive && (
               <button
-                onClick={() => handleFiltersChange({ ...filters, accountOwner: 'unassigned' })}
+                onClick={() => {
+                  if (isOkta) {
+                    handleFiltersChange({ ...filters, oktaAccountOwner: 'unassigned' });
+                  } else {
+                    handleFiltersChange({ ...filters, accountOwner: 'unassigned' });
+                  }
+                }}
                 className="px-4 py-2 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg font-semibold hover:bg-blue-200 transition-colors flex items-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -368,6 +414,7 @@ export default function AccountsPage() {
         onFiltersChange={handleFiltersChange}
         industries={industries}
         accountOwners={accountOwners}
+        oktaAccountOwners={oktaAccountOwners}
       />
 
       {/* Active Filter Chips */}
@@ -461,28 +508,112 @@ export default function AccountsPage() {
         <>
           <div className="mb-4 flex items-center justify-between">
             <div className="text-sm text-gray-600">
-              Showing {accounts.length} account{accounts.length !== 1 ? 's' : ''}
+              Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(currentPage * ITEMS_PER_PAGE, totalAccounts)} of {totalAccounts} account{totalAccounts !== 1 ? 's' : ''}
               {showSelectionMode && selectedAccountIds.size > 0 && (
                 <span className="ml-2 text-blue-600 font-semibold">
                   ({selectedAccountIds.size} selected)
                 </span>
               )}
             </div>
-            {showSelectionMode && (
+            <div className="flex items-center gap-3">
+              {showSelectionMode && (
+                <button
+                  onClick={isAllSelected ? handleClearSelection : handleSelectAll}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+                >
+                  {isAllSelected ? 'Deselect All' : 'Select All'}
+                </button>
+              )}
               <button
-                onClick={isAllSelected ? handleClearSelection : handleSelectAll}
-                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+                onClick={() => setShowExportModal(true)}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold transition-colors flex items-center gap-2"
               >
-                {isAllSelected ? 'Deselect All' : 'Select All'}
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                {selectedAccountIds.size > 0
+                  ? `Export Selected (${selectedAccountIds.size})`
+                  : `Export ${activeFilters.length > 0 ? 'Filtered' : 'All'} (${totalAccounts})`
+                }
               </button>
-            )}
+            </div>
           </div>
+
+          {/* Pagination Controls - Top */}
+          {totalPages > 1 && (
+            <div className="mb-6 flex items-center justify-center gap-2">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+              >
+                Previous
+              </button>
+
+              <div className="flex items-center gap-1">
+                {/* First page */}
+                {currentPage > 3 && (
+                  <>
+                    <button
+                      onClick={() => handlePageChange(1)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      1
+                    </button>
+                    {currentPage > 4 && <span className="px-2 text-gray-500">...</span>}
+                  </>
+                )}
+
+                {/* Page numbers around current */}
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(page => {
+                    return page === currentPage ||
+                           (page >= currentPage - 2 && page <= currentPage + 2);
+                  })
+                  .map(page => (
+                    <button
+                      key={page}
+                      onClick={() => handlePageChange(page)}
+                      className={`px-4 py-2 border rounded-lg transition-colors ${
+                        page === currentPage
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+
+                {/* Last page */}
+                {currentPage < totalPages - 2 && (
+                  <>
+                    {currentPage < totalPages - 3 && <span className="px-2 text-gray-500">...</span>}
+                    <button
+                      onClick={() => handlePageChange(totalPages)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      {totalPages}
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {accounts.map((account) => {
               const isSelectable = showRetryMode
                 ? (account.status === 'failed' || account.status === 'pending')
                 : showOwnerMode
-                ? !account.auth0AccountOwner
+                ? (isOkta ? !account.oktaAccountOwner : !account.auth0AccountOwner)
                 : false;
 
               return (
@@ -496,6 +627,75 @@ export default function AccountsPage() {
               );
             })}
           </div>
+
+          {/* Pagination Controls - Bottom */}
+          {totalPages > 1 && (
+            <div className="mt-8 flex items-center justify-center gap-2">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+              >
+                Previous
+              </button>
+
+              <div className="flex items-center gap-1">
+                {/* First page */}
+                {currentPage > 3 && (
+                  <>
+                    <button
+                      onClick={() => handlePageChange(1)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      1
+                    </button>
+                    {currentPage > 4 && <span className="px-2 text-gray-500">...</span>}
+                  </>
+                )}
+
+                {/* Page numbers around current */}
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(page => {
+                    return page === currentPage ||
+                           (page >= currentPage - 2 && page <= currentPage + 2);
+                  })
+                  .map(page => (
+                    <button
+                      key={page}
+                      onClick={() => handlePageChange(page)}
+                      className={`px-4 py-2 border rounded-lg transition-colors ${
+                        page === currentPage
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+
+                {/* Last page */}
+                {currentPage < totalPages - 2 && (
+                  <>
+                    {currentPage < totalPages - 3 && <span className="px-2 text-gray-500">...</span>}
+                    <button
+                      onClick={() => handlePageChange(totalPages)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      {totalPages}
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -520,16 +720,54 @@ export default function AccountsPage() {
                   Clear Selection
                 </button>
               </div>
-              <button
-                onClick={handleBulkRetry}
-                disabled={isRetrying}
-                className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                {isRetrying ? 'Processing...' : 'Reprocess Selected'}
-              </button>
+              <div className="flex items-center gap-3">
+                {/* Reprocess Mode Selector */}
+                <div className="flex items-center gap-2 border-l pl-4">
+                  <span className="text-sm font-medium text-gray-700">Research Type:</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setReprocessMode('both')}
+                      className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                        reprocessMode === 'both'
+                          ? 'bg-green-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      Both
+                    </button>
+                    <button
+                      onClick={() => setReprocessMode('auth0')}
+                      className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                        reprocessMode === 'auth0'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      Auth0
+                    </button>
+                    <button
+                      onClick={() => setReprocessMode('okta')}
+                      className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                        reprocessMode === 'okta'
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      Okta
+                    </button>
+                  </div>
+                </div>
+                <button
+                  onClick={handleBulkRetry}
+                  disabled={isRetrying}
+                  className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  {isRetrying ? 'Processing...' : 'Reprocess Selected'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -586,6 +824,29 @@ export default function AccountsPage() {
           </div>
         </div>
       )}
+
+      {/* Export Modal */}
+      <ExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        selectedAccountIds={selectedAccountIds}
+        currentFilters={filters}
+        totalFilteredAccounts={totalAccounts}
+      />
     </main>
+  );
+}
+
+export default function AccountsPage() {
+  return (
+    <Suspense fallback={
+      <main className="min-h-screen p-8 max-w-7xl mx-auto">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-xl text-gray-600">Loading accounts...</div>
+        </div>
+      </main>
+    }>
+      <AccountsPageContent />
+    </Suspense>
   );
 }

@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account Research Reports - Offline Viewer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+      background: #f3f4f6;
+      color: #111827;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    /* Header */
+    .header {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      margin-bottom: 2rem;
+    }
+
+    .header h1 {
+      font-size: 2rem;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
+      color: #1f2937;
+    }
+
+    .header .meta {
+      color: #6b7280;
+      font-size: 0.875rem;
+    }
+
+    /* Search Bar */
+    .search-bar {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      margin-bottom: 2rem;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      transition: all 0.2s;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    .filters {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .filter-select {
+      padding: 0.5rem;
+      border: 2px solid #e5e7eb;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      background: white;
+      cursor: pointer;
+    }
+
+    /* Account List */
+    .account-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .account-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 2px solid transparent;
+    }
+
+    .account-card:hover {
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      border-color: #3b82f6;
+      transform: translateY(-2px);
+    }
+
+    .account-card .company-name {
+      font-size: 1.25rem;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
+      color: #1f2937;
+    }
+
+    .account-card .domain {
+      color: #6b7280;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .badges {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-top: 0.75rem;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge.tier-a { background: #dcfce7; color: #166534; }
+    .badge.tier-b { background: #fef3c7; color: #92400e; }
+    .badge.tier-c { background: #e5e7eb; color: #374151; }
+    .badge.industry { background: #dbeafe; color: #1e40af; }
+    .badge.priority { background: #fce7f3; color: #9f1239; }
+
+    /* Detail View */
+    .detail-view {
+      display: none;
+      background: white;
+      padding: 2rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .detail-view.active {
+      display: block;
+    }
+
+    .back-button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 2rem;
+      transition: all 0.2s;
+    }
+
+    .back-button:hover {
+      background: #2563eb;
+    }
+
+    .detail-header {
+      border-bottom: 2px solid #e5e7eb;
+      padding-bottom: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .detail-header h2 {
+      font-size: 2rem;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
+    }
+
+    .detail-section {
+      margin-bottom: 2rem;
+    }
+
+    .detail-section h3 {
+      font-size: 1.25rem;
+      font-weight: bold;
+      margin-bottom: 1rem;
+      color: #1f2937;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .detail-section .icon {
+      width: 1.5rem;
+      height: 1.5rem;
+      display: inline-block;
+    }
+
+    .detail-section > p {
+      color: #4b5563;
+      line-height: 1.8;
+      white-space: pre-wrap;
+    }
+
+    .detail-section .markdown-content {
+      margin-top: 0.5rem;
+    }
+
+    .summary-box .markdown-content {
+      margin-top: 0.5rem;
+    }
+
+    /* Markdown content styling */
+    .markdown-content {
+      color: #4b5563;
+      line-height: 1.8;
+    }
+
+    .markdown-content p {
+      margin: 0 0 1rem 0;
+      line-height: 1.7;
+    }
+
+    .markdown-content p:empty {
+      display: none;
+    }
+
+    .markdown-content a {
+      color: #3b82f6;
+      text-decoration: underline;
+      transition: color 0.2s;
+      word-break: break-word;
+    }
+
+    .markdown-content a:hover {
+      color: #2563eb;
+    }
+
+    .markdown-content strong {
+      color: #1f2937;
+      font-weight: 600;
+    }
+
+    .markdown-content em {
+      font-style: italic;
+      color: #374151;
+    }
+
+    .markdown-content h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 1.5rem 0 0.75rem 0;
+      color: #1f2937;
+      line-height: 1.3;
+    }
+
+    .markdown-content h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin: 1.25rem 0 0.5rem 0;
+      color: #1f2937;
+      line-height: 1.3;
+    }
+
+    .markdown-content h4 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin: 1rem 0 0.5rem 0;
+      color: #1f2937;
+      line-height: 1.3;
+    }
+
+    .markdown-content ul,
+    .markdown-content ol {
+      margin: 1rem 0;
+      padding-left: 2rem;
+      line-height: 1.7;
+    }
+
+    .markdown-content ul {
+      list-style-type: disc;
+    }
+
+    .markdown-content ol {
+      list-style-type: decimal;
+    }
+
+    .markdown-content li {
+      margin: 0.5rem 0;
+      color: #4b5563;
+      padding-left: 0.25rem;
+    }
+
+    .markdown-content li::marker {
+      color: #6b7280;
+    }
+
+    .markdown-content code {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+      font-family: 'Courier New', Consolas, Monaco, monospace;
+      font-size: 0.875em;
+      color: #dc2626;
+    }
+
+    .markdown-content blockquote {
+      border-left: 4px solid #3b82f6;
+      background: #f0f9ff;
+      padding: 1rem 1.25rem;
+      margin: 1.25rem 0;
+      color: #1e3a8a;
+      font-style: italic;
+      border-radius: 0 0.375rem 0.375rem 0;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .markdown-content blockquote p {
+      margin: 0;
+    }
+
+    .markdown-content hr {
+      border: none;
+      border-top: 2px solid #e5e7eb;
+      margin: 2rem 0;
+      border-radius: 2px;
+    }
+
+    /* First paragraph in markdown content should have no top margin */
+    .markdown-content > p:first-child {
+      margin-top: 0;
+    }
+
+    /* Last element in markdown content should have no bottom margin */
+    .markdown-content > *:last-child {
+      margin-bottom: 0;
+    }
+
+    .summary-box {
+      background: #eff6ff;
+      border-left: 4px solid #3b82f6;
+      padding: 1.5rem;
+      border-radius: 0.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .summary-box h3 {
+      color: #1e40af;
+      margin-bottom: 0.5rem;
+    }
+
+    .prospects-list {
+      list-style: none;
+      padding: 0;
+    }
+
+    .prospects-list li {
+      background: #f9fafb;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      border-radius: 0.5rem;
+      border-left: 3px solid #3b82f6;
+    }
+
+    .prospects-list .name {
+      font-weight: 600;
+      color: #1f2937;
+    }
+
+    .prospects-list .title {
+      color: #6b7280;
+      font-size: 0.875rem;
+    }
+
+    .no-results {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: #6b7280;
+    }
+
+    .no-results svg {
+      width: 4rem;
+      height: 4rem;
+      margin: 0 auto 1rem;
+      opacity: 0.3;
+    }
+
+    .print-button {
+      background: #10b981;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-left: 1rem;
+      transition: all 0.2s;
+    }
+
+    .print-button:hover {
+      background: #059669;
+    }
+
+    @media print {
+      .back-button, .print-button {
+        display: none;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .account-list {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Account Research Reports</h1>
+      <div class="meta">
+        Offline Viewer | <span id="account-count">0</span> accounts loaded
+        <span id="export-date"></span>
+      </div>
+    </div>
+
+    <!-- List View -->
+    <div id="list-view">
+      <!-- Search Bar -->
+      <div class="search-bar">
+        <input
+          type="text"
+          id="search-input"
+          class="search-input"
+          placeholder="Search by company name, domain, or industry..."
+        >
+        <div class="filters">
+          <select id="tier-filter" class="filter-select">
+            <option value="">All Tiers</option>
+            <option value="A">Tier A</option>
+            <option value="B">Tier B</option>
+            <option value="C">Tier C</option>
+          </select>
+          <select id="industry-filter" class="filter-select">
+            <option value="">All Industries</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Account List -->
+      <div id="account-list" class="account-list"></div>
+
+      <!-- No Results -->
+      <div id="no-results" class="no-results" style="display: none;">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <h3>No accounts found</h3>
+        <p>Try adjusting your search or filters</p>
+      </div>
+    </div>
+
+    <!-- Detail View -->
+    <div id="detail-view" class="detail-view">
+      <div>
+        <button class="back-button" onclick="showList()">← Back to List</button>
+        <button class="print-button" onclick="window.print()">🖨️ Print / Save PDF</button>
+      </div>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+
+  <!-- Load Data -->
+  <script src="data.js"></script>
+
+  <!-- Application Logic -->
+  <script>
+    let accounts = [];
+    let filteredAccounts = [];
+    let currentAccount = null;
+
+    // Initialize
+    function init() {
+      if (typeof MyData === 'undefined') {
+        document.querySelector('.container').innerHTML = `
+          <div class="header">
+            <h1>⚠️ Data File Not Found</h1>
+            <p style="margin-top: 1rem; color: #6b7280;">
+              Please make sure <code>data.js</code> is in the same folder as this HTML file.
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      accounts = MyData.accounts || [];
+      filteredAccounts = accounts;
+
+      // Update meta info
+      document.getElementById('account-count').textContent = accounts.length;
+      if (MyData.export_metadata?.export_date) {
+        const date = new Date(MyData.export_metadata.export_date);
+        document.getElementById('export-date').textContent =
+          ` | Exported ${date.toLocaleDateString()}`;
+      }
+
+      // Populate industry filter
+      const industries = [...new Set(accounts.map(a => a.industry))].sort();
+      const industryFilter = document.getElementById('industry-filter');
+      industries.forEach(industry => {
+        const option = document.createElement('option');
+        option.value = industry;
+        option.textContent = industry;
+        industryFilter.appendChild(option);
+      });
+
+      // Event listeners
+      document.getElementById('search-input').addEventListener('input', filterAccounts);
+      document.getElementById('tier-filter').addEventListener('change', filterAccounts);
+      document.getElementById('industry-filter').addEventListener('change', filterAccounts);
+
+      // Initial render
+      renderAccounts();
+    }
+
+    // Filter accounts
+    function filterAccounts() {
+      const searchTerm = document.getElementById('search-input').value.toLowerCase();
+      const tierFilter = document.getElementById('tier-filter').value;
+      const industryFilter = document.getElementById('industry-filter').value;
+
+      filteredAccounts = accounts.filter(account => {
+        const matchesSearch = !searchTerm ||
+          account.company_name.toLowerCase().includes(searchTerm) ||
+          (account.domain && account.domain.toLowerCase().includes(searchTerm)) ||
+          account.industry.toLowerCase().includes(searchTerm);
+
+        const matchesTier = !tierFilter || account.tier === tierFilter;
+        const matchesIndustry = !industryFilter || account.industry === industryFilter;
+
+        return matchesSearch && matchesTier && matchesIndustry;
+      });
+
+      renderAccounts();
+    }
+
+    // Render account list
+    function renderAccounts() {
+      const listContainer = document.getElementById('account-list');
+      const noResults = document.getElementById('no-results');
+
+      if (filteredAccounts.length === 0) {
+        listContainer.innerHTML = '';
+        noResults.style.display = 'block';
+        return;
+      }
+
+      noResults.style.display = 'none';
+      listContainer.innerHTML = filteredAccounts.map(account => `
+        <div class="account-card" onclick="showDetail(${account.id})">
+          <div class="company-name">${escapeHtml(account.company_name)}</div>
+          <div class="domain">${escapeHtml(account.domain || 'No domain')}</div>
+          <div class="badges">
+            ${account.tier ? `<span class="badge tier-${account.tier.toLowerCase()}">Tier ${account.tier}</span>` : ''}
+            <span class="badge industry">${escapeHtml(account.industry)}</span>
+            ${account.priority_score ? `<span class="badge priority">Priority: ${account.priority_score}/10</span>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Show account detail
+    function showDetail(accountId) {
+      currentAccount = accounts.find(a => a.id === accountId);
+      if (!currentAccount) return;
+
+      const detailContent = document.getElementById('detail-content');
+      const prospects = currentAccount.prospects || [];
+
+      detailContent.innerHTML = `
+        <div class="detail-header">
+          <h2>${escapeHtml(currentAccount.company_name)}</h2>
+          <div class="domain">${escapeHtml(currentAccount.domain || 'No domain')}</div>
+          <div class="badges">
+            ${currentAccount.tier ? `<span class="badge tier-${currentAccount.tier.toLowerCase()}">Tier ${currentAccount.tier}</span>` : ''}
+            <span class="badge industry">${escapeHtml(currentAccount.industry)}</span>
+            ${currentAccount.priority_score ? `<span class="badge priority">Priority: ${currentAccount.priority_score}/10</span>` : ''}
+            ${currentAccount.estimated_annual_revenue ? `<span class="badge">ARR: ${escapeHtml(currentAccount.estimated_annual_revenue)}</span>` : ''}
+            ${currentAccount.estimated_user_volume ? `<span class="badge">Users: ${escapeHtml(currentAccount.estimated_user_volume)}</span>` : ''}
+          </div>
+        </div>
+
+        ${currentAccount.research?.summary ? `
+        <div class="summary-box">
+          <h3>📋 Executive Summary</h3>
+          ${renderMarkdown(currentAccount.research.summary)}
+        </div>
+        ` : ''}
+
+        ${renderSection('🔐', 'Current Authentication Solution', currentAccount.research?.current_auth_solution)}
+        ${renderSection('👥', 'Customer Base & Growth', currentAccount.research?.customer_base_info)}
+        ${renderSection('🛡️', 'Security & Compliance', currentAccount.research?.security_incidents)}
+        ${renderSection('📰', 'Recent News & Funding', currentAccount.research?.news_and_funding)}
+        ${renderSection('🚀', 'Tech Transformation Initiatives', currentAccount.research?.tech_transformation)}
+
+        ${prospects.length > 0 ? `
+        <div class="detail-section">
+          <h3><span class="icon">👤</span> Key Decision Maker Prospects</h3>
+          <ul class="prospects-list">
+            ${prospects.map(p => `
+              <li>
+                <div class="name">${escapeHtml(p.name || 'Unknown')}</div>
+                <div class="title">${escapeHtml(p.title || 'No title')}</div>
+                ${p.reasoning ? `<div style="margin-top: 0.5rem; color: #6b7280; font-size: 0.875rem; line-height: 1.5;">${escapeHtml(p.reasoning)}</div>` : ''}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+        ` : ''}
+
+        ${currentAccount.use_cases && currentAccount.use_cases.length > 0 ? `
+        <div class="detail-section">
+          <h3><span class="icon">💼</span> Relevant Use Cases</h3>
+          <div class="badges">
+            ${currentAccount.use_cases.map(uc => `<span class="badge">${escapeHtml(uc)}</span>`).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        ${currentAccount.auth0_skus && currentAccount.auth0_skus.length > 0 ? `
+        <div class="detail-section">
+          <h3><span class="icon">📦</span> Recommended Auth0 SKUs</h3>
+          <div class="badges">
+            ${currentAccount.auth0_skus.map(sku => `<span class="badge tier-a">${escapeHtml(sku)}</span>`).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        ${currentAccount.sdr_notes ? `
+        <div class="detail-section">
+          <h3><span class="icon">📝</span> SDR Notes</h3>
+          ${renderMarkdown(currentAccount.sdr_notes)}
+        </div>
+        ` : ''}
+      `;
+
+      document.getElementById('list-view').style.display = 'none';
+      document.getElementById('detail-view').classList.add('active');
+      window.scrollTo(0, 0);
+    }
+
+    // Show list view
+    function showList() {
+      document.getElementById('detail-view').classList.remove('active');
+      document.getElementById('list-view').style.display = 'block';
+      window.scrollTo(0, 0);
+    }
+
+    // Render section helper
+    function renderSection(icon, title, content) {
+      if (!content) return '';
+      return `
+        <div class="detail-section">
+          <h3><span class="icon">${icon}</span> ${title}</h3>
+          ${renderMarkdown(content)}
+        </div>
+      `;
+    }
+
+    // Escape HTML helper
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Markdown renderer - converts markdown to clean HTML
+    function renderMarkdown(text) {
+      if (!text) return '<div class="markdown-content"></div>';
+
+      let html = escapeHtml(text);
+
+      // Process in specific order to avoid conflicts
+      // Use longer placeholder markers to avoid accidental matches
+
+      // 1. Headers (must be at start of line)
+      html = html.replace(/^### (.+)$/gm, '__HEADER4START__$1__HEADER4END__');
+      html = html.replace(/^## (.+)$/gm, '__HEADER3START__$1__HEADER3END__');
+      html = html.replace(/^# (.+)$/gm, '__HEADER2START__$1__HEADER2END__');
+
+      // 2. Blockquotes (> text)
+      html = html.replace(/^&gt; (.+)$/gm, '__QUOTESTART__$1__QUOTEEND__');
+
+      // 3. Horizontal rules
+      html = html.replace(/^(\*\*\*|---|___)$/gm, '__HRULE__');
+
+      // 4. Unordered lists (- or * at start of line)
+      html = html.replace(/^[\*\-] (.+)$/gm, '__LISTART__$1__LIEND__');
+
+      // Group consecutive list items
+      let listItemRegex = /__LISTART__[\s\S]+?__LIEND__/g;
+      let matches = html.match(listItemRegex);
+      if (matches) {
+        let consecutiveItems = [];
+        let inList = false;
+
+        html = html.split('\n').map(line => {
+          if (line.includes('__LISTART__')) {
+            if (!inList) {
+              inList = true;
+              consecutiveItems = [];
+            }
+            consecutiveItems.push(line);
+            return '__COLLECTING__';
+          } else if (inList && !line.includes('__LISTART__')) {
+            inList = false;
+            let result = '__ULSTART__' + consecutiveItems.join('\n') + '__ULEND__';
+            consecutiveItems = [];
+            return result + '\n' + line;
+          } else {
+            return line;
+          }
+        }).join('\n');
+
+        // Handle case where list goes to end of content
+        if (inList) {
+          html = html.replace(/__COLLECTING__\n?/g, '');
+          html += '\n__ULSTART__' + consecutiveItems.join('\n') + '__ULEND__';
+        }
+        html = html.replace(/__COLLECTING__\n?/g, '');
+      }
+
+      // 5. Ordered lists (1. 2. 3. etc)
+      html = html.replace(/^\d+\. (.+)$/gm, '__OLISTART__$1__OLIEND__');
+
+      // Group consecutive ordered list items (similar logic)
+      let olItemRegex = /__OLISTART__[\s\S]+?__OLIEND__/g;
+      matches = html.match(olItemRegex);
+      if (matches) {
+        let consecutiveItems = [];
+        let inList = false;
+
+        html = html.split('\n').map(line => {
+          if (line.includes('__OLISTART__')) {
+            if (!inList) {
+              inList = true;
+              consecutiveItems = [];
+            }
+            consecutiveItems.push(line);
+            return '__OLCOLLECTING__';
+          } else if (inList && !line.includes('__OLISTART__')) {
+            inList = false;
+            let result = '__OLSTART__' + consecutiveItems.join('\n') + '__OLEND__';
+            consecutiveItems = [];
+            return result + '\n' + line;
+          } else {
+            return line;
+          }
+        }).join('\n');
+
+        // Handle case where list goes to end of content
+        if (inList) {
+          html = html.replace(/__OLCOLLECTING__\n?/g, '');
+          html += '\n__OLSTART__' + consecutiveItems.join('\n') + '__OLEND__';
+        }
+        html = html.replace(/__OLCOLLECTING__\n?/g, '');
+      }
+
+      // 6. Links (must be before bold/italic)
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+      // 7. Inline code
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+      // 8. Bold (must be before italic)
+      html = html.replace(/\*\*([^\*\n]+?)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/__([^_\n]+?)__/g, '<strong>$1</strong>');
+
+      // 9. Italic
+      html = html.replace(/\*([^\*\n]+?)\*/g, '<em>$1</em>');
+      html = html.replace(/\b_([^_\n]+?)_\b/g, '<em>$1</em>');
+
+      // 10. Convert placeholders to HTML (use global flag and match anything including newlines)
+      html = html.replace(/__HEADER2START__([\s\S]*?)__HEADER2END__/g, '<h2>$1</h2>');
+      html = html.replace(/__HEADER3START__([\s\S]*?)__HEADER3END__/g, '<h3>$1</h3>');
+      html = html.replace(/__HEADER4START__([\s\S]*?)__HEADER4END__/g, '<h4>$1</h4>');
+      html = html.replace(/__QUOTESTART__([\s\S]*?)__QUOTEEND__/g, '<blockquote><p>$1</p></blockquote>');
+      html = html.replace(/__HRULE__/g, '<hr>');
+
+      // Convert list structures
+      html = html.replace(/__ULSTART__([\s\S]*?)__ULEND__/g, function(match, content) {
+        let items = content.replace(/__LISTART__([\s\S]*?)__LIEND__/g, '<li>$1</li>');
+        return '<ul>' + items + '</ul>';
+      });
+
+      html = html.replace(/__OLSTART__([\s\S]*?)__OLEND__/g, function(match, content) {
+        let items = content.replace(/__OLISTART__([\s\S]*?)__OLIEND__/g, '<li>$1</li>');
+        return '<ol>' + items + '</ol>';
+      });
+
+      // 11. Paragraph handling - split on double newlines
+      html = html.replace(/\n\n+/g, '</p><p>');
+
+      // 12. Single newlines to <br>
+      html = html.replace(/\n/g, '<br>');
+
+      // 13. Wrap in paragraphs
+      html = '<p>' + html + '</p>';
+
+      // 14. Clean up
+      // Remove empty paragraphs
+      html = html.replace(/<p>\s*<\/p>/g, '');
+      html = html.replace(/<p>(\s|<br>)*<\/p>/g, '');
+
+      // Remove <br> before/after block elements
+      html = html.replace(/<br>\s*<(h[234]|ul|ol|blockquote|hr)/gi, '<$1');
+      html = html.replace(/<\/(h[234]|ul|ol|blockquote|hr)>\s*<br>/gi, '</$1>');
+
+      // Remove <p> around block elements
+      html = html.replace(/<p>\s*<(h[234]|ul|ol|blockquote|hr)/gi, '<$1');
+      html = html.replace(/<\/(h[234]|ul|ol|blockquote|hr)>\s*<\/p>/gi, '</$1>');
+
+      // Wrap everything in markdown-content div
+      return '<div class="markdown-content">' + html + '</div>';
+    }
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

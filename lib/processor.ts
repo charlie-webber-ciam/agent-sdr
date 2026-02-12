@@ -2,18 +2,33 @@ import {
   getJob,
   getNextPendingAccount,
   updateAccountStatus,
-  updateAccountResearch,
+  updateAccountAuth0Research,
+  updateAccountOktaResearch,
   updateJobStatus,
   updateJobProgress,
   updateAccountMetadata,
+  updateOktaAccountMetadata,
 } from './db';
-import { researchCompany } from './agent-researcher';
+import { researchCompanyDual, ResearchMode } from './dual-researcher';
 import { analyzeAccountData } from './categorizer';
+import { analyzeOktaAccountData } from './okta-categorizer';
+import { PROCESSING_CONFIG } from './config';
+import { processJobParallel } from './parallel-processor';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
 
-export async function processJob(jobId: number): Promise<void> {
+/**
+ * Process a job - routes to parallel or sequential based on configuration
+ */
+export async function processJob(
+  jobId: number,
+  options?: {
+    mode?: 'parallel' | 'sequential';
+    concurrency?: number;
+    researchType?: ResearchMode;
+  }
+): Promise<void> {
   // Check if job is already being processed
   if (activeJobs.has(jobId)) {
     console.log(`Job ${jobId} is already being processed`);
@@ -23,56 +38,112 @@ export async function processJob(jobId: number): Promise<void> {
   activeJobs.add(jobId);
 
   try {
-    const job = getJob(jobId);
-    if (!job) {
-      throw new Error(`Job ${jobId} not found`);
+    // Determine processing mode
+    const mode = options?.mode || (PROCESSING_CONFIG.enableParallel ? 'parallel' : 'sequential');
+    const concurrency = options?.concurrency || PROCESSING_CONFIG.concurrency;
+    const researchType = options?.researchType || 'both';
+
+    if (mode === 'parallel') {
+      console.log(`Using PARALLEL processing mode (concurrency: ${concurrency}, research: ${researchType})`);
+      await processJobParallel(jobId, concurrency, researchType);
+    } else {
+      console.log(`Using SEQUENTIAL processing mode (research: ${researchType})`);
+      await processJobSequential(jobId, researchType);
+    }
+  } finally {
+    activeJobs.delete(jobId);
+  }
+}
+
+/**
+ * Process job sequentially (one account at a time)
+ * This is the original processing logic, kept as fallback
+ */
+export async function processJobSequential(
+  jobId: number,
+  researchType: ResearchMode = 'both'
+): Promise<void> {
+  const job = getJob(jobId);
+  if (!job) {
+    throw new Error(`Job ${jobId} not found`);
+  }
+
+  if (job.status !== 'pending') {
+    console.log(`Job ${jobId} is not pending (status: ${job.status})`);
+    return;
+  }
+
+  console.log(`Starting sequential processing for job ${jobId}`);
+  updateJobStatus(jobId, 'processing');
+
+  let processedCount = 0;
+  let failedCount = 0;
+
+  while (true) {
+    // Check if job is paused
+    const currentJob = getJob(jobId);
+    if (currentJob?.paused === 1) {
+      console.log(`Job ${jobId} is paused. Waiting...`);
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Check every 3 seconds
+      continue;
     }
 
-    if (job.status !== 'pending') {
-      console.log(`Job ${jobId} is not pending (status: ${job.status})`);
-      return;
+    // Check if job was cancelled
+    if (currentJob?.status === 'failed') {
+      console.log(`Job ${jobId} was cancelled`);
+      break;
     }
 
-    console.log(`Starting processing for job ${jobId}`);
-    updateJobStatus(jobId, 'processing');
+    // Get next pending account
+    const account = getNextPendingAccount(jobId);
 
-    let processedCount = 0;
-    let failedCount = 0;
+    if (!account) {
+      // No more pending accounts
+      console.log(`No more pending accounts for job ${jobId}`);
+      break;
+    }
 
-    while (true) {
-      // Get next pending account
-      const account = getNextPendingAccount(jobId);
+    console.log(`Processing account ${account.id}: ${account.company_name}`);
 
-      if (!account) {
-        // No more pending accounts
-        console.log(`No more pending accounts for job ${jobId}`);
-        break;
-      }
+    // Update job to show current account
+    updateJobStatus(jobId, 'processing', account.id);
 
-      console.log(`Processing account ${account.id}: ${account.company_name}`);
+    // Mark account as processing
+    updateAccountStatus(account.id, 'processing');
 
-      // Update job to show current account
-      updateJobStatus(jobId, 'processing', account.id);
-
-      // Mark account as processing
-      updateAccountStatus(account.id, 'processing');
-
-      try {
-        // Perform research
-        const research = await researchCompany({
+    try {
+      // Perform dual research (Auth0 and/or Okta)
+      const dualResearch = await researchCompanyDual(
+        {
           company_name: account.company_name,
           domain: account.domain,
           industry: account.industry,
-        });
+        },
+        researchType
+      );
 
-        // Update account with research results
-        updateAccountResearch(account.id, research);
+      // Update Auth0 research if available
+      if (dualResearch.auth0) {
+        updateAccountAuth0Research(account.id, dualResearch.auth0);
+        console.log(`✓ Auth0 research completed for ${account.company_name}`);
+      }
 
-        console.log(`Completed research for ${account.company_name}, starting categorization...`);
+      // Update Okta research if available
+      if (dualResearch.okta) {
+        updateAccountOktaResearch(account.id, dualResearch.okta);
+        console.log(`✓ Okta research completed for ${account.company_name}`);
+      }
 
-        // Perform AI categorization
+      console.log(`Completed research for ${account.company_name}, starting categorization...`);
+
+      // Perform Auth0 AI categorization
+      if (dualResearch.auth0) {
         try {
-          const updatedAccount = { ...account, ...research, research_status: 'completed' as const };
+          const updatedAccount = {
+            ...account,
+            ...dualResearch.auth0,
+            research_status: 'completed' as const,
+          };
           const suggestions = await analyzeAccountData(updatedAccount);
 
           // Store both the suggestions and apply the categorization
@@ -87,47 +158,80 @@ export async function processJob(jobId: number): Promise<void> {
             last_edited_at: new Date().toISOString(),
           });
 
-          console.log(`Categorized ${account.company_name} as Tier ${suggestions.tier} (Priority: ${suggestions.priorityScore})`);
+          console.log(
+            `✓ Auth0 categorization: ${account.company_name} → Tier ${suggestions.tier} (Priority: ${suggestions.priorityScore})`
+          );
         } catch (categorizationError) {
-          console.error(`Failed to categorize ${account.company_name}:`, categorizationError);
+          console.error(`Failed to categorize Auth0 for ${account.company_name}:`, categorizationError);
           // Continue even if categorization fails - the research is still valuable
         }
-
-        // Mark account as completed
-        updateAccountStatus(account.id, 'completed');
-        processedCount++;
-
-        console.log(`Completed processing for ${account.company_name}`);
-
-        // Update job progress
-        updateJobProgress(jobId, processedCount, failedCount);
-
-        // Add a small delay between accounts to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-      } catch (error) {
-        console.error(`Failed to research ${account.company_name}:`, error);
-
-        // Mark account as failed
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        updateAccountStatus(account.id, 'failed', errorMessage);
-        failedCount++;
-
-        // Update job progress
-        updateJobProgress(jobId, processedCount, failedCount);
-
-        // Continue to next account even if this one failed
       }
+
+      // Perform Okta AI categorization
+      if (dualResearch.okta) {
+        try {
+          const updatedAccount = {
+            ...account,
+            okta_current_iam_solution: dualResearch.okta.current_iam_solution,
+            okta_workforce_info: dualResearch.okta.workforce_info,
+            okta_security_incidents: dualResearch.okta.security_incidents,
+            okta_news_and_funding: dualResearch.okta.news_and_funding,
+            okta_tech_transformation: dualResearch.okta.tech_transformation,
+            okta_ecosystem: dualResearch.okta.okta_ecosystem,
+            okta_research_summary: dualResearch.okta.research_summary,
+            okta_opportunity_type: dualResearch.okta.opportunity_type,
+            okta_priority_score: dualResearch.okta.priority_score,
+          };
+          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount);
+
+          // Store Okta categorization
+          updateOktaAccountMetadata(account.id, {
+            okta_tier: oktaSuggestions.tier,
+            okta_estimated_annual_revenue: oktaSuggestions.estimatedAnnualRevenue,
+            okta_estimated_user_volume: oktaSuggestions.estimatedEmployeeCount,
+            okta_use_cases: JSON.stringify(oktaSuggestions.useCases),
+            okta_skus: JSON.stringify(oktaSuggestions.oktaSkus),
+            okta_ai_suggestions: JSON.stringify(oktaSuggestions),
+            okta_last_edited_at: new Date().toISOString(),
+          });
+
+          console.log(
+            `✓ Okta categorization: ${account.company_name} → Tier ${oktaSuggestions.tier} (Priority: ${oktaSuggestions.priorityScore})`
+          );
+        } catch (categorizationError) {
+          console.error(`Failed to categorize Okta for ${account.company_name}:`, categorizationError);
+          // Continue even if categorization fails - the research is still valuable
+        }
+      }
+
+      // Mark account as completed
+      updateAccountStatus(account.id, 'completed');
+      processedCount++;
+
+      console.log(`Completed processing for ${account.company_name}`);
+
+      // Update job progress
+      updateJobProgress(jobId, processedCount, failedCount);
+
+      // Add a small delay between accounts to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+    } catch (error) {
+      console.error(`Failed to research ${account.company_name}:`, error);
+
+      // Mark account as failed
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      updateAccountStatus(account.id, 'failed', errorMessage);
+      failedCount++;
+
+      // Update job progress
+      updateJobProgress(jobId, processedCount, failedCount);
+
+      // Continue to next account even if this one failed
     }
-
-    // Mark job as completed
-    updateJobStatus(jobId, 'completed');
-    console.log(`Job ${jobId} completed. Processed: ${processedCount}, Failed: ${failedCount}`);
-
-  } catch (error) {
-    console.error(`Job ${jobId} failed:`, error);
-    updateJobStatus(jobId, 'failed');
-  } finally {
-    activeJobs.delete(jobId);
   }
+
+  // Mark job as completed
+  updateJobStatus(jobId, 'completed');
+  console.log(`Job ${jobId} completed. Processed: ${processedCount}, Failed: ${failedCount}`);
 }

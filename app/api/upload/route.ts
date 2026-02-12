@@ -146,7 +146,8 @@ export async function POST(request: Request) {
         domain,
         record.industry,
         jobId,
-        record.auth0_account_owner || undefined
+        record.auth0_account_owner || undefined,
+        record.okta_account_owner || undefined
       );
     }
 

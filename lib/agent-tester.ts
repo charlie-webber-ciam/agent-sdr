@@ -30,7 +30,6 @@ export async function testCompany(companyName: string): Promise<TestResult> {
 - Be concise and actionable
 - Focus on CIAM relevance`,
     tools: [webSearchTool()],
-    disableTelemetry: true,
   });
 
   try {

@@ -111,14 +111,14 @@ export default function UploadPage() {
           <h2 className="text-xl font-semibold mb-2">CSV Format Requirements</h2>
           <p className="text-gray-600 mb-4">
             Required columns: <strong>company_name</strong>, <strong>industry</strong><br/>
-            Optional columns: <em>domain</em>, <em>auth0_account_owner</em>
+            Optional columns: <em>domain</em>, <em>auth0_account_owner</em>, <em>okta_account_owner</em>
           </p>
           <div className="bg-gray-50 p-4 rounded border border-gray-200 font-mono text-sm">
-            company_name,domain,industry,auth0_account_owner
+            company_name,domain,industry,auth0_account_owner,okta_account_owner
           </div>
           <p className="text-sm text-gray-500 mt-2">
-            Example: "Acme Corp,acme.com,Technology,John Smith"<br/>
-            Leave domain blank if not available: "Private Co,,Finance,Jane Doe"
+            Example: "Acme Corp,acme.com,Technology,John Smith,Jane Doe"<br/>
+            Leave domain blank if not available: "Private Co,,Finance,John Smith,"
           </p>
         </div>
 

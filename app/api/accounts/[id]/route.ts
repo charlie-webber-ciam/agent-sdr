@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAccount, updateAccountMetadata, deleteAccount } from '@/lib/db';
+import { getAccount, updateAccountMetadata, updateOktaAccountMetadata, deleteAccount } from '@/lib/db';
 
 export async function GET(
   request: Request,
@@ -62,12 +62,51 @@ export async function GET(
       }
     }
 
+    // Parse Okta prospects
+    let oktaProspects = [];
+    if (account.okta_prospects) {
+      try {
+        oktaProspects = JSON.parse(account.okta_prospects);
+      } catch (e) {
+        oktaProspects = [];
+      }
+    }
+
+    // Parse Okta categorization fields
+    let oktaUseCases = [];
+    if (account.okta_use_cases) {
+      try {
+        oktaUseCases = JSON.parse(account.okta_use_cases);
+      } catch (e) {
+        oktaUseCases = [];
+      }
+    }
+
+    let oktaSkus = [];
+    if (account.okta_skus) {
+      try {
+        oktaSkus = JSON.parse(account.okta_skus);
+      } catch (e) {
+        oktaSkus = [];
+      }
+    }
+
+    let oktaAiSuggestions = null;
+    if (account.okta_ai_suggestions) {
+      try {
+        oktaAiSuggestions = JSON.parse(account.okta_ai_suggestions);
+      } catch (e) {
+        oktaAiSuggestions = null;
+      }
+    }
+
     return NextResponse.json({
       id: account.id,
       companyName: account.company_name,
       domain: account.domain,
       industry: account.industry,
       status: account.research_status,
+      // Auth0 CIAM Research
       currentAuthSolution: account.current_auth_solution,
       customerBaseInfo: account.customer_base_info,
       securityIncidents: account.security_incidents,
@@ -75,11 +114,24 @@ export async function GET(
       techTransformation: account.tech_transformation,
       prospects,
       researchSummary: account.research_summary,
+      // Okta Workforce Identity Research
+      oktaCurrentIamSolution: account.okta_current_iam_solution,
+      oktaWorkforceInfo: account.okta_workforce_info,
+      oktaSecurityIncidents: account.okta_security_incidents,
+      oktaNewsAndFunding: account.okta_news_and_funding,
+      oktaTechTransformation: account.okta_tech_transformation,
+      oktaEcosystem: account.okta_ecosystem,
+      oktaProspects,
+      oktaResearchSummary: account.okta_research_summary,
+      oktaOpportunityType: account.okta_opportunity_type,
+      oktaPriorityScore: account.okta_priority_score,
+      oktaProcessedAt: account.okta_processed_at,
+      // Common fields
       errorMessage: account.error_message,
       createdAt: account.created_at,
       updatedAt: account.updated_at,
       processedAt: account.processed_at,
-      // SDR fields
+      // SDR fields (Auth0-focused categorization)
       tier: account.tier,
       estimatedAnnualRevenue: account.estimated_annual_revenue,
       estimatedUserVolume: account.estimated_user_volume,
@@ -89,6 +141,17 @@ export async function GET(
       priorityScore: account.priority_score,
       lastEditedAt: account.last_edited_at,
       aiSuggestions,
+      auth0AccountOwner: account.auth0_account_owner,
+      oktaAccountOwner: account.okta_account_owner,
+      // Okta SDR fields (Workforce Identity categorization)
+      oktaTier: account.okta_tier,
+      oktaEstimatedAnnualRevenue: account.okta_estimated_annual_revenue,
+      oktaEstimatedUserVolume: account.okta_estimated_user_volume,
+      oktaUseCases,
+      oktaSkus,
+      oktaSdrNotes: account.okta_sdr_notes,
+      oktaLastEditedAt: account.okta_last_edited_at,
+      oktaAiSuggestions,
     });
   } catch (error) {
     console.error('Error fetching account:', error);
@@ -116,39 +179,99 @@ export async function PATCH(
 
     const body = await request.json();
 
-    const updates: any = {};
-
-    if (body.tier !== undefined) {
-      updates.tier = body.tier;
+    // Handle account owner updates directly
+    if (body.auth0AccountOwner !== undefined || body.oktaAccountOwner !== undefined) {
+      const { getDb } = await import('@/lib/db');
+      const db = getDb();
+      if (body.auth0AccountOwner !== undefined) {
+        db.prepare('UPDATE accounts SET auth0_account_owner = ?, updated_at = datetime(\'now\') WHERE id = ?')
+          .run(body.auth0AccountOwner, accountId);
+      }
+      if (body.oktaAccountOwner !== undefined) {
+        db.prepare('UPDATE accounts SET okta_account_owner = ?, updated_at = datetime(\'now\') WHERE id = ?')
+          .run(body.oktaAccountOwner, accountId);
+      }
+      // If only updating owner fields, return early
+      if (Object.keys(body).every(k => k === 'auth0AccountOwner' || k === 'oktaAccountOwner')) {
+        return NextResponse.json({ success: true });
+      }
     }
 
-    if (body.estimatedAnnualRevenue !== undefined) {
-      updates.estimated_annual_revenue = body.estimatedAnnualRevenue;
+    // Determine if updating Auth0 or Okta categorization
+    const isOktaUpdate = body.oktaTier !== undefined ||
+                         body.oktaEstimatedAnnualRevenue !== undefined ||
+                         body.oktaEstimatedUserVolume !== undefined ||
+                         body.oktaUseCases !== undefined ||
+                         body.oktaSkus !== undefined ||
+                         body.oktaSdrNotes !== undefined;
+
+    if (isOktaUpdate) {
+      // Update Okta categorization
+      const oktaUpdates: any = {};
+
+      if (body.oktaTier !== undefined) {
+        oktaUpdates.okta_tier = body.oktaTier;
+      }
+
+      if (body.oktaEstimatedAnnualRevenue !== undefined) {
+        oktaUpdates.okta_estimated_annual_revenue = body.oktaEstimatedAnnualRevenue;
+      }
+
+      if (body.oktaEstimatedUserVolume !== undefined) {
+        oktaUpdates.okta_estimated_user_volume = body.oktaEstimatedUserVolume;
+      }
+
+      if (body.oktaUseCases !== undefined) {
+        oktaUpdates.okta_use_cases = JSON.stringify(body.oktaUseCases);
+      }
+
+      if (body.oktaSkus !== undefined) {
+        oktaUpdates.okta_skus = JSON.stringify(body.oktaSkus);
+      }
+
+      if (body.oktaSdrNotes !== undefined) {
+        oktaUpdates.okta_sdr_notes = body.oktaSdrNotes;
+      }
+
+      oktaUpdates.okta_last_edited_at = new Date().toISOString();
+
+      updateOktaAccountMetadata(accountId, oktaUpdates);
+    } else {
+      // Update Auth0 categorization
+      const updates: any = {};
+
+      if (body.tier !== undefined) {
+        updates.tier = body.tier;
+      }
+
+      if (body.estimatedAnnualRevenue !== undefined) {
+        updates.estimated_annual_revenue = body.estimatedAnnualRevenue;
+      }
+
+      if (body.estimatedUserVolume !== undefined) {
+        updates.estimated_user_volume = body.estimatedUserVolume;
+      }
+
+      if (body.useCases !== undefined) {
+        updates.use_cases = JSON.stringify(body.useCases);
+      }
+
+      if (body.auth0Skus !== undefined) {
+        updates.auth0_skus = JSON.stringify(body.auth0Skus);
+      }
+
+      if (body.sdrNotes !== undefined) {
+        updates.sdr_notes = body.sdrNotes;
+      }
+
+      if (body.priorityScore !== undefined) {
+        updates.priority_score = body.priorityScore;
+      }
+
+      updates.last_edited_at = new Date().toISOString();
+
+      updateAccountMetadata(accountId, updates);
     }
-
-    if (body.estimatedUserVolume !== undefined) {
-      updates.estimated_user_volume = body.estimatedUserVolume;
-    }
-
-    if (body.useCases !== undefined) {
-      updates.use_cases = JSON.stringify(body.useCases);
-    }
-
-    if (body.auth0Skus !== undefined) {
-      updates.auth0_skus = JSON.stringify(body.auth0Skus);
-    }
-
-    if (body.sdrNotes !== undefined) {
-      updates.sdr_notes = body.sdrNotes;
-    }
-
-    if (body.priorityScore !== undefined) {
-      updates.priority_score = body.priorityScore;
-    }
-
-    updates.last_edited_at = new Date().toISOString();
-
-    updateAccountMetadata(accountId, updates);
 
     return NextResponse.json({ success: true });
   } catch (error) {

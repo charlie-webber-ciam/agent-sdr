@@ -8,15 +8,17 @@ interface MarkdownSectionProps {
   title: string;
   content: string | null;
   icon?: React.ReactNode;
+  id?: string;
 }
 
 export default function MarkdownSection({
   title,
   content,
-  icon
+  icon,
+  id
 }: MarkdownSectionProps) {
   return (
-    <div className="mb-8">
+    <div id={id} className="mb-8 scroll-mt-24">
       <div className="flex items-center gap-3 mb-4">
         {icon && <div className="text-blue-600 flex-shrink-0">{icon}</div>}
         <h3 className="text-2xl font-semibold text-gray-900">{title}</h3>

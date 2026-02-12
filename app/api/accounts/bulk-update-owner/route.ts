@@ -4,16 +4,17 @@ import { getAccountsByIds, updateAccountMetadata } from '@/lib/db';
 /**
  * POST /api/accounts/bulk-update-owner
  *
- * Bulk update Auth0 Account Owner for multiple accounts
+ * Bulk update Account Owner for multiple accounts
  *
  * Body:
  * - accountIds: number[] - Array of account IDs to update
  * - accountOwner: string - New account owner name
+ * - ownerType: 'auth0' | 'okta' - Which owner field to update (default: 'auth0')
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { accountIds, accountOwner } = body;
+    const { accountIds, accountOwner, ownerType = 'auth0' } = body;
 
     // Validation
     if (!Array.isArray(accountIds) || accountIds.length === 0) {
@@ -51,7 +52,8 @@ export async function POST(request: Request) {
       console.warn(`Found ${accounts.length} accounts but ${accountIds.length} IDs provided`);
     }
 
-    console.log(`Bulk updating account owner for ${accounts.length} accounts to: ${accountOwner}`);
+    const ownerColumn = ownerType === 'okta' ? 'okta_account_owner' : 'auth0_account_owner';
+    console.log(`Bulk updating ${ownerColumn} for ${accounts.length} accounts to: ${accountOwner}`);
 
     // Update each account
     let successCount = 0;
@@ -69,7 +71,7 @@ export async function POST(request: Request) {
         const db = getDb();
         const stmt = db.prepare(`
           UPDATE accounts
-          SET auth0_account_owner = ?,
+          SET ${ownerColumn} = ?,
               updated_at = datetime('now')
           WHERE id = ?
         `);

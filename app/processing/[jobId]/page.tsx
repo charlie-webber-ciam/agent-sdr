@@ -21,6 +21,7 @@ interface JobData {
     processedCount: number;
     failedCount: number;
     progressPercent: number;
+    paused: number; // SQLite boolean (0/1)
     createdAt: string;
     completedAt: string | null;
   };
@@ -51,6 +52,7 @@ export default function ProcessingPage({
   const [data, setData] = useState<JobData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const fetchJobData = async () => {
     try {
@@ -68,18 +70,95 @@ export default function ProcessingPage({
     }
   };
 
-  useEffect(() => {
-    fetchJobData();
+  const handlePause = async () => {
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/process/${jobId}/pause`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to pause job');
+      await fetchJobData();
+    } catch (err) {
+      console.error('Pause error:', err);
+      alert('Failed to pause job');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
-    // Auto-refresh every 3 seconds if job is still processing
-    const interval = setInterval(() => {
-      if (data?.job.status === 'processing' || data?.job.status === 'pending') {
-        fetchJobData();
+  const handleResume = async () => {
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/process/${jobId}/resume`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to resume job');
+      await fetchJobData();
+    } catch (err) {
+      console.error('Resume error:', err);
+      alert('Failed to resume job');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!confirm('Are you sure you want to cancel this job? This cannot be undone.')) {
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/process/${jobId}/cancel`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to cancel job');
+      await fetchJobData();
+    } catch (err) {
+      console.error('Cancel error:', err);
+      alert('Failed to cancel job');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this job and all its data? This cannot be undone.')) {
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/process/${jobId}/delete`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete job');
+      router.push('/');
+    } catch (err) {
+      console.error('Delete error:', err);
+      alert('Failed to delete job');
+      setActionLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const fetchAndCheck = async () => {
+      await fetchJobData();
+    };
+
+    fetchAndCheck();
+
+    // Auto-refresh every 3 seconds, checking status on each poll
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        if (!res.ok) return;
+        const jobData = await res.json();
+        setData(jobData);
+
+        // Stop polling if job is complete
+        if (jobData.job.status !== 'processing' && jobData.job.status !== 'pending') {
+          clearInterval(interval);
+        }
+      } catch (err) {
+        console.error('Polling error:', err);
       }
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [jobId, data?.job.status]);
+  }, [jobId]); // Only depend on jobId, not data state
 
   if (loading) {
     return (
@@ -112,6 +191,7 @@ export default function ProcessingPage({
   const isComplete = job.status === 'completed';
   const isFailed = job.status === 'failed';
   const isProcessing = job.status === 'processing' || job.status === 'pending';
+  const isPaused = job.paused === 1;
 
   const completedAccounts = accounts.filter(a => a.status === 'completed');
   const failedAccounts = accounts.filter(a => a.status === 'failed');
@@ -130,27 +210,78 @@ export default function ProcessingPage({
             ? 'bg-green-50 border border-green-200'
             : isFailed
             ? 'bg-red-50 border border-red-200'
+            : isPaused
+            ? 'bg-yellow-50 border border-yellow-200'
             : 'bg-blue-50 border border-blue-200'
         }`}
       >
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-semibold mb-1">
-              {isComplete ? 'Completed!' : isFailed ? 'Failed' : 'Processing...'}
+              {isComplete
+                ? 'Completed!'
+                : isFailed
+                ? 'Failed/Cancelled'
+                : isPaused
+                ? '⏸️ Paused'
+                : 'Processing...'}
             </h2>
             <p className="text-gray-700">
               {job.processedCount} of {job.totalAccounts} accounts processed
               {job.failedCount > 0 && ` (${job.failedCount} failed)`}
             </p>
           </div>
-          {isComplete && (
-            <button
-              onClick={() => router.push('/accounts')}
-              className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-            >
-              View All Accounts
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {isComplete && (
+              <button
+                onClick={() => router.push('/accounts')}
+                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+              >
+                View All Accounts
+              </button>
+            )}
+            {isProcessing && (
+              <>
+                {isPaused ? (
+                  <button
+                    onClick={handleResume}
+                    disabled={actionLoading}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
+                  >
+                    <span>▶️</span>
+                    {actionLoading ? 'Resuming...' : 'Resume'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handlePause}
+                    disabled={actionLoading}
+                    className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
+                  >
+                    <span>⏸️</span>
+                    {actionLoading ? 'Pausing...' : 'Pause'}
+                  </button>
+                )}
+                <button
+                  onClick={handleCancel}
+                  disabled={actionLoading}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
+                >
+                  <span>✖️</span>
+                  {actionLoading ? 'Cancelling...' : 'Cancel'}
+                </button>
+              </>
+            )}
+            {(isFailed || isComplete) && (
+              <button
+                onClick={handleDelete}
+                disabled={actionLoading}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
+              >
+                <span>🗑️</span>
+                {actionLoading ? 'Deleting...' : 'Delete Job'}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Progress Bar */}

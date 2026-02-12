@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { usePerspective } from '@/lib/perspective-context';
 
 // Available filter options (from categorizer.ts)
 const USE_CASES = [
@@ -22,6 +24,30 @@ const USE_CASES = [
 ];
 
 const SKUS = ['Core', 'FGA', 'Auth for AI'];
+
+const OKTA_USE_CASES = [
+  'SSO',
+  'MFA / Adaptive MFA',
+  'Lifecycle Management',
+  'Directory Integration',
+  'API Access Management',
+  'Privileged Access Management',
+  'Identity Governance',
+  'Zero Trust',
+  'Device Trust',
+  'SCIM Provisioning',
+  'Compliance & Audit',
+  'AI Agent Identity',
+];
+
+const OKTA_SKUS = [
+  'Workforce Identity Cloud',
+  'Identity Governance',
+  'Privileged Access',
+  'Identity Threat Protection',
+  'Okta for AI Agents',
+];
+
 const TIERS = ['A', 'B', 'C', 'unassigned'];
 
 export interface FilterState {
@@ -35,6 +61,13 @@ export interface FilterState {
   revenue: string;
   accountOwner: string;
   sortBy: string;
+  freshness: string;
+  // Okta-specific filter keys (used when in Okta perspective)
+  oktaTier?: string;
+  oktaSku?: string;
+  oktaUseCase?: string;
+  oktaMinPriority?: number | null;
+  oktaAccountOwner?: string;
 }
 
 interface SearchBarProps {
@@ -42,12 +75,27 @@ interface SearchBarProps {
   onFiltersChange: (filters: FilterState) => void;
   industries?: string[];
   accountOwners?: string[];
+  oktaAccountOwners?: string[];
 }
 
-export default function SearchBar({ filters, onFiltersChange, industries = [], accountOwners = [] }: SearchBarProps) {
+const selectClass = "w-full px-4 py-2 bg-white border border-gray-300 text-gray-900 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50";
+const inputClass = "w-full px-4 py-2 bg-white border border-gray-300 text-gray-900 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 placeholder-gray-400";
+
+export default function SearchBar({ filters, onFiltersChange, industries = [], accountOwners = [], oktaAccountOwners = [] }: SearchBarProps) {
+  const { perspective } = usePerspective();
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
 
-  // Use refs to track debounce timers
+  // Perspective-aware filter keys and values
+  const isOkta = perspective === 'okta';
+  const tierValue = isOkta ? (filters.oktaTier || '') : filters.tier;
+  const skuValue = isOkta ? (filters.oktaSku || '') : filters.sku;
+  const useCaseValue = isOkta ? (filters.oktaUseCase || '') : filters.useCase;
+  const minPriorityValue = isOkta ? (filters.oktaMinPriority ?? null) : filters.minPriority;
+  const ownerValue = isOkta ? (filters.oktaAccountOwner || '') : filters.accountOwner;
+  const ownersList = isOkta ? oktaAccountOwners : accountOwners;
+  const skuOptions = isOkta ? OKTA_SKUS : SKUS;
+  const useCaseOptions = isOkta ? OKTA_USE_CASES : USE_CASES;
+
   const searchTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const revenueTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
@@ -75,7 +123,22 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
     onFiltersChange({ ...filters, [key]: value });
   };
 
-  // Cleanup timers on unmount
+  // Perspective-aware filter change: maps generic filter concept to the correct key
+  const handlePerspectiveFilterChange = (concept: 'tier' | 'sku' | 'useCase' | 'minPriority' | 'accountOwner', value: string | number | null) => {
+    if (isOkta) {
+      const keyMap: Record<string, keyof FilterState> = {
+        tier: 'oktaTier',
+        sku: 'oktaSku',
+        useCase: 'oktaUseCase',
+        minPriority: 'oktaMinPriority',
+        accountOwner: 'oktaAccountOwner',
+      };
+      onFiltersChange({ ...filters, [keyMap[concept]]: value });
+    } else {
+      onFiltersChange({ ...filters, [concept]: value });
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -83,24 +146,24 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
     };
   }, []);
 
-  // Count active advanced filters
+  const defaultSort = isOkta ? 'okta_priority_score' : 'priority_score';
   const advancedFilterCount = [
-    filters.tier,
-    filters.sku,
-    filters.useCase,
-    filters.minPriority !== null && filters.minPriority > 1,
+    tierValue,
+    skuValue,
+    useCaseValue,
+    minPriorityValue !== null && (minPriorityValue as number) > 1,
     filters.revenue,
-    filters.accountOwner,
-    filters.sortBy && filters.sortBy !== 'priority_score',
+    ownerValue,
+    filters.freshness,
+    filters.sortBy && filters.sortBy !== defaultSort,
   ].filter(Boolean).length;
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-      {/* Basic Filters - Always Visible */}
+    <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6 shadow-sm">
+      {/* Basic Filters */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {/* Search Input */}
         <div className="md:col-span-2">
-          <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-2">
+          <label htmlFor="search" className="block text-sm font-medium text-gray-600 mb-2">
             Search
           </label>
           <input
@@ -109,20 +172,19 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
             defaultValue={filters.search}
             onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Company name or domain..."
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className={inputClass}
           />
         </div>
 
-        {/* Industry Filter */}
         <div>
-          <label htmlFor="industry" className="block text-sm font-medium text-gray-700 mb-2">
+          <label htmlFor="industry" className="block text-sm font-medium text-gray-600 mb-2">
             Industry
           </label>
           <select
             id="industry"
             value={filters.industry}
             onChange={(e) => handleFilterChange('industry', e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className={selectClass}
           >
             <option value="">All Industries</option>
             {industries.map((ind) => (
@@ -133,16 +195,15 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
           </select>
         </div>
 
-        {/* Status Filter */}
         <div>
-          <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-2">
+          <label htmlFor="status" className="block text-sm font-medium text-gray-600 mb-2">
             Status
           </label>
           <select
             id="status"
             value={filters.status}
             onChange={(e) => handleFilterChange('status', e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className={selectClass}
           >
             <option value="">All Statuses</option>
             <option value="completed">Completed</option>
@@ -158,7 +219,7 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
         <button
           type="button"
           onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
-          className="flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium"
+          className="flex items-center gap-2 text-blue-400 hover:text-blue-300 font-medium"
         >
           <svg
             className={`w-5 h-5 transition-transform ${isAdvancedOpen ? 'rotate-180' : ''}`}
@@ -170,7 +231,7 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
           </svg>
           Advanced Filters
           {advancedFilterCount > 0 && (
-            <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
+            <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full border border-blue-300">
               {advancedFilterCount}
             </span>
           )}
@@ -178,143 +239,163 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
       </div>
 
       {/* Advanced Filters Section */}
-      {isAdvancedOpen && (
-        <div className="mt-4 pt-4 border-t border-gray-200">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Auth0 Account Owner Filter */}
-            <div>
-              <label htmlFor="accountOwner" className="block text-sm font-medium text-gray-700 mb-2">
-                Auth0 Account Owner
-              </label>
-              <select
-                id="accountOwner"
-                value={filters.accountOwner}
-                onChange={(e) => handleFilterChange('accountOwner', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">All Owners</option>
-                <option value="unassigned">No Owner (Unassigned)</option>
-                {accountOwners.map((owner) => (
-                  <option key={owner} value={owner}>
-                    {owner}
-                  </option>
-                ))}
-              </select>
-            </div>
+      <AnimatePresence>
+        {isAdvancedOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' as const }}
+            className="overflow-hidden"
+          >
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label htmlFor="accountOwner" className="block text-sm font-medium text-gray-600 mb-2">
+                    {isOkta ? 'Okta Account Owner' : 'Auth0 Account Owner'}
+                  </label>
+                  <select
+                    id="accountOwner"
+                    value={ownerValue}
+                    onChange={(e) => handlePerspectiveFilterChange('accountOwner', e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">All Owners</option>
+                    <option value="unassigned">No Owner (Unassigned)</option>
+                    {ownersList.map((owner) => (
+                      <option key={owner} value={owner}>
+                        {owner}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            {/* Tier Filter */}
-            <div>
-              <label htmlFor="tier" className="block text-sm font-medium text-gray-700 mb-2">
-                Tier
-              </label>
-              <select
-                id="tier"
-                value={filters.tier}
-                onChange={(e) => handleFilterChange('tier', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">All Tiers</option>
-                {TIERS.map((tier) => (
-                  <option key={tier} value={tier}>
-                    {tier === 'unassigned' ? 'Unassigned' : `Tier ${tier}`}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <div>
+                  <label htmlFor="tier" className="block text-sm font-medium text-gray-600 mb-2">
+                    {isOkta ? 'Okta Tier' : 'Tier'}
+                  </label>
+                  <select
+                    id="tier"
+                    value={tierValue}
+                    onChange={(e) => handlePerspectiveFilterChange('tier', e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">All Tiers</option>
+                    {TIERS.map((tier) => (
+                      <option key={tier} value={tier}>
+                        {tier === 'unassigned' ? 'Unassigned' : `Tier ${tier}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            {/* SKU Filter */}
-            <div>
-              <label htmlFor="sku" className="block text-sm font-medium text-gray-700 mb-2">
-                Auth0 SKU
-              </label>
-              <select
-                id="sku"
-                value={filters.sku}
-                onChange={(e) => handleFilterChange('sku', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">All SKUs</option>
-                {SKUS.map((sku) => (
-                  <option key={sku} value={sku}>
-                    {sku}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <div>
+                  <label htmlFor="sku" className="block text-sm font-medium text-gray-600 mb-2">
+                    {isOkta ? 'Okta SKU' : 'Auth0 SKU'}
+                  </label>
+                  <select
+                    id="sku"
+                    value={skuValue}
+                    onChange={(e) => handlePerspectiveFilterChange('sku', e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">All SKUs</option>
+                    {skuOptions.map((sku) => (
+                      <option key={sku} value={sku}>
+                        {sku}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            {/* Use Case Filter */}
-            <div>
-              <label htmlFor="useCase" className="block text-sm font-medium text-gray-700 mb-2">
-                Use Case
-              </label>
-              <select
-                id="useCase"
-                value={filters.useCase}
-                onChange={(e) => handleFilterChange('useCase', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">All Use Cases</option>
-                {USE_CASES.map((uc) => (
-                  <option key={uc} value={uc}>
-                    {uc}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <div>
+                  <label htmlFor="useCase" className="block text-sm font-medium text-gray-600 mb-2">
+                    Use Case
+                  </label>
+                  <select
+                    id="useCase"
+                    value={useCaseValue}
+                    onChange={(e) => handlePerspectiveFilterChange('useCase', e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">All Use Cases</option>
+                    {useCaseOptions.map((uc) => (
+                      <option key={uc} value={uc}>
+                        {uc}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            {/* Priority Filter */}
-            <div>
-              <label htmlFor="minPriority" className="block text-sm font-medium text-gray-700 mb-2">
-                Min Priority Score
-              </label>
-              <input
-                id="minPriority"
-                type="number"
-                min="1"
-                max="10"
-                value={filters.minPriority || ''}
-                onChange={(e) => handleFilterChange('minPriority', e.target.value ? parseInt(e.target.value) : null)}
-                placeholder="1-10"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
+                <div>
+                  <label htmlFor="minPriority" className="block text-sm font-medium text-gray-600 mb-2">
+                    Min Priority Score
+                  </label>
+                  <input
+                    id="minPriority"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={minPriorityValue || ''}
+                    onChange={(e) => handlePerspectiveFilterChange('minPriority', e.target.value ? parseInt(e.target.value) : null)}
+                    placeholder="1-10"
+                    className={inputClass}
+                  />
+                </div>
 
-            {/* Revenue Filter */}
-            <div>
-              <label htmlFor="revenue" className="block text-sm font-medium text-gray-700 mb-2">
-                Revenue
-              </label>
-              <input
-                id="revenue"
-                type="text"
-                defaultValue={filters.revenue}
-                onChange={(e) => handleRevenueChange(e.target.value)}
-                placeholder="e.g., $10M-$50M"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
+                <div>
+                  <label htmlFor="revenue" className="block text-sm font-medium text-gray-600 mb-2">
+                    Revenue
+                  </label>
+                  <input
+                    id="revenue"
+                    type="text"
+                    defaultValue={filters.revenue}
+                    onChange={(e) => handleRevenueChange(e.target.value)}
+                    placeholder="e.g., $10M-$50M"
+                    className={inputClass}
+                  />
+                </div>
 
-            {/* Sort By */}
-            <div>
-              <label htmlFor="sortBy" className="block text-sm font-medium text-gray-700 mb-2">
-                Sort By
-              </label>
-              <select
-                id="sortBy"
-                value={filters.sortBy}
-                onChange={(e) => handleFilterChange('sortBy', e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="priority_score">Priority Score</option>
-                <option value="processed_at">Recently Processed</option>
-                <option value="created_at">Recently Added</option>
-                <option value="tier">Tier</option>
-                <option value="company_name">Company Name</option>
-              </select>
+                <div>
+                  <label htmlFor="freshness" className="block text-sm font-medium text-gray-600 mb-2">
+                    Research Freshness
+                  </label>
+                  <select
+                    id="freshness"
+                    value={filters.freshness}
+                    onChange={(e) => handleFilterChange('freshness', e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">All</option>
+                    <option value="fresh">Fresh (&lt;30 days)</option>
+                    <option value="aging">Aging (30-60 days)</option>
+                    <option value="stale">Stale (&gt;60 days)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="sortBy" className="block text-sm font-medium text-gray-600 mb-2">
+                    Sort By
+                  </label>
+                  <select
+                    id="sortBy"
+                    value={filters.sortBy}
+                    onChange={(e) => handleFilterChange('sortBy', e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value={isOkta ? 'okta_priority_score' : 'priority_score'}>Priority Score</option>
+                    <option value="processed_at">Recently Processed</option>
+                    <option value="created_at">Recently Added</option>
+                    <option value={isOkta ? 'okta_tier' : 'tier'}>{isOkta ? 'Okta Tier' : 'Tier'}</option>
+                    <option value="company_name">Company Name</option>
+                  </select>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAccountsWithFilters } from '@/lib/db';
+import { getAccountsWithFilters, getFilterMetadata } from '@/lib/db';
 
 export async function GET(request: Request) {
   try {
@@ -9,45 +9,31 @@ export async function GET(request: Request) {
       search: searchParams.get('search') || undefined,
       industry: searchParams.get('industry') || undefined,
       status: searchParams.get('status') || undefined,
+      // Auth0 filters
       tier: searchParams.get('tier') || undefined,
       sku: searchParams.get('sku') || undefined,
       useCase: searchParams.get('useCase') || undefined,
       minPriority: searchParams.get('minPriority') ? parseInt(searchParams.get('minPriority')!) : undefined,
       revenue: searchParams.get('revenue') || undefined,
       accountOwner: searchParams.get('accountOwner') || undefined,
+      // Okta filters
+      oktaTier: searchParams.get('oktaTier') || undefined,
+      oktaSku: searchParams.get('oktaSku') || undefined,
+      oktaUseCase: searchParams.get('oktaUseCase') || undefined,
+      oktaMinPriority: searchParams.get('oktaMinPriority') ? parseInt(searchParams.get('oktaMinPriority')!) : undefined,
+      oktaAccountOwner: searchParams.get('oktaAccountOwner') || undefined,
+      freshness: searchParams.get('freshness') || undefined,
       sortBy: searchParams.get('sortBy') || undefined,
       limit: parseInt(searchParams.get('limit') || '100'),
       offset: parseInt(searchParams.get('offset') || '0'),
     };
 
-    const accounts = getAccountsWithFilters(filters);
+    const result = getAccountsWithFilters(filters);
+    const accounts = result.accounts;
+    const total = result.total;
 
-    // Extract unique values for filter metadata
-    const allIndustries = new Set<string>();
-    const allTiers = new Set<string>();
-    const allSkus = new Set<string>();
-    const allUseCases = new Set<string>();
-    const allAccountOwners = new Set<string>();
-
-    accounts.forEach(acc => {
-      if (acc.industry) allIndustries.add(acc.industry);
-      if (acc.tier) allTiers.add(acc.tier);
-      if (acc.auth0_account_owner) allAccountOwners.add(acc.auth0_account_owner);
-
-      if (acc.auth0_skus) {
-        try {
-          const skus = JSON.parse(acc.auth0_skus);
-          skus.forEach((sku: string) => allSkus.add(sku));
-        } catch (e) {}
-      }
-
-      if (acc.use_cases) {
-        try {
-          const useCases = JSON.parse(acc.use_cases);
-          useCases.forEach((uc: string) => allUseCases.add(uc));
-        } catch (e) {}
-      }
-    });
+    // Get filter metadata from all accounts (not just current page)
+    const filterMetadata = getFilterMetadata();
 
     return NextResponse.json({
       accounts: accounts.map(acc => {
@@ -69,6 +55,24 @@ export async function GET(request: Request) {
           }
         }
 
+        let oktaUseCases = [];
+        if (acc.okta_use_cases) {
+          try {
+            oktaUseCases = JSON.parse(acc.okta_use_cases);
+          } catch (e) {
+            oktaUseCases = [];
+          }
+        }
+
+        let oktaSkus = [];
+        if (acc.okta_skus) {
+          try {
+            oktaSkus = JSON.parse(acc.okta_skus);
+          } catch (e) {
+            oktaSkus = [];
+          }
+        }
+
         return {
           id: acc.id,
           companyName: acc.company_name,
@@ -78,6 +82,7 @@ export async function GET(request: Request) {
           researchSummary: acc.research_summary,
           processedAt: acc.processed_at,
           createdAt: acc.created_at,
+          // Auth0 categorization
           tier: acc.tier,
           estimatedAnnualRevenue: acc.estimated_annual_revenue,
           estimatedUserVolume: acc.estimated_user_volume,
@@ -86,15 +91,35 @@ export async function GET(request: Request) {
           priorityScore: acc.priority_score,
           lastEditedAt: acc.last_edited_at,
           auth0AccountOwner: acc.auth0_account_owner,
+          // Okta categorization
+          oktaTier: acc.okta_tier,
+          oktaEstimatedAnnualRevenue: acc.okta_estimated_annual_revenue,
+          oktaEstimatedUserVolume: acc.okta_estimated_user_volume,
+          oktaUseCases,
+          oktaSkus,
+          oktaPriorityScore: acc.okta_priority_score,
+          oktaOpportunityType: acc.okta_opportunity_type,
+          oktaProcessedAt: acc.okta_processed_at,
+          oktaAccountOwner: acc.okta_account_owner,
         };
       }),
-      total: accounts.length,
+      total,
+      pagination: {
+        limit: filters.limit,
+        offset: filters.offset,
+        totalPages: Math.ceil(total / filters.limit),
+        currentPage: Math.floor(filters.offset / filters.limit) + 1,
+      },
       filters: {
-        availableIndustries: Array.from(allIndustries).sort(),
-        availableTiers: Array.from(allTiers).sort(),
-        availableSkus: Array.from(allSkus).sort(),
-        availableUseCases: Array.from(allUseCases).sort(),
-        availableAccountOwners: Array.from(allAccountOwners).sort(),
+        availableIndustries: filterMetadata.industries,
+        availableTiers: filterMetadata.tiers,
+        availableSkus: filterMetadata.skus,
+        availableUseCases: filterMetadata.useCases,
+        availableAccountOwners: filterMetadata.accountOwners,
+        // Okta filter metadata
+        availableOktaSkus: filterMetadata.oktaSkus,
+        availableOktaUseCases: filterMetadata.oktaUseCases,
+        availableOktaAccountOwners: filterMetadata.oktaAccountOwners,
       },
     });
   } catch (error) {

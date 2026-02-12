@@ -39,7 +39,7 @@ export default function CategorizePage() {
       const accountsRes = await fetch('/api/accounts?limit=1000');
       if (accountsRes.ok) {
         const data = await accountsRes.json();
-        const uniqueIndustries = [...new Set(data.accounts.map((a: any) => a.industry))];
+        const uniqueIndustries = [...new Set(data.accounts.map((a: any) => a.industry))] as string[];
         setIndustries(uniqueIndustries.filter(Boolean).sort());
       }
     } catch (error) {
