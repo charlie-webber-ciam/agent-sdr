@@ -65,6 +65,9 @@ function AccountsPageContent() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [reprocessMode, setReprocessMode] = useState<'both' | 'auth0' | 'okta'>('both');
 
+  // Bulk delete state
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Bulk account owner assignment state
   const [newOwnerName, setNewOwnerName] = useState('');
   const [isAssigningOwner, setIsAssigningOwner] = useState(false);
@@ -239,6 +242,41 @@ function AccountsPageContent() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedAccountIds.size === 0) return;
+
+    if (!confirm(`Are you sure you want to delete ${selectedAccountIds.size} account(s)? This cannot be undone.`)) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const res = await fetch('/api/accounts/bulk-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          accountIds: Array.from(selectedAccountIds),
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to delete accounts');
+      }
+
+      const data = await res.json();
+      alert(`Successfully deleted ${data.deletedCount} account(s).`);
+      setSelectedAccountIds(new Set());
+      fetchAccounts();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete accounts');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleBulkAssignOwner = async () => {
     if (selectedAccountIds.size === 0) {
       alert('Please select at least one account');
@@ -338,22 +376,34 @@ function AccountsPageContent() {
   const showOwnerMode = ownerFilterActive && noOwnerAccounts.length > 0;
   const showSelectionMode = showRetryMode || showOwnerMode;
 
-  const handleSelectAll = () => {
-    let idsToSelect: number[] = [];
+  const handleSelectAll = async () => {
+    try {
+      const params = new URLSearchParams();
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== null && value !== '' && value !== DEFAULT_FILTERS[key as keyof FilterState]) {
+          params.set(key, String(value));
+        }
+      });
 
-    if (showRetryMode) {
-      idsToSelect = retryableAccounts.map(a => a.id);
-    } else if (showOwnerMode) {
-      idsToSelect = noOwnerAccounts.map(a => a.id);
+      const res = await fetch(`/api/accounts/ids?${params.toString()}`);
+      if (!res.ok) throw new Error('Failed to fetch all IDs');
+      const data = await res.json();
+
+      setSelectedAccountIds(new Set(data.ids as number[]));
+    } catch {
+      // Fallback to current page selection
+      let idsToSelect: number[] = [];
+      if (showRetryMode) {
+        idsToSelect = retryableAccounts.map(a => a.id);
+      } else if (showOwnerMode) {
+        idsToSelect = noOwnerAccounts.map(a => a.id);
+      }
+      setSelectedAccountIds(new Set(idsToSelect));
     }
-
-    setSelectedAccountIds(new Set(idsToSelect));
   };
 
-  const selectableAccounts = showRetryMode ? retryableAccounts :
-                            showOwnerMode ? noOwnerAccounts : [];
-  const isAllSelected = selectableAccounts.length > 0 &&
-                       selectedAccountIds.size === selectableAccounts.length;
+  const isAllSelected = selectedAccountIds.size > 0 &&
+                       selectedAccountIds.size >= totalAccounts;
 
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto pb-32">
@@ -757,6 +807,16 @@ function AccountsPageContent() {
                     </button>
                   </div>
                 </div>
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={isDeleting}
+                  className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  {isDeleting ? 'Deleting...' : 'Delete Selected'}
+                </button>
                 <button
                   onClick={handleBulkRetry}
                   disabled={isRetrying}

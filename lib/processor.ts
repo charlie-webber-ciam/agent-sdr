@@ -19,6 +19,14 @@ import { processJobParallel } from './parallel-processor';
 const activeJobs = new Set<number>();
 
 /**
+ * Check if a job currently has an active processing loop in this server process.
+ * Used to detect orphaned jobs after server restarts.
+ */
+export function isJobActive(jobId: number): boolean {
+  return activeJobs.has(jobId);
+}
+
+/**
  * Process a job - routes to parallel or sequential based on configuration
  */
 export async function processJob(
@@ -68,13 +76,15 @@ export async function processJobSequential(
     throw new Error(`Job ${jobId} not found`);
   }
 
-  if (job.status !== 'pending') {
-    console.log(`Job ${jobId} is not pending (status: ${job.status})`);
+  if (job.status !== 'pending' && job.status !== 'processing') {
+    console.log(`Job ${jobId} is not pending or processing (status: ${job.status})`);
     return;
   }
 
   console.log(`Starting sequential processing for job ${jobId}`);
-  updateJobStatus(jobId, 'processing');
+  if (job.status === 'pending') {
+    updateJobStatus(jobId, 'processing');
+  }
 
   let processedCount = 0;
   let failedCount = 0;

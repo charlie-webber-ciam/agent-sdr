@@ -601,6 +601,17 @@ export function deleteAccount(id: number): boolean {
   }
 }
 
+// Bulk account deletion function
+export function deleteAccountsByIds(ids: number[]): number {
+  if (ids.length === 0) return 0;
+
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  const stmt = db.prepare(`DELETE FROM accounts WHERE id IN (${placeholders})`);
+  const result = stmt.run(...ids);
+  return result.changes;
+}
+
 // Enhanced filtering with tier, SKU, priority
 export function getAccountsWithFilters(filters: {
   search?: string;

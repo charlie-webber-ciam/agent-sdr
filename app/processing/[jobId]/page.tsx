@@ -53,6 +53,23 @@ export default function ProcessingPage({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [isOrphaned, setIsOrphaned] = useState(false);
+
+  const checkJobActive = async (jobStatus: string) => {
+    if (jobStatus === 'processing') {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/active`);
+        if (res.ok) {
+          const { active } = await res.json();
+          setIsOrphaned(!active);
+        }
+      } catch {
+        // If we can't reach the endpoint, don't change orphan state
+      }
+    } else {
+      setIsOrphaned(false);
+    }
+  };
 
   const fetchJobData = async () => {
     try {
@@ -63,6 +80,7 @@ export default function ProcessingPage({
       const jobData = await res.json();
       setData(jobData);
       setError(null);
+      await checkJobActive(jobData.job.status);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
@@ -154,6 +172,68 @@ export default function ProcessingPage({
     }
   };
 
+  const handleDeleteFailedAccounts = async () => {
+    if (!data) return;
+    const failedIds = data.accounts.filter(a => a.status === 'failed').map(a => a.id);
+    if (failedIds.length === 0) {
+      alert('No failed accounts to delete.');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete ${failedIds.length} failed account(s)? This cannot be undone.`)) {
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await fetch('/api/accounts/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountIds: failedIds }),
+      });
+      if (!res.ok) throw new Error('Failed to delete accounts');
+      const result = await res.json();
+      alert(`Deleted ${result.deletedCount} failed account(s).`);
+      await fetchJobData();
+    } catch (err) {
+      console.error('Delete failed accounts error:', err);
+      alert('Failed to delete accounts');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteAllJobAccounts = async () => {
+    if (!data) return;
+    const allIds = data.accounts.map(a => a.id);
+    if (allIds.length === 0) {
+      alert('No accounts to delete.');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete ALL ${allIds.length} account(s) from this job? This cannot be undone.`)) {
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await fetch('/api/accounts/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountIds: allIds }),
+      });
+      if (!res.ok) throw new Error('Failed to delete accounts');
+      const result = await res.json();
+      alert(`Deleted ${result.deletedCount} account(s).`);
+      await fetchJobData();
+    } catch (err) {
+      console.error('Delete all accounts error:', err);
+      alert('Failed to delete accounts');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   useEffect(() => {
     const fetchAndCheck = async () => {
       await fetchJobData();
@@ -168,6 +248,9 @@ export default function ProcessingPage({
         if (!res.ok) return;
         const jobData = await res.json();
         setData(jobData);
+
+        // Check if a "processing" job actually has a live server loop
+        await checkJobActive(jobData.job.status);
 
         // Stop polling if job is complete
         if (jobData.job.status !== 'processing' && jobData.job.status !== 'pending') {
@@ -221,6 +304,9 @@ export default function ProcessingPage({
   const pendingAccounts = accounts.filter(a => a.status === 'pending');
   // A pending job with no current account and accounts still pending is likely stuck
   const isStuck = isPending && !currentAccount && pendingAccounts.length > 0 && job.processedCount === 0;
+  // An orphaned job shows "processing" in DB but has no server-side loop running
+  // (e.g. after a server restart). Also covers paused+orphaned state.
+  const needsResume = isOrphaned && isActivelyProcessing && pendingAccounts.length > 0;
 
   return (
     <main className="min-h-screen p-8 max-w-6xl mx-auto">
@@ -236,7 +322,7 @@ export default function ProcessingPage({
             ? 'bg-green-50 border border-green-200'
             : isFailed
             ? 'bg-red-50 border border-red-200'
-            : isStuck
+            : isStuck || needsResume
             ? 'bg-orange-50 border border-orange-200'
             : isPaused
             ? 'bg-yellow-50 border border-yellow-200'
@@ -252,6 +338,8 @@ export default function ProcessingPage({
                 ? 'Failed/Cancelled'
                 : isStuck
                 ? 'Pending'
+                : needsResume
+                ? 'Stopped'
                 : isPaused
                 ? 'Paused'
                 : 'Processing...'}
@@ -259,6 +347,14 @@ export default function ProcessingPage({
             <p className="text-gray-700">
               {isStuck
                 ? `${job.totalAccounts} account${job.totalAccounts !== 1 ? 's' : ''} waiting to be processed`
+                : needsResume
+                ? (
+                  <>
+                    {job.processedCount} of {job.totalAccounts} accounts processed
+                    {job.failedCount > 0 && ` (${job.failedCount} failed)`}
+                    {` — ${pendingAccounts.length} remaining`}
+                  </>
+                )
                 : (
                   <>
                     {job.processedCount} of {job.totalAccounts} accounts processed
@@ -268,7 +364,12 @@ export default function ProcessingPage({
             </p>
             {isStuck && (
               <p className="text-sm text-orange-700 mt-1">
-                Processing did not start automatically. Click "Start Processing" to begin.
+                Processing did not start automatically. Click &quot;Start Processing&quot; to begin.
+              </p>
+            )}
+            {needsResume && (
+              <p className="text-sm text-orange-700 mt-1">
+                Processing is no longer running (server may have restarted). Click &quot;Resume Processing&quot; to continue.
               </p>
             )}
           </div>
@@ -309,7 +410,35 @@ export default function ProcessingPage({
                 </button>
               </>
             )}
-            {isProcessing && !isStuck && (
+            {needsResume && !isStuck && (
+              <>
+                <button
+                  onClick={handleResume}
+                  disabled={actionLoading}
+                  className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center gap-2 font-medium"
+                >
+                  {actionLoading ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Resuming...
+                    </>
+                  ) : (
+                    'Resume Processing'
+                  )}
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={actionLoading}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
+                >
+                  {actionLoading ? 'Cancelling...' : 'Cancel'}
+                </button>
+              </>
+            )}
+            {isProcessing && !isStuck && !needsResume && (
               <>
                 {isPaused ? (
                   <button
@@ -338,13 +467,31 @@ export default function ProcessingPage({
               </>
             )}
             {(isFailed || isComplete) && (
-              <button
-                onClick={handleDelete}
-                disabled={actionLoading}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
-              >
-                {actionLoading ? 'Deleting...' : 'Delete Job'}
-              </button>
+              <>
+                {failedAccounts.length > 0 && (
+                  <button
+                    onClick={handleDeleteFailedAccounts}
+                    disabled={actionLoading}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition-colors flex items-center gap-2 text-sm"
+                  >
+                    {actionLoading ? 'Deleting...' : `Delete Failed (${failedAccounts.length})`}
+                  </button>
+                )}
+                <button
+                  onClick={handleDeleteAllJobAccounts}
+                  disabled={actionLoading}
+                  className="px-4 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800 disabled:bg-gray-400 transition-colors flex items-center gap-2 text-sm"
+                >
+                  {actionLoading ? 'Deleting...' : `Delete All Accounts (${accounts.length})`}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={actionLoading}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-400 transition-colors flex items-center gap-2"
+                >
+                  {actionLoading ? 'Deleting...' : 'Delete Job'}
+                </button>
+              </>
             )}
           </div>
         </div>

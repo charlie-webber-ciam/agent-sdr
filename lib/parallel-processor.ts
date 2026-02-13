@@ -35,13 +35,15 @@ export async function processJobParallel(
     throw new Error(`Job ${jobId} not found`);
   }
 
-  if (job.status !== 'pending') {
-    console.log(`Job ${jobId} is not pending (status: ${job.status})`);
+  if (job.status !== 'pending' && job.status !== 'processing') {
+    console.log(`Job ${jobId} is not pending or processing (status: ${job.status})`);
     return;
   }
 
   try {
-    updateJobStatus(jobId, 'processing');
+    if (job.status === 'pending') {
+      updateJobStatus(jobId, 'processing');
+    }
 
     let processedCount = 0;
     let failedCount = 0;
