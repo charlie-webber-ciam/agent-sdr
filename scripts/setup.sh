@@ -258,33 +258,27 @@ configure_env() {
   fi
 
   echo ""
-  echo "  The Agent SDR uses OpenAI's API to research accounts."
-  echo "  You'll need your OpenAI API key and base URL."
+  echo "  The Agent SDR uses an API key to research accounts."
   echo ""
-  echo "  If you don't have these yet, ask your team lead or check your"
-  echo "  OpenAI account at https://platform.openai.com/api-keys"
+  echo "  If you don't have your API key yet, ask your team lead."
   echo ""
 
-  # Prompt for API key
+  # Prompt for API key (silent input to avoid exposing the key)
   local api_key=""
   while [[ -z "$api_key" ]]; do
-    read -rp "  Enter your OPENAI_API_KEY: " api_key
+    read -rsp "  Enter your API key: " api_key
+    echo ""  # newline after silent input
     if [[ -z "$api_key" ]]; then
       warn "API key cannot be empty. Please try again."
     fi
   done
 
-  # Prompt for base URL
-  local base_url=""
-  while [[ -z "$base_url" ]]; do
-    read -rp "  Enter your OPENAI_BASE_URL: " base_url
-    if [[ -z "$base_url" ]]; then
-      warn "Base URL cannot be empty. Please try again."
-    fi
-  done
+  local base_url="https://llm.atko.ai"
 
-  # Write the env file
-  cat > "$env_file" <<EOF
+  # Write the env file with restrictive permissions
+  (
+    umask 077
+    cat > "$env_file" <<EOF
 # Agent SDR - OpenAI Configuration
 OPENAI_API_KEY=$api_key
 OPENAI_BASE_URL=$base_url
@@ -293,6 +287,7 @@ OPENAI_BASE_URL=$base_url
 # ENABLE_PARALLEL_PROCESSING=true
 # PROCESSING_CONCURRENCY=5
 EOF
+  )
 
   success "Configuration saved to .env.local"
 }
