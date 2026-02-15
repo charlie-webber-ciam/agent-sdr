@@ -35,6 +35,13 @@ cleanup() {
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
+# Migration state (set by detect_existing_install, used by restore_migrated_data)
+# ---------------------------------------------------------------------------
+MIGRATED_DB_PATH=""
+MIGRATED_API_KEY=""
+MIGRATED_OLD_DIR=""
+
+# ---------------------------------------------------------------------------
 # Pre-flight checks
 # ---------------------------------------------------------------------------
 preflight_checks() {
@@ -63,6 +70,106 @@ preflight_checks() {
     exit 1
   fi
   success "Disk space OK (${free_space_mb} MB free)"
+}
+
+# ---------------------------------------------------------------------------
+# Detect existing installation in a non-standard location
+# ---------------------------------------------------------------------------
+detect_existing_install() {
+  header "Checking for existing installation..."
+
+  local canonical="$HOME/agent-sdr"
+  local found_dirs=()
+
+  # Search for agent-sdr directories in common locations (shallow search)
+  while IFS= read -r dir; do
+    [[ "$dir" == "$canonical" ]] && continue
+    # Verify it looks like an agent-sdr install
+    if [[ -f "$dir/package.json" ]] || [[ -d "$dir/data" ]]; then
+      found_dirs+=("$dir")
+    fi
+  done < <(find "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads" "$HOME" \
+    -maxdepth 3 -type d -name "*agent*sdr*" 2>/dev/null | sort -u)
+
+  if [[ ${#found_dirs[@]} -eq 0 ]]; then
+    success "No previous installation found"
+    return
+  fi
+
+  local old_install="${found_dirs[0]}"
+  local old_db="$old_install/data/accounts.db"
+  local old_env="$old_install/.env.local"
+
+  if [[ ! -f "$old_db" ]]; then
+    success "No research data to migrate"
+    return
+  fi
+
+  local db_size
+  db_size=$(du -h "$old_db" | cut -f1)
+
+  echo ""
+  info "Found a previous installation at:"
+  echo "    $old_install"
+  info "Research database found ($db_size)"
+  echo ""
+  read -rp "  Migrate your existing research data to the new location? (Y/n): " migrate_choice
+  if [[ "${migrate_choice,,}" == "n" ]]; then
+    info "Skipping migration. Starting fresh."
+    return
+  fi
+
+  MIGRATED_DB_PATH="$old_db"
+  MIGRATED_OLD_DIR="$old_install"
+
+  # Extract API key from old .env.local so user doesn't have to re-enter it
+  if [[ -f "$old_env" ]]; then
+    MIGRATED_API_KEY=$(grep -E '^OPENAI_API_KEY=' "$old_env" 2>/dev/null | cut -d'=' -f2-)
+    if [[ -n "$MIGRATED_API_KEY" ]]; then
+      info "API key found in previous configuration"
+    fi
+  fi
+
+  success "Data will be migrated after setup completes"
+}
+
+# ---------------------------------------------------------------------------
+# Restore migrated data into the new install
+# ---------------------------------------------------------------------------
+restore_migrated_data() {
+  if [[ -z "$MIGRATED_DB_PATH" && -z "$MIGRATED_API_KEY" ]]; then
+    return
+  fi
+
+  header "Migrating data from previous installation..."
+
+  local install_dir="$HOME/agent-sdr"
+
+  # Restore .env.local with migrated API key (before configure_env runs)
+  if [[ -n "$MIGRATED_API_KEY" && ! -f "$install_dir/.env.local" ]]; then
+    (
+      umask 077
+      cat > "$install_dir/.env.local" <<EOF
+# Agent SDR - OpenAI Configuration
+OPENAI_API_KEY=$MIGRATED_API_KEY
+OPENAI_BASE_URL=https://llm.atko.ai
+
+# Optional parallel processing (uncomment to enable)
+# ENABLE_PARALLEL_PROCESSING=true
+# PROCESSING_CONCURRENCY=5
+EOF
+    )
+    success "API key migrated (base URL set to https://llm.atko.ai)"
+  fi
+
+  # Restore research database
+  if [[ -n "$MIGRATED_DB_PATH" && -f "$MIGRATED_DB_PATH" ]]; then
+    mkdir -p "$install_dir/data"
+    cp "$MIGRATED_DB_PATH" "$install_dir/data/accounts.db"
+    local db_size
+    db_size=$(du -h "$install_dir/data/accounts.db" | cut -f1)
+    success "Research database migrated ($db_size)"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -432,11 +539,13 @@ main() {
   read -rp "  Press Enter to begin (or Ctrl+C to cancel)... "
 
   preflight_checks
+  detect_existing_install
   install_xcode_tools
   install_homebrew
   install_nvm
   install_node
   clone_repo
+  restore_migrated_data
   configure_env
   run_npm_install
   create_launcher_and_start
@@ -454,6 +563,17 @@ main() {
   echo "  To stop the app:"
   echo "    - Close the Terminal window running it"
   echo ""
+
+  # If we migrated from an old location, tell the user they can clean it up
+  if [[ -n "$MIGRATED_OLD_DIR" ]]; then
+    echo "  Your data was migrated from:"
+    echo "    $MIGRATED_OLD_DIR"
+    echo ""
+    echo "  Once you've confirmed everything works, you can remove the old install:"
+    echo "    rm -rf \"$MIGRATED_OLD_DIR\""
+    echo ""
+  fi
+
   echo "  If you have any issues, reach out to your team lead."
   echo ""
 }
