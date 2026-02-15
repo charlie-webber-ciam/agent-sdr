@@ -81,15 +81,24 @@ detect_existing_install() {
   local canonical="$HOME/agent-sdr"
   local found_dirs=()
 
-  # Search for agent-sdr directories in common locations (shallow search)
+  # Search for agent-sdr directories in common locations (shallow search).
+  # Only checks places the old setup script or a casual user would have put it.
   while IFS= read -r dir; do
     [[ "$dir" == "$canonical" ]] && continue
-    # Verify it looks like an agent-sdr install
-    if [[ -f "$dir/package.json" ]] || [[ -d "$dir/data" ]]; then
+    # Verify it looks like an agent-sdr install (has a database to migrate)
+    if [[ -f "$dir/data/accounts.db" ]]; then
       found_dirs+=("$dir")
     fi
-  done < <(find "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads" "$HOME" \
+  done < <(find "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads" \
     -maxdepth 3 -type d -name "*agent*sdr*" 2>/dev/null | sort -u)
+
+  # Also check immediate children of $HOME (e.g. ~/agent-sdr-old, ~/my-agent-sdr)
+  while IFS= read -r dir; do
+    [[ "$dir" == "$canonical" ]] && continue
+    if [[ -f "$dir/data/accounts.db" ]]; then
+      found_dirs+=("$dir")
+    fi
+  done < <(find "$HOME" -maxdepth 1 -type d -name "*agent*sdr*" 2>/dev/null)
 
   if [[ ${#found_dirs[@]} -eq 0 ]]; then
     success "No previous installation found"
@@ -114,7 +123,7 @@ detect_existing_install() {
   info "Research database found ($db_size)"
   echo ""
   read -rp "  Migrate your existing research data to the new location? (Y/n): " migrate_choice
-  if [[ "${migrate_choice,,}" == "n" ]]; then
+  if [[ "$migrate_choice" == "n" || "$migrate_choice" == "N" ]]; then
     info "Skipping migration. Starting fresh."
     return
   fi
