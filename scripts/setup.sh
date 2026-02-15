@@ -1,0 +1,466 @@
+#!/bin/bash
+# =============================================================================
+# Agent SDR - macOS Setup Script
+# =============================================================================
+# A guided installer for non-technical users.
+# Run with: bash <(curl -fsSL https://raw.githubusercontent.com/charlie-webber-ciam/agent-sdr/main/scripts/setup.sh)
+# =============================================================================
+
+set -eo pipefail
+
+# ---------------------------------------------------------------------------
+# Colors and formatting
+# ---------------------------------------------------------------------------
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+success() { echo -e "${GREEN}✔${NC} $1"; }
+fail()    { echo -e "${RED}✘ $1${NC}"; }
+info()    { echo -e "${BLUE}→${NC} $1"; }
+warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
+header()  { echo -e "\n${BOLD}$1${NC}"; }
+
+# ---------------------------------------------------------------------------
+# Cleanup on exit
+# ---------------------------------------------------------------------------
+cleanup() {
+  # If the dev server was started by this script, it will be left running
+  # intentionally so the user can use the app.
+  :
+}
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# Pre-flight checks
+# ---------------------------------------------------------------------------
+preflight_checks() {
+  header "Running pre-flight checks..."
+
+  # macOS only
+  if [[ "$(uname)" != "Darwin" ]]; then
+    fail "This script only supports macOS. Detected: $(uname)"
+    exit 1
+  fi
+  success "Running on macOS"
+
+  # Internet connectivity
+  if ! curl -s --connect-timeout 5 https://github.com > /dev/null 2>&1; then
+    fail "No internet connection detected."
+    echo "  Please check your Wi-Fi or Ethernet and try again."
+    exit 1
+  fi
+  success "Internet connection OK"
+
+  # Disk space (need at least 2 GB free)
+  free_space_mb=$(df -m "$HOME" | awk 'NR==2 {print $4}')
+  if [[ "$free_space_mb" -lt 2048 ]]; then
+    fail "Less than 2 GB of free disk space available (${free_space_mb} MB)."
+    echo "  Please free up some space and try again."
+    exit 1
+  fi
+  success "Disk space OK (${free_space_mb} MB free)"
+}
+
+# ---------------------------------------------------------------------------
+# Step 1: Xcode Command Line Tools
+# ---------------------------------------------------------------------------
+install_xcode_tools() {
+  header "Step 1/8: Xcode Command Line Tools"
+
+  if xcode-select -p > /dev/null 2>&1; then
+    success "Xcode Command Line Tools already installed"
+    return
+  fi
+
+  info "Installing Xcode Command Line Tools..."
+  echo "  A system dialog will appear asking you to install. Click \"Install\" and wait."
+  echo ""
+
+  xcode-select --install 2>/dev/null || true
+
+  # Wait for the user to finish the GUI installer
+  echo ""
+  info "Waiting for installation to complete..."
+  echo "  (This can take several minutes. Do NOT close the installer dialog.)"
+  echo ""
+
+  until xcode-select -p > /dev/null 2>&1; do
+    sleep 5
+  done
+
+  success "Xcode Command Line Tools installed"
+}
+
+# ---------------------------------------------------------------------------
+# Step 2: Homebrew
+# ---------------------------------------------------------------------------
+install_homebrew() {
+  header "Step 2/8: Homebrew"
+
+  if command -v brew > /dev/null 2>&1; then
+    success "Homebrew already installed"
+    return
+  fi
+
+  info "Installing Homebrew (the macOS package manager)..."
+  echo "  You may be asked for your Mac password. This is normal."
+  echo ""
+
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+  # Add Homebrew to PATH for Apple Silicon Macs
+  if [[ -f /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -f /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+
+  if ! command -v brew > /dev/null 2>&1; then
+    fail "Homebrew installation failed."
+    echo "  Try installing it manually: https://brew.sh"
+    exit 1
+  fi
+
+  success "Homebrew installed"
+}
+
+# ---------------------------------------------------------------------------
+# Step 3: nvm (Node Version Manager)
+# ---------------------------------------------------------------------------
+install_nvm() {
+  header "Step 3/8: Node Version Manager (nvm)"
+
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+
+  # Source nvm if it exists
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    source "$NVM_DIR/nvm.sh"
+  fi
+
+  if command -v nvm > /dev/null 2>&1; then
+    success "nvm already installed"
+    return
+  fi
+
+  info "Installing nvm..."
+
+  # Install via official install script (more reliable across setups than Homebrew)
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+
+  export NVM_DIR="$HOME/.nvm"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    source "$NVM_DIR/nvm.sh"
+  fi
+
+  if ! command -v nvm > /dev/null 2>&1; then
+    fail "nvm installation failed."
+    echo "  Try installing it manually: https://github.com/nvm-sh/nvm#installing-and-updating"
+    exit 1
+  fi
+
+  success "nvm installed"
+}
+
+# ---------------------------------------------------------------------------
+# Step 4: Node.js 24
+# ---------------------------------------------------------------------------
+install_node() {
+  header "Step 4/8: Node.js 24"
+
+  # Ensure nvm is loaded
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    source "$NVM_DIR/nvm.sh"
+  fi
+
+  local current_node
+  current_node=$(nvm current 2>/dev/null || echo "none")
+
+  if [[ "$current_node" == v24.* ]]; then
+    success "Node.js 24 already active ($current_node)"
+    return
+  fi
+
+  # Check if Node 24 is installed but not active
+  if nvm ls 24 > /dev/null 2>&1; then
+    info "Switching to Node.js 24..."
+    nvm use 24
+  else
+    info "Installing Node.js 24 (this may take a minute)..."
+    nvm install 24
+    nvm use 24
+  fi
+
+  # Set as default so future terminals use it
+  nvm alias default 24 > /dev/null 2>&1 || true
+
+  local version
+  version=$(node --version 2>/dev/null || echo "unknown")
+  if [[ "$version" == v24.* ]]; then
+    success "Node.js $version installed and active"
+  else
+    fail "Node.js 24 installation failed. Got: $version"
+    exit 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Step 5: Clone or update the repository
+# ---------------------------------------------------------------------------
+clone_repo() {
+  header "Step 5/8: Agent SDR Repository"
+
+  local repo_url="https://github.com/charlie-webber-ciam/agent-sdr.git"
+  local install_dir="$HOME/agent-sdr"
+
+  if [[ -d "$install_dir/.git" ]]; then
+    info "Repository already exists. Pulling latest changes..."
+    if git -C "$install_dir" pull --ff-only; then
+      success "Repository updated"
+    else
+      warn "Could not fast-forward. Continuing with existing code."
+    fi
+    return
+  fi
+
+  if [[ -d "$install_dir" ]]; then
+    warn "$install_dir exists but is not a git repo."
+    echo "  Moving it to ${install_dir}.backup and cloning fresh."
+    mv "$install_dir" "${install_dir}.backup.$(date +%s)"
+  fi
+
+  info "Cloning repository to $install_dir..."
+  if git clone "$repo_url" "$install_dir"; then
+    success "Repository cloned to $install_dir"
+  else
+    fail "Failed to clone repository."
+    echo "  Check your internet connection and try again."
+    exit 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Step 6: Environment variables (.env.local)
+# ---------------------------------------------------------------------------
+configure_env() {
+  header "Step 6/8: OpenAI Configuration"
+
+  local env_file="$HOME/agent-sdr/.env.local"
+
+  if [[ -f "$env_file" ]]; then
+    success "Configuration file already exists (.env.local)"
+    info "Keeping your existing credentials. Delete $env_file and re-run to reconfigure."
+    return
+  fi
+
+  echo ""
+  echo "  The Agent SDR uses OpenAI's API to research accounts."
+  echo "  You'll need your OpenAI API key and base URL."
+  echo ""
+  echo "  If you don't have these yet, ask your team lead or check your"
+  echo "  OpenAI account at https://platform.openai.com/api-keys"
+  echo ""
+
+  # Prompt for API key
+  local api_key=""
+  while [[ -z "$api_key" ]]; do
+    read -rp "  Enter your OPENAI_API_KEY: " api_key
+    if [[ -z "$api_key" ]]; then
+      warn "API key cannot be empty. Please try again."
+    fi
+  done
+
+  # Prompt for base URL
+  local base_url=""
+  while [[ -z "$base_url" ]]; do
+    read -rp "  Enter your OPENAI_BASE_URL: " base_url
+    if [[ -z "$base_url" ]]; then
+      warn "Base URL cannot be empty. Please try again."
+    fi
+  done
+
+  # Write the env file
+  cat > "$env_file" <<EOF
+# Agent SDR - OpenAI Configuration
+OPENAI_API_KEY=$api_key
+OPENAI_BASE_URL=$base_url
+
+# Optional parallel processing (uncomment to enable)
+# ENABLE_PARALLEL_PROCESSING=true
+# PROCESSING_CONCURRENCY=5
+EOF
+
+  success "Configuration saved to .env.local"
+}
+
+# ---------------------------------------------------------------------------
+# Step 7: npm install
+# ---------------------------------------------------------------------------
+run_npm_install() {
+  header "Step 7/8: Installing Dependencies"
+
+  local install_dir="$HOME/agent-sdr"
+
+  # Ensure nvm/node is available
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    source "$NVM_DIR/nvm.sh"
+  fi
+  nvm use 24 > /dev/null 2>&1 || true
+
+  info "Running npm install (this may take a couple of minutes)..."
+  echo "  (The better-sqlite3 package needs to compile native code -- this is normal.)"
+  echo ""
+
+  if (cd "$install_dir" && npm install 2>&1); then
+    echo ""
+    success "All dependencies installed"
+  else
+    echo ""
+    fail "npm install failed."
+    echo ""
+    echo "  Common fixes:"
+    echo "  1. Make sure Xcode Command Line Tools are installed: xcode-select --install"
+    echo "  2. Try deleting node_modules and running again:"
+    echo "     rm -rf ~/agent-sdr/node_modules && cd ~/agent-sdr && npm install"
+    echo "  3. If you see Python errors, install Python 3: brew install python3"
+    exit 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Step 8: Create Desktop launcher and start the app
+# ---------------------------------------------------------------------------
+create_launcher_and_start() {
+  header "Step 8/8: Desktop Launcher & First Launch"
+
+  local launcher="$HOME/Desktop/Agent SDR.command"
+
+  # Create the Desktop launcher
+  cat > "$launcher" <<'LAUNCHER'
+#!/bin/bash
+# ================================================
+# Agent SDR - Double-click to start
+# ================================================
+cd ~/agent-sdr || { echo "Error: ~/agent-sdr not found."; read -rp "Press Enter to close."; exit 1; }
+
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+  source "$NVM_DIR/nvm.sh"
+fi
+nvm use 24 2>/dev/null
+
+echo ""
+echo "  Starting Agent SDR..."
+echo "  The app will open in your browser at http://localhost:3000"
+echo "  Keep this window open while using the app. Close it to stop."
+echo ""
+
+npm run dev &
+DEV_PID=$!
+
+sleep 4
+open http://localhost:3000
+
+# Wait for the dev server process; when this window is closed, it stops
+wait $DEV_PID
+LAUNCHER
+
+  chmod +x "$launcher"
+  success "Desktop launcher created: Agent SDR.command"
+
+  # Check if port 3000 is in use
+  if lsof -i :3000 > /dev/null 2>&1; then
+    warn "Port 3000 is already in use. The app may not start correctly."
+    echo "  Close whatever is using port 3000, then double-click \"Agent SDR\" on your Desktop."
+    return
+  fi
+
+  # Start the app
+  info "Starting Agent SDR for the first time..."
+
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    source "$NVM_DIR/nvm.sh"
+  fi
+  nvm use 24 > /dev/null 2>&1 || true
+
+  (cd "$HOME/agent-sdr" && npm run dev > /dev/null 2>&1) &
+  local dev_pid=$!
+
+  # Give the dev server a moment to start
+  info "Waiting for the dev server to start..."
+  local attempts=0
+  while ! curl -s --connect-timeout 2 http://localhost:3000 > /dev/null 2>&1; do
+    sleep 2
+    attempts=$((attempts + 1))
+    if [[ $attempts -ge 15 ]]; then
+      warn "Dev server is taking longer than expected."
+      echo "  You can try double-clicking \"Agent SDR\" on your Desktop to start it manually."
+      return
+    fi
+  done
+
+  open http://localhost:3000
+
+  echo ""
+  success "Agent SDR is running at http://localhost:3000"
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+main() {
+  echo ""
+  echo -e "${BOLD}============================================${NC}"
+  echo -e "${BOLD}      Agent SDR - macOS Setup              ${NC}"
+  echo -e "${BOLD}============================================${NC}"
+  echo ""
+  echo "  This script will set up the Agent SDR research tool on your Mac."
+  echo "  It will install a few developer tools if you don't have them already"
+  echo "  and then download and start the application."
+  echo ""
+  echo "  What gets installed (only if not already present):"
+  echo "    1. Xcode Command Line Tools (Apple developer tools)"
+  echo "    2. Homebrew (macOS package manager)"
+  echo "    3. nvm (Node.js version manager)"
+  echo "    4. Node.js 24 (JavaScript runtime)"
+  echo ""
+  echo "  The app will be installed at: ~/agent-sdr"
+  echo "  A launcher shortcut will be placed on your Desktop."
+  echo ""
+
+  read -rp "  Press Enter to begin (or Ctrl+C to cancel)... "
+
+  preflight_checks
+  install_xcode_tools
+  install_homebrew
+  install_nvm
+  install_node
+  clone_repo
+  configure_env
+  run_npm_install
+  create_launcher_and_start
+
+  echo ""
+  echo -e "${BOLD}============================================${NC}"
+  echo -e "${GREEN}${BOLD}  Setup complete!${NC}"
+  echo -e "${BOLD}============================================${NC}"
+  echo ""
+  echo "  Your app is running at: http://localhost:3000"
+  echo ""
+  echo "  To start the app in the future:"
+  echo "    - Double-click \"Agent SDR\" on your Desktop"
+  echo ""
+  echo "  To stop the app:"
+  echo "    - Close the Terminal window running it"
+  echo ""
+  echo "  If you have any issues, reach out to your team lead."
+  echo ""
+}
+
+main "$@"
