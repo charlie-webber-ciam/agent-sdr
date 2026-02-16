@@ -143,7 +143,7 @@ export async function generateSequence(request: SequenceRequest): Promise<Sequen
 
     const agent = new Agent({
       name: `${contextLabel} Sequence Writer - Charlie Style`,
-      model: 'gpt-5.2',
+      model: 'claude-4-6-opus',
       instructions: SYSTEM_INSTRUCTIONS,
       tools: [],
     });

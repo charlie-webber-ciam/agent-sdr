@@ -73,6 +73,7 @@ interface AccountDetail {
   lastEditedAt: string | null;
   aiSuggestions: any | null;
   auth0AccountOwner: string | null;
+  researchModel: string | null;
   // Okta SDR fields
   oktaTier: 'A' | 'B' | 'C' | null;
   oktaEstimatedAnnualRevenue: string | null;
@@ -517,7 +518,7 @@ export default function AccountDetailPage({
     }
   };
 
-  const handleReprocess = async (researchType: 'both' | 'auth0' | 'okta') => {
+  const handleReprocess = async (researchType: 'both' | 'auth0' | 'okta', model?: string) => {
     setIsReprocessing(true);
     try {
       const res = await fetch(`/api/accounts/${id}/reprocess`, {
@@ -525,7 +526,7 @@ export default function AccountDetailPage({
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ researchType }),
+        body: JSON.stringify({ researchType, model }),
       });
 
       if (!res.ok) {
@@ -673,6 +674,11 @@ export default function AccountDetailPage({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             Processed: {formatDate(account.processedAt)}
+            {account.researchModel && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                {account.researchModel}
+              </span>
+            )}
           </p>
 
           {account.errorMessage && (

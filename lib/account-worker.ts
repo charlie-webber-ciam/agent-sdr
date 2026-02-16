@@ -15,6 +15,7 @@ import {
   updateAccountOktaResearchSafe as updateAccountOktaResearch,
   updateAccountMetadataSafe as updateAccountMetadata,
   updateOktaAccountMetadataSafe as updateOktaAccountMetadata,
+  updateAccountResearchModel,
 } from './db';
 import { researchCompanyDual, ResearchMode } from './dual-researcher';
 import { analyzeAccountData } from './categorizer';
@@ -35,7 +36,8 @@ export interface AccountProcessingResult {
 export async function processAccountWithRetry(
   account: Account,
   jobId: number,
-  researchType: ResearchMode = 'both'
+  researchType: ResearchMode = 'both',
+  model?: string
 ): Promise<AccountProcessingResult> {
   const { maxRetries, retryDelay } = PROCESSING_CONFIG;
   let lastError: Error | null = null;
@@ -59,7 +61,8 @@ export async function processAccountWithRetry(
           domain: account.domain,
           industry: account.industry,
         },
-        researchType
+        researchType,
+        model
       );
 
       // Update Auth0 research if available
@@ -154,6 +157,11 @@ export async function processAccountWithRetry(
 
       // Mark account as completed
       updateAccountStatus(account.id, 'completed');
+
+      // Record which model was used for research
+      if (model) {
+        updateAccountResearchModel(account.id, model);
+      }
 
       console.log(`[Account ${account.id}] ✓ Completed processing for ${account.company_name}`);
 

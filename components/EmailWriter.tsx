@@ -181,17 +181,22 @@ export default function EmailWriter({ accountId, account }: EmailWriterProps) {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Recipient Persona *
               </label>
-              <select
+              <input
+                type="text"
+                list="persona-options"
                 value={recipientPersona}
                 onChange={(e) => setRecipientPersona(e.target.value)}
+                placeholder="e.g., CTO, VP Engineering, or type custom..."
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
+              />
+              <datalist id="persona-options">
                 {PERSONA_OPTIONS.map((persona) => (
-                  <option key={persona} value={persona}>
-                    {persona}
-                  </option>
+                  <option key={persona} value={persona} />
                 ))}
-              </select>
+              </datalist>
+              <p className="mt-1 text-xs text-gray-500">
+                Select from suggestions or type a custom title
+              </p>
             </div>
 
             {/* Email Type Toggle */}

@@ -8,8 +8,18 @@ export default function QuickResearchPage() {
   const [companyName, setCompanyName] = useState('');
   const [domain, setDomain] = useState('');
   const [industry, setIndustry] = useState('');
+  const [model, setModel] = useState('gpt-5.2');
   const [isResearching, setIsResearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const availableModels = [
+    'gpt-5.2',
+    'claude-4-6-opus',
+    'claude-4-5-sonnet',
+    'gpt-5-nano',
+    'gemini-3-flash-preview',
+    'llama-4-maverick-17b',
+  ];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +47,7 @@ export default function QuickResearchPage() {
           companyName: companyName.trim(),
           domain: domain.trim() || null,
           industry: industry.trim(),
+          model,
         }),
       });
 
@@ -143,6 +154,29 @@ export default function QuickResearchPage() {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Model */}
+          <div>
+            <label htmlFor="model" className="block text-sm font-semibold text-gray-700 mb-2">
+              Research Model
+            </label>
+            <select
+              id="model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={isResearching}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+            >
+              {availableModels.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              Select the AI model to use for research
+            </p>
           </div>
 
           {/* Error Message */}

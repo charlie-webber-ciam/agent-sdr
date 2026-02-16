@@ -8,6 +8,7 @@ import {
   updateJobProgress,
   updateAccountMetadata,
   updateOktaAccountMetadata,
+  updateAccountResearchModel,
 } from './db';
 import { researchCompanyDual, ResearchMode } from './dual-researcher';
 import { analyzeAccountData } from './categorizer';
@@ -35,6 +36,7 @@ export async function processJob(
     mode?: 'parallel' | 'sequential';
     concurrency?: number;
     researchType?: ResearchMode;
+    model?: string;
   }
 ): Promise<void> {
   // Check if job is already being processed
@@ -50,13 +52,14 @@ export async function processJob(
     const mode = options?.mode || (PROCESSING_CONFIG.enableParallel ? 'parallel' : 'sequential');
     const concurrency = options?.concurrency || PROCESSING_CONFIG.concurrency;
     const researchType = options?.researchType || 'both';
+    const model = options?.model;
 
     if (mode === 'parallel') {
       console.log(`Using PARALLEL processing mode (concurrency: ${concurrency}, research: ${researchType})`);
-      await processJobParallel(jobId, concurrency, researchType);
+      await processJobParallel(jobId, concurrency, researchType, model);
     } else {
       console.log(`Using SEQUENTIAL processing mode (research: ${researchType})`);
-      await processJobSequential(jobId, researchType);
+      await processJobSequential(jobId, researchType, model);
     }
   } finally {
     activeJobs.delete(jobId);
@@ -69,7 +72,8 @@ export async function processJob(
  */
 export async function processJobSequential(
   jobId: number,
-  researchType: ResearchMode = 'both'
+  researchType: ResearchMode = 'both',
+  model?: string
 ): Promise<void> {
   const job = getJob(jobId);
   if (!job) {
@@ -129,7 +133,8 @@ export async function processJobSequential(
           domain: account.domain,
           industry: account.industry,
         },
-        researchType
+        researchType,
+        model
       );
 
       // Update Auth0 research if available
@@ -216,6 +221,12 @@ export async function processJobSequential(
 
       // Mark account as completed
       updateAccountStatus(account.id, 'completed');
+
+      // Record which model was used for research
+      if (model) {
+        updateAccountResearchModel(account.id, model);
+      }
+
       processedCount++;
 
       console.log(`Completed processing for ${account.company_name}`);

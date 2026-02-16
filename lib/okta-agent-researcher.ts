@@ -141,9 +141,9 @@ Format all responses in markdown with bold text, bullet points, and links to sou
 
 // ─── Specialist Agent Definitions ──────────────────────────────────────────────
 
-function createIAMDiscoveryAgent(): Agent {
+function createIAMDiscoveryAgent(model?: string): Agent {
   return new Agent({
-    model: 'gpt-5.2',
+    model: model || 'gpt-5.2',
     name: 'Okta IAM Discovery Agent',
     instructions: `${OKTA_BASE_INSTRUCTIONS}
 
@@ -152,9 +152,9 @@ function createIAMDiscoveryAgent(): Agent {
   });
 }
 
-function createWorkforceIntelAgent(): Agent {
+function createWorkforceIntelAgent(model?: string): Agent {
   return new Agent({
-    model: 'gpt-5.2',
+    model: model || 'gpt-5.2',
     name: 'Okta Workforce Intelligence Agent',
     instructions: `${OKTA_BASE_INSTRUCTIONS}
 
@@ -163,9 +163,9 @@ function createWorkforceIntelAgent(): Agent {
   });
 }
 
-function createSecurityComplianceAgent(): Agent {
+function createSecurityComplianceAgent(model?: string): Agent {
   return new Agent({
-    model: 'gpt-5.2',
+    model: model || 'gpt-5.2',
     name: 'Okta Security & Compliance Agent',
     instructions: `${OKTA_BASE_INSTRUCTIONS}
 
@@ -174,9 +174,9 @@ function createSecurityComplianceAgent(): Agent {
   });
 }
 
-function createNewsAgent(): Agent {
+function createNewsAgent(model?: string): Agent {
   return new Agent({
-    model: 'gpt-5.2',
+    model: model || 'gpt-5.2',
     name: 'Okta News & Funding Agent',
     instructions: `${OKTA_BASE_INSTRUCTIONS}
 
@@ -185,9 +185,9 @@ function createNewsAgent(): Agent {
   });
 }
 
-function createTechTransformAgent(): Agent {
+function createTechTransformAgent(model?: string): Agent {
   return new Agent({
-    model: 'gpt-5.2',
+    model: model || 'gpt-5.2',
     name: 'Okta Tech Transformation Agent',
     instructions: `${OKTA_BASE_INSTRUCTIONS}
 
@@ -196,9 +196,9 @@ function createTechTransformAgent(): Agent {
   });
 }
 
-function createEcosystemCheckAgent(): Agent {
+function createEcosystemCheckAgent(model?: string): Agent {
   return new Agent({
-    model: 'gpt-5.2',
+    model: model || 'gpt-5.2',
     name: 'Okta Ecosystem Check Agent',
     instructions: `${OKTA_BASE_INSTRUCTIONS}
 
@@ -207,9 +207,9 @@ function createEcosystemCheckAgent(): Agent {
   });
 }
 
-function createProspectsAgent(): Agent {
+function createProspectsAgent(model?: string): Agent {
   return new Agent({
-    model: 'gpt-5.2',
+    model: model || 'gpt-5.2',
     name: 'Okta Prospects Discovery Agent',
     instructions: `${OKTA_BASE_INSTRUCTIONS}
 
@@ -218,9 +218,9 @@ function createProspectsAgent(): Agent {
   });
 }
 
-function createSummaryAgent(): Agent {
+function createSummaryAgent(model?: string): Agent {
   return new Agent({
-    model: 'gpt-5.2',
+    model: model || 'gpt-5.2',
     name: 'Okta SDR Summary Agent',
     instructions: `${OKTA_BASE_INSTRUCTIONS}
 
@@ -273,7 +273,7 @@ function getDefaultPersonas(industry: string) {
 
 // ─── Main Research Function ────────────────────────────────────────────────────
 
-export async function researchCompany(company: CompanyInfo): Promise<ResearchResult> {
+export async function researchCompany(company: CompanyInfo, model?: string): Promise<ResearchResult> {
   // Validate input
   validateCompanyInput(company);
 
@@ -282,14 +282,14 @@ export async function researchCompany(company: CompanyInfo): Promise<ResearchRes
     : company.company_name;
 
   // Create specialist agents
-  const iamAgent = createIAMDiscoveryAgent();
-  const workforceAgent = createWorkforceIntelAgent();
-  const securityAgent = createSecurityComplianceAgent();
-  const newsAgent = createNewsAgent();
-  const techAgent = createTechTransformAgent();
-  const ecosystemAgent = createEcosystemCheckAgent();
-  const prospectsAgent = createProspectsAgent();
-  const summaryAgent = createSummaryAgent();
+  const iamAgent = createIAMDiscoveryAgent(model);
+  const workforceAgent = createWorkforceIntelAgent(model);
+  const securityAgent = createSecurityComplianceAgent(model);
+  const newsAgent = createNewsAgent(model);
+  const techAgent = createTechTransformAgent(model);
+  const ecosystemAgent = createEcosystemCheckAgent(model);
+  const prospectsAgent = createProspectsAgent(model);
+  const summaryAgent = createSummaryAgent(model);
 
   // ─── Research Prompts ──────────────────────────────────────────────────────
 

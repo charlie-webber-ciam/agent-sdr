@@ -30,9 +30,10 @@ export interface CompanyInfo {
   industry: string;
 }
 
-export async function researchCompany(company: CompanyInfo): Promise<ResearchResult> {
+export async function researchCompany(company: CompanyInfo, model?: string): Promise<ResearchResult> {
+  const agentModel = model || 'gpt-5.2';
   const agent = new Agent({
-    model: 'gpt-5.2',
+    model: agentModel,
     name: 'Auth0 SDR Researcher - ANZ',
 
     instructions: `You are an expert SDR (Sales Development Representative) researcher working for Auth0 in the Australia/New Zealand region. Your role is to build comprehensive account profiles for CIAM (Customer Identity and Access Management) opportunities.

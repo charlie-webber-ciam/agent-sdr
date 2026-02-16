@@ -220,15 +220,22 @@ export default function SequenceWriter({ accountId, account }: SequenceWriterPro
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Recipient Persona *</label>
-            <select
+            <input
+              type="text"
+              list="sequence-persona-options"
               value={recipientPersona}
               onChange={(e) => setRecipientPersona(e.target.value)}
+              placeholder="e.g., CTO, VP Engineering, or type custom..."
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
+            />
+            <datalist id="sequence-persona-options">
               {PERSONA_OPTIONS.map((p) => (
-                <option key={p} value={p}>{p}</option>
+                <option key={p} value={p} />
               ))}
-            </select>
+            </datalist>
+            <p className="mt-1 text-xs text-gray-500">
+              Select from suggestions or type a custom title
+            </p>
           </div>
 
           {/* Research Context */}

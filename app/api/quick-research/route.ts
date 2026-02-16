@@ -8,6 +8,7 @@ import {
   getAccount,
   updateAccountMetadata,
   updateOktaAccountMetadata,
+  updateAccountResearchModel,
 } from '@/lib/db';
 import { researchCompanyDual } from '@/lib/dual-researcher';
 import { analyzeAccountData } from '@/lib/categorizer';
@@ -16,7 +17,7 @@ import { analyzeOktaAccountData } from '@/lib/okta-categorizer';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { companyName, domain, industry } = body;
+    const { companyName, domain, industry, model } = body;
 
     // Validate input
     if (!companyName || !industry) {
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Start research in the background (don't await - return immediately)
-    performResearch(accountId, companyName, domain, industry).catch(error => {
+    performResearch(accountId, companyName, domain, industry, model).catch(error => {
       console.error('Research error for account', accountId, ':', error);
       updateAccountStatus(accountId, 'failed', error instanceof Error ? error.message : 'Research failed');
     });
@@ -61,21 +62,23 @@ async function performResearch(
   accountId: number,
   companyName: string,
   domain: string | null,
-  industry: string
+  industry: string,
+  model?: string
 ) {
   try {
     // Update status to processing
     updateAccountStatus(accountId, 'processing');
 
     // Run dual research (Auth0 + Okta)
-    console.log(`Starting dual research for: ${companyName}`);
+    console.log(`Starting dual research for: ${companyName}${model ? ` (model: ${model})` : ''}`);
     const dualResearch = await researchCompanyDual(
       {
         company_name: companyName,
         domain,
         industry,
       },
-      'both'
+      'both',
+      model
     );
 
     // Update Auth0 research if available
@@ -92,6 +95,9 @@ async function performResearch(
 
     // Mark as completed
     updateAccountStatus(accountId, 'completed');
+
+    // Record which model was used for research
+    updateAccountResearchModel(accountId, model || 'gpt-5.2');
 
     console.log(`Research completed for: ${companyName}, starting categorization...`);
 

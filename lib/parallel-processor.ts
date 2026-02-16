@@ -23,7 +23,8 @@ import { PROCESSING_CONFIG } from './config';
 export async function processJobParallel(
   jobId: number,
   concurrency: number = PROCESSING_CONFIG.concurrency,
-  researchType: ResearchMode = 'both'
+  researchType: ResearchMode = 'both',
+  model?: string
 ): Promise<void> {
   console.log(`\n${'='.repeat(60)}`);
   console.log(`🚀 Starting PARALLEL processing for job ${jobId}`);
@@ -79,7 +80,7 @@ export async function processJobParallel(
 
       // Create array of promises with concurrency limit
       const promises = accounts.map(account =>
-        limit(() => processAccountWithRetry(account, jobId, researchType))
+        limit(() => processAccountWithRetry(account, jobId, researchType, model))
       );
 
       // Wait for all accounts in batch to complete

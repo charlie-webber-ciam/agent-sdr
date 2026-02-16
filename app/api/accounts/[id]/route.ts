@@ -143,6 +143,7 @@ export async function GET(
       aiSuggestions,
       auth0AccountOwner: account.auth0_account_owner,
       oktaAccountOwner: account.okta_account_owner,
+      researchModel: account.research_model,
       // Okta SDR fields (Workforce Identity categorization)
       oktaTier: account.okta_tier,
       oktaEstimatedAnnualRevenue: account.okta_estimated_annual_revenue,

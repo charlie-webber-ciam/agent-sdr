@@ -109,6 +109,8 @@ export interface Account {
   okta_last_edited_at: string | null;
   okta_ai_suggestions: string | null; // JSON
   okta_account_owner: string | null;
+  // Research model tracking
+  research_model: string | null;
 }
 
 export interface ProcessingJob {
@@ -238,6 +240,11 @@ export function updateAccountStatus(
     WHERE id = ?
   `);
   stmt.run(status, errorMessage || null, status, id);
+}
+
+export function updateAccountResearchModel(id: number, model: string): void {
+  const db = getDb();
+  db.prepare("UPDATE accounts SET research_model = ?, updated_at = datetime('now') WHERE id = ?").run(model, id);
 }
 
 export function updateAccountResearch(

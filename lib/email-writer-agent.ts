@@ -143,7 +143,7 @@ export async function generateEmail(request: EmailRequest): Promise<EmailResult>
 
     const agent = new Agent({
       name: `${contextLabel} Cold Email Writer - Charlie Style`,
-      model: 'gpt-5.2', // Updated to a standard model ID, ensure this matches your available models
+      model: 'claude-4-6-opus',
       instructions: SYSTEM_INSTRUCTIONS,
       tools: [], // No tools needed - using provided context only
     });

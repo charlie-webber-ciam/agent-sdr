@@ -39,6 +39,8 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'okta_last_edited_at', type: 'TEXT' },
     { name: 'okta_ai_suggestions', type: 'TEXT' }, // JSON: stores AI-generated suggestions for Okta
     { name: 'okta_account_owner', type: 'TEXT' },
+    // Research model tracking
+    { name: 'research_model', type: 'TEXT' },
   ];
 
   // Get existing columns

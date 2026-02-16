@@ -22,9 +22,10 @@ export type ResearchMode = 'both' | 'auth0' | 'okta';
  */
 export async function researchCompanyDual(
   company: CompanyInfo,
-  mode: ResearchMode = 'both'
+  mode: ResearchMode = 'both',
+  model?: string
 ): Promise<DualResearchResult> {
-  console.log(`[Dual Researcher] Starting ${mode} research for ${company.company_name}`);
+  console.log(`[Dual Researcher] Starting ${mode} research for ${company.company_name}${model ? ` (model: ${model})` : ''}`);
 
   const result: DualResearchResult = {};
 
@@ -32,8 +33,8 @@ export async function researchCompanyDual(
     if (mode === 'both') {
       // Run both agents in parallel
       const [auth0Result, oktaResult] = await Promise.allSettled([
-        researchAuth0(company),
-        researchOkta(company),
+        researchAuth0(company, model),
+        researchOkta(company, model),
       ]);
 
       // Handle Auth0 result
@@ -58,11 +59,11 @@ export async function researchCompanyDual(
       }
     } else if (mode === 'auth0') {
       // Run Auth0 agent only
-      result.auth0 = await researchAuth0(company);
+      result.auth0 = await researchAuth0(company, model);
       console.log(`[Dual Researcher] ✓ Auth0 research completed for ${company.company_name}`);
     } else if (mode === 'okta') {
       // Run Okta agent only
-      result.okta = await researchOkta(company);
+      result.okta = await researchOkta(company, model);
       console.log(`[Dual Researcher] ✓ Okta research completed for ${company.company_name}`);
     }
 

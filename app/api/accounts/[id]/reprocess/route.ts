@@ -22,7 +22,7 @@ export async function POST(
 
     // Parse request body
     const body = await request.json();
-    const { researchType = 'both' } = body;
+    const { researchType = 'both', model } = body;
 
     // Validate researchType
     const validResearchTypes: ResearchMode[] = ['both', 'auth0', 'okta'];
@@ -51,8 +51,8 @@ export async function POST(
     // Update account's job_id
     updateAccountJobId(accountId, newJobId);
 
-    // Start processing in the background with specified research type
-    processJob(newJobId, { researchType }).catch((error) => {
+    // Start processing in the background with specified research type and model
+    processJob(newJobId, { researchType, model }).catch((error) => {
       console.error(`Background processing failed for job ${newJobId}:`, error);
     });
 

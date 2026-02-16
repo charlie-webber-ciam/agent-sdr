@@ -1,6 +1,15 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
+
+const AVAILABLE_MODELS = [
+  'gpt-5.2',
+  'claude-4-6-opus',
+  'claude-4-5-sonnet',
+  'gpt-5-nano',
+  'gemini-3-flash-preview',
+  'llama-4-maverick-17b',
+];
 
 export interface SidebarSection {
   id: string;
@@ -17,7 +26,7 @@ interface ReportSidebarProps {
   hasOktaResearch: boolean;
   onPrint: () => void;
   onDelete: () => void;
-  onReprocess: (type: 'auth0' | 'okta' | 'both') => void;
+  onReprocess: (type: 'auth0' | 'okta' | 'both', model?: string) => void;
   isReprocessing?: boolean;
   showCategorization?: boolean;
   onToggleCategorization?: () => void;
@@ -37,6 +46,9 @@ export default function ReportSidebar({
   showCategorization = false,
   onToggleCategorization,
 }: ReportSidebarProps) {
+  const [reprocessModel, setReprocessModel] = useState('gpt-5.2');
+  const [showReprocessPanel, setShowReprocessPanel] = useState(false);
+
   const scrollToSection = (sectionId: string) => {
     const el = document.getElementById(sectionId);
     if (el) {
@@ -157,40 +169,59 @@ export default function ReportSidebar({
                 Categorization
               </button>
             )}
-            {/* Reprocess dropdown */}
-            <div className="relative group">
+            {/* Reprocess */}
+            <div>
               <button
+                onClick={() => !isReprocessing && setShowReprocessPanel(!showReprocessPanel)}
                 disabled={isReprocessing}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors text-left w-full disabled:opacity-50"
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors text-left w-full disabled:opacity-50 ${
+                  showReprocessPanel
+                    ? 'bg-gray-100 text-gray-900 font-medium'
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
               >
                 <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
                 {isReprocessing ? 'Reprocessing...' : 'Reprocess'}
-                <svg className="w-3 h-3 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className={`w-3 h-3 ml-auto transition-transform ${showReprocessPanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
-              {!isReprocessing && (
-                <div className="hidden group-hover:block absolute left-0 top-full w-full bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
-                  <button
-                    onClick={() => onReprocess('auth0')}
-                    className="block w-full text-left px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-50"
-                  >
-                    Auth0 Only
-                  </button>
-                  <button
-                    onClick={() => onReprocess('okta')}
-                    className="block w-full text-left px-3 py-1.5 text-sm text-purple-700 hover:bg-purple-50"
-                  >
-                    Okta Only
-                  </button>
-                  <button
-                    onClick={() => onReprocess('both')}
-                    className="block w-full text-left px-3 py-1.5 text-sm text-green-700 hover:bg-green-50"
-                  >
-                    Both
-                  </button>
+              {showReprocessPanel && !isReprocessing && (
+                <div className="mt-1 ml-2 pl-4 border-l-2 border-gray-200 space-y-2 py-2">
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Model</label>
+                    <select
+                      value={reprocessModel}
+                      onChange={(e) => setReprocessModel(e.target.value)}
+                      className="w-full mt-1 text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      {AVAILABLE_MODELS.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <button
+                      onClick={() => { onReprocess('auth0', reprocessModel); setShowReprocessPanel(false); }}
+                      className="text-left px-2 py-1 text-xs rounded text-blue-700 hover:bg-blue-50 transition-colors"
+                    >
+                      Auth0 Only
+                    </button>
+                    <button
+                      onClick={() => { onReprocess('okta', reprocessModel); setShowReprocessPanel(false); }}
+                      className="text-left px-2 py-1 text-xs rounded text-purple-700 hover:bg-purple-50 transition-colors"
+                    >
+                      Okta Only
+                    </button>
+                    <button
+                      onClick={() => { onReprocess('both', reprocessModel); setShowReprocessPanel(false); }}
+                      className="text-left px-2 py-1 text-xs rounded text-green-700 hover:bg-green-50 transition-colors"
+                    >
+                      Both
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
