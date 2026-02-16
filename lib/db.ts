@@ -1986,6 +1986,87 @@ export function getEmployeeCountResults(jobId: number): EmployeeCountResult[] {
   return stmt.all(jobId) as EmployeeCountResult[];
 }
 
+// Reprocessing query functions
+
+export interface ReprocessingStats {
+  completedTotal: number;
+  missingOkta: number;
+  missingAuth0: number;
+  hasBoth: number;
+}
+
+export function getReprocessingStats(): ReprocessingStats {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT
+      COUNT(*) as completedTotal,
+      SUM(CASE
+        WHEN processed_at IS NOT NULL AND current_auth_solution IS NOT NULL
+             AND okta_processed_at IS NULL
+        THEN 1 ELSE 0
+      END) as missingOkta,
+      SUM(CASE
+        WHEN okta_processed_at IS NOT NULL
+             AND (current_auth_solution IS NULL OR processed_at IS NULL)
+        THEN 1 ELSE 0
+      END) as missingAuth0,
+      SUM(CASE
+        WHEN processed_at IS NOT NULL AND current_auth_solution IS NOT NULL
+             AND okta_processed_at IS NOT NULL
+        THEN 1 ELSE 0
+      END) as hasBoth
+    FROM accounts
+    WHERE research_status = 'completed'
+  `);
+  const result = stmt.get() as any;
+  return {
+    completedTotal: result.completedTotal || 0,
+    missingOkta: result.missingOkta || 0,
+    missingAuth0: result.missingAuth0 || 0,
+    hasBoth: result.hasBoth || 0,
+  };
+}
+
+export function getAccountsForReprocessing(filters: {
+  scope: 'missing_okta' | 'missing_auth0' | 'all_completed';
+  industry?: string;
+  limit?: number;
+}): { accounts: Account[]; total: number } {
+  const db = getDb();
+  let query = "SELECT * FROM accounts WHERE research_status = 'completed'";
+  const params: any[] = [];
+
+  if (filters.scope === 'missing_okta') {
+    query += ' AND processed_at IS NOT NULL AND current_auth_solution IS NOT NULL AND okta_processed_at IS NULL';
+  } else if (filters.scope === 'missing_auth0') {
+    query += ' AND okta_processed_at IS NOT NULL AND (current_auth_solution IS NULL OR processed_at IS NULL)';
+  }
+  // 'all_completed' uses the base WHERE clause
+
+  if (filters.industry) {
+    query += ' AND industry = ?';
+    params.push(filters.industry);
+  }
+
+  // Get total count before applying limit
+  const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
+  const countStmt = db.prepare(countQuery);
+  const countResult = countStmt.get(...params) as { total: number };
+  const total = countResult.total;
+
+  query += ' ORDER BY processed_at DESC, id';
+
+  if (filters.limit) {
+    query += ' LIMIT ?';
+    params.push(filters.limit);
+  }
+
+  const stmt = db.prepare(query);
+  const accounts = stmt.all(...params) as Account[];
+
+  return { accounts, total };
+}
+
 export function deleteEmployeeCountJob(jobId: number): boolean {
   const db = getDb();
 

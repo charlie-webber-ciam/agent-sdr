@@ -214,6 +214,7 @@ export default function DashboardPage() {
   const secondaryActions = [
     { label: 'Preprocess', href: '/preprocess', icon: '🔍' },
     { label: 'Bulk Categorize', href: '/categorize', icon: '📋' },
+    { label: 'Bulk Reprocess', href: '/reprocess', icon: '🔄' },
     { label: 'Employee Counts', href: '/employee-counts/jobs', icon: '👥' },
   ];
 
