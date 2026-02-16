@@ -41,6 +41,12 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'okta_account_owner', type: 'TEXT' },
     // Research model tracking
     { name: 'research_model', type: 'TEXT' },
+    // Triage fields
+    { name: 'triage_auth0_tier', type: 'TEXT', constraint: "CHECK(triage_auth0_tier IN ('A', 'B', 'C', NULL))" },
+    { name: 'triage_okta_tier', type: 'TEXT', constraint: "CHECK(triage_okta_tier IN ('A', 'B', 'C', NULL))" },
+    { name: 'triage_summary', type: 'TEXT' },
+    { name: 'triage_data', type: 'TEXT' },
+    { name: 'triaged_at', type: 'TEXT' },
   ];
 
   // Get existing columns
@@ -73,7 +79,9 @@ export function migrateDatabase(db: Database.Database) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_priority ON accounts(priority_score)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_processed ON accounts(okta_processed_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_tier ON accounts(okta_tier)');
-    console.log('✓ Added indexes for tier, priority_score, okta_processed_at, and okta_tier');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_triage_auth0_tier ON accounts(triage_auth0_tier)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_triage_okta_tier ON accounts(triage_okta_tier)');
+    console.log('✓ Added indexes for tier, priority_score, okta_processed_at, okta_tier, and triage tiers');
   } catch (error) {
     console.error('Failed to add indexes:', error);
   }
@@ -119,6 +127,29 @@ export function migrateDatabase(db: Database.Database) {
     console.log('✓ Ensured categorization_jobs table exists');
   } catch (error) {
     console.error('Failed to create categorization_jobs table:', error);
+  }
+
+  // Add triage_jobs table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS triage_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL,
+        total_accounts INTEGER NOT NULL,
+        processed_count INTEGER NOT NULL DEFAULT 0,
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        current_account TEXT,
+        paused INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_triage_jobs_status ON triage_jobs(status)');
+    console.log('✓ Ensured triage_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create triage_jobs table:', error);
   }
 
   // Add paused column to processing_jobs

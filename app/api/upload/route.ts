@@ -6,6 +6,7 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
+    const mode = (formData.get('mode') as string) || 'research';
 
     if (!file) {
       return NextResponse.json(
@@ -180,15 +181,16 @@ export async function POST(request: Request) {
       );
     }
 
-    // Trigger background processing
-    // We'll make a non-blocking call to start the processing
-    fetch(`${request.headers.get('origin')}/api/process/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId }),
-    }).catch(err => {
-      console.error('Failed to trigger processing:', err);
-    });
+    // Only auto-trigger processing in research mode
+    if (mode === 'research') {
+      fetch(`${request.headers.get('origin')}/api/process/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      }).catch(err => {
+        console.error('Failed to trigger processing:', err);
+      });
+    }
 
     // Build detailed message
     const totalDbDuplicates = dbDuplicateRecords.length + lateSkipped;
@@ -215,6 +217,7 @@ export async function POST(request: Request) {
       dbDuplicates: totalDbDuplicates,
       totalSkipped: totalSkipped + lateSkipped,
       message: message,
+      mode,
     });
 
   } catch (error) {

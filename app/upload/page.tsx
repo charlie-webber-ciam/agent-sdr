@@ -3,6 +3,15 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+const MODELS = [
+  { value: 'gpt-5.2', label: 'GPT-5.2' },
+  { value: 'gpt-4.1', label: 'GPT-4.1' },
+  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+  { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano' },
+  { value: 'o4-mini', label: 'o4-mini' },
+  { value: 'o3', label: 'o3' },
+];
+
 interface UploadResult {
   jobId: number;
   totalRecords: number;
@@ -11,6 +20,7 @@ interface UploadResult {
   dbDuplicates: number;
   totalSkipped: number;
   message: string;
+  mode: string;
 }
 
 export default function UploadPage() {
@@ -20,6 +30,9 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+  const [mode, setMode] = useState<'triage' | 'research'>('triage');
+  const [triageModel, setTriageModel] = useState('gpt-5.2');
+  const [startingTriage, setStartingTriage] = useState(false);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -70,6 +83,7 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('mode', mode);
 
       const res = await fetch('/api/upload', {
         method: 'POST',
@@ -80,6 +94,33 @@ export default function UploadPage() {
 
       if (!res.ok) {
         throw new Error(data.message || data.error || 'Failed to upload file');
+      }
+
+      // If triage mode, start the triage job automatically
+      if (mode === 'triage') {
+        setStartingTriage(true);
+        try {
+          const triageRes = await fetch('/api/triage/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jobId: data.jobId,
+              model: triageModel,
+            }),
+          });
+          const triageData = await triageRes.json();
+          if (!triageRes.ok) {
+            throw new Error(triageData.error || 'Failed to start triage');
+          }
+          // Redirect to triage progress
+          router.push(`/triage/progress/${triageData.triageJobId}?processingJobId=${data.jobId}`);
+          return;
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to start triage');
+          setStartingTriage(false);
+          setUploading(false);
+          return;
+        }
       }
 
       setUploadResult(data);
@@ -96,7 +137,7 @@ export default function UploadPage() {
     setError(null);
   };
 
-  // Upload complete view
+  // Upload complete view (research mode only — triage mode redirects)
   if (uploadResult) {
     return (
       <main className="min-h-screen p-8 max-w-4xl mx-auto">
@@ -219,8 +260,8 @@ export default function UploadPage() {
             company_name,domain,industry,auth0_account_owner,okta_account_owner
           </div>
           <p className="text-sm text-gray-500 mt-2">
-            Example: "Acme Corp,acme.com,Technology,John Smith,Jane Doe"<br/>
-            Leave domain blank if not available: "Private Co,,Finance,John Smith,"
+            Example: &quot;Acme Corp,acme.com,Technology,John Smith,Jane Doe&quot;<br/>
+            Leave domain blank if not available: &quot;Private Co,,Finance,John Smith,&quot;
           </p>
         </div>
 
@@ -304,6 +345,64 @@ export default function UploadPage() {
             )}
           </div>
 
+          {/* Processing Mode Toggle */}
+          <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+            <label className="text-sm font-medium text-gray-700 mb-3 block">Processing Mode</label>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setMode('triage')}
+                className={`flex-1 px-4 py-3 rounded-lg border-2 transition-colors text-left ${
+                  mode === 'triage'
+                    ? 'border-purple-500 bg-purple-50'
+                    : 'border-gray-200 bg-white hover:border-gray-300'
+                }`}
+              >
+                <div className="font-medium text-sm">
+                  {mode === 'triage' && <span className="text-purple-600 mr-1">&#10003;</span>}
+                  Triage First
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Quick triage (~15-20s/account) to categorize into tiers, then selectively run full research.
+                  Best for large lists.
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('research')}
+                className={`flex-1 px-4 py-3 rounded-lg border-2 transition-colors text-left ${
+                  mode === 'research'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 bg-white hover:border-gray-300'
+                }`}
+              >
+                <div className="font-medium text-sm">
+                  {mode === 'research' && <span className="text-blue-600 mr-1">&#10003;</span>}
+                  Research All
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Full research (~45-75s/account) on every account immediately. Best for small lists.
+                </p>
+              </button>
+            </div>
+
+            {/* Model selector for triage mode */}
+            {mode === 'triage' && (
+              <div className="mt-3 flex items-center gap-2">
+                <label className="text-sm text-gray-600">Triage model:</label>
+                <select
+                  value={triageModel}
+                  onChange={(e) => setTriageModel(e.target.value)}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                >
+                  {MODELS.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
           {error && (
             <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
               <p className="text-red-700 text-sm">{error}</p>
@@ -313,17 +412,23 @@ export default function UploadPage() {
           <div className="mt-6 flex gap-4">
             <button
               type="submit"
-              disabled={!file || uploading}
-              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              disabled={!file || uploading || startingTriage}
+              className={`flex-1 px-6 py-3 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
+                mode === 'triage'
+                  ? 'bg-purple-600 hover:bg-purple-700'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
-              {uploading ? (
+              {uploading || startingTriage ? (
                 <>
                   <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  Uploading...
+                  {startingTriage ? 'Starting Triage...' : 'Uploading...'}
                 </>
+              ) : mode === 'triage' ? (
+                'Upload & Triage First'
               ) : (
                 'Upload & Start Research'
               )}
@@ -331,7 +436,7 @@ export default function UploadPage() {
             <button
               type="button"
               onClick={() => router.push('/')}
-              disabled={uploading}
+              disabled={uploading || startingTriage}
               className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 disabled:opacity-50"
             >
               Cancel
@@ -341,8 +446,17 @@ export default function UploadPage() {
 
         <div className="mt-8 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
           <p className="text-sm text-yellow-800">
-            <strong>Note:</strong> Processing takes approximately 30-60 seconds per account.
-            You'll be able to monitor progress in real-time after uploading.
+            {mode === 'triage' ? (
+              <>
+                <strong>Triage mode:</strong> Each account gets 2-3 quick web searches (~15-20s) to determine tier priority.
+                After triage, you can selectively run full research on specific tiers.
+              </>
+            ) : (
+              <>
+                <strong>Note:</strong> Processing takes approximately 30-60 seconds per account.
+                You&apos;ll be able to monitor progress in real-time after uploading.
+              </>
+            )}
           </p>
         </div>
       </div>

@@ -111,6 +111,12 @@ export interface Account {
   okta_account_owner: string | null;
   // Research model tracking
   research_model: string | null;
+  // Triage fields
+  triage_auth0_tier: 'A' | 'B' | 'C' | null;
+  triage_okta_tier: 'A' | 'B' | 'C' | null;
+  triage_summary: string | null;
+  triage_data: string | null; // JSON string of TriageResult
+  triaged_at: string | null;
 }
 
 export interface ProcessingJob {
@@ -136,6 +142,20 @@ export interface CategorizationJob {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   current_account_id: number | null;
   filters: string | null; // JSON string
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface TriageJob {
+  id: number;
+  filename: string;
+  total_accounts: number;
+  processed_count: number;
+  failed_count: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  current_account: string | null;
+  paused: number; // SQLite boolean (0/1)
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -659,6 +679,9 @@ export function getAccountsWithFilters(filters: {
   oktaUseCase?: string;
   oktaMinPriority?: number;
   oktaAccountOwner?: string;
+  // Triage filters
+  triageAuth0Tier?: string;
+  triageOktaTier?: string;
   freshness?: string;
   sortBy?: string;
   limit?: number;
@@ -754,6 +777,25 @@ export function getAccountsWithFilters(filters: {
     } else {
       query += ' AND okta_account_owner LIKE ?';
       params.push(`%${filters.oktaAccountOwner}%`);
+    }
+  }
+
+  // Triage tier filters
+  if (filters.triageAuth0Tier) {
+    if (filters.triageAuth0Tier === 'unassigned') {
+      query += ' AND triage_auth0_tier IS NULL';
+    } else {
+      query += ' AND triage_auth0_tier = ?';
+      params.push(filters.triageAuth0Tier);
+    }
+  }
+
+  if (filters.triageOktaTier) {
+    if (filters.triageOktaTier === 'unassigned') {
+      query += ' AND triage_okta_tier IS NULL';
+    } else {
+      query += ' AND triage_okta_tier = ?';
+      params.push(filters.triageOktaTier);
     }
   }
 
@@ -2072,6 +2114,145 @@ export function getAccountsForReprocessing(filters: {
   const accounts = stmt.all(...params) as Account[];
 
   return { accounts, total };
+}
+
+// Triage job operations
+
+export function createTriageJob(filename: string, totalAccounts: number): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO triage_jobs (filename, total_accounts)
+    VALUES (?, ?)
+  `);
+  const result = stmt.run(filename, totalAccounts);
+  return result.lastInsertRowid as number;
+}
+
+export function getTriageJob(id: number): TriageJob | undefined {
+  const db = getDb();
+  const stmt = db.prepare('SELECT * FROM triage_jobs WHERE id = ?');
+  return stmt.get(id) as TriageJob | undefined;
+}
+
+export function getAllTriageJobs(limit: number = 10): TriageJob[] {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT * FROM triage_jobs
+    ORDER BY created_at DESC
+    LIMIT ?
+  `);
+  return stmt.all(limit) as TriageJob[];
+}
+
+export function updateTriageJobStatus(
+  id: number,
+  status: 'pending' | 'processing' | 'completed' | 'failed',
+  currentAccount?: string | null
+) {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE triage_jobs
+    SET status = ?,
+        current_account = ?,
+        updated_at = datetime('now'),
+        completed_at = CASE WHEN ? IN ('completed', 'failed') THEN datetime('now') ELSE completed_at END
+    WHERE id = ?
+  `);
+  stmt.run(status, currentAccount || null, status, id);
+}
+
+export function updateTriageJobProgress(
+  id: number,
+  processedCount: number,
+  failedCount: number
+) {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE triage_jobs
+    SET processed_count = ?,
+        failed_count = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `);
+  stmt.run(processedCount, failedCount, id);
+}
+
+export function updateAccountTriage(
+  id: number,
+  triage: {
+    triage_auth0_tier: 'A' | 'B' | 'C';
+    triage_okta_tier: 'A' | 'B' | 'C';
+    triage_summary: string;
+    triage_data: string; // JSON string
+  }
+) {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE accounts
+    SET triage_auth0_tier = ?,
+        triage_okta_tier = ?,
+        triage_summary = ?,
+        triage_data = ?,
+        triaged_at = datetime('now'),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `);
+  stmt.run(
+    triage.triage_auth0_tier,
+    triage.triage_okta_tier,
+    triage.triage_summary,
+    triage.triage_data,
+    id
+  );
+}
+
+export function getTriageJobStats(jobId: number): {
+  auth0: { tierA: number; tierB: number; tierC: number };
+  okta: { tierA: number; tierB: number; tierC: number };
+  total: number;
+} {
+  const db = getDb();
+  const stmt = db.prepare(`
+    SELECT
+      SUM(CASE WHEN triage_auth0_tier = 'A' THEN 1 ELSE 0 END) as auth0TierA,
+      SUM(CASE WHEN triage_auth0_tier = 'B' THEN 1 ELSE 0 END) as auth0TierB,
+      SUM(CASE WHEN triage_auth0_tier = 'C' THEN 1 ELSE 0 END) as auth0TierC,
+      SUM(CASE WHEN triage_okta_tier = 'A' THEN 1 ELSE 0 END) as oktaTierA,
+      SUM(CASE WHEN triage_okta_tier = 'B' THEN 1 ELSE 0 END) as oktaTierB,
+      SUM(CASE WHEN triage_okta_tier = 'C' THEN 1 ELSE 0 END) as oktaTierC,
+      COUNT(*) as total
+    FROM accounts
+    WHERE job_id = ? AND triaged_at IS NOT NULL
+  `);
+  const result = stmt.get(jobId) as any;
+  return {
+    auth0: {
+      tierA: result.auth0TierA || 0,
+      tierB: result.auth0TierB || 0,
+      tierC: result.auth0TierC || 0,
+    },
+    okta: {
+      tierA: result.oktaTierA || 0,
+      tierB: result.oktaTierB || 0,
+      tierC: result.oktaTierC || 0,
+    },
+    total: result.total || 0,
+  };
+}
+
+export function getAccountsByJobAndTriageTier(
+  jobId: number,
+  tierType: 'auth0' | 'okta',
+  tier: 'A' | 'B' | 'C'
+): Account[] {
+  const db = getDb();
+  const column = tierType === 'auth0' ? 'triage_auth0_tier' : 'triage_okta_tier';
+  const stmt = db.prepare(`
+    SELECT * FROM accounts
+    WHERE job_id = ? AND ${column} = ?
+    ORDER BY id
+  `);
+  return stmt.all(jobId, tier) as Account[];
 }
 
 export function deleteEmployeeCountJob(jobId: number): boolean {

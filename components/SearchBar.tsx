@@ -68,6 +68,9 @@ export interface FilterState {
   oktaUseCase?: string;
   oktaMinPriority?: number | null;
   oktaAccountOwner?: string;
+  // Triage tier filters
+  triageAuth0Tier?: string;
+  triageOktaTier?: string;
 }
 
 interface SearchBarProps {
@@ -154,6 +157,8 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
     minPriorityValue !== null && (minPriorityValue as number) > 1,
     filters.revenue,
     ownerValue,
+    filters.triageAuth0Tier,
+    filters.triageOktaTier,
     filters.freshness,
     filters.sortBy && filters.sortBy !== defaultSort,
   ].filter(Boolean).length;
@@ -355,6 +360,42 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
                     placeholder="e.g., $10M-$50M"
                     className={inputClass}
                   />
+                </div>
+
+                <div>
+                  <label htmlFor="triageAuth0Tier" className="block text-sm font-medium text-gray-600 mb-2">
+                    Triage Auth0 Tier
+                  </label>
+                  <select
+                    id="triageAuth0Tier"
+                    value={filters.triageAuth0Tier || ''}
+                    onChange={(e) => handleFilterChange('triageAuth0Tier', e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">All</option>
+                    <option value="A">Tier A</option>
+                    <option value="B">Tier B</option>
+                    <option value="C">Tier C</option>
+                    <option value="unassigned">Not Triaged</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="triageOktaTier" className="block text-sm font-medium text-gray-600 mb-2">
+                    Triage Okta Tier
+                  </label>
+                  <select
+                    id="triageOktaTier"
+                    value={filters.triageOktaTier || ''}
+                    onChange={(e) => handleFilterChange('triageOktaTier', e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">All</option>
+                    <option value="A">Tier A</option>
+                    <option value="B">Tier B</option>
+                    <option value="C">Tier C</option>
+                    <option value="unassigned">Not Triaged</option>
+                  </select>
                 </div>
 
                 <div>

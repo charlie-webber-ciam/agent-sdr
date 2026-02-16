@@ -83,6 +83,18 @@ interface AccountDetail {
   oktaSdrNotes: string | null;
   oktaLastEditedAt: string | null;
   oktaAiSuggestions: any | null;
+  // Triage fields
+  triageAuth0Tier: 'A' | 'B' | 'C' | null;
+  triageOktaTier: 'A' | 'B' | 'C' | null;
+  triageSummary: string | null;
+  triageData: {
+    auth0_tier_reasoning: string;
+    okta_tier_reasoning: string;
+    estimated_arr: string;
+    estimated_employees: string;
+    key_signals: string[];
+  } | null;
+  triagedAt: string | null;
 }
 
 // Icon components
@@ -1253,6 +1265,83 @@ export default function AccountDetailPage({
                 </div>
               )}
             </div>
+
+            {/* Triage Summary (if triaged) */}
+            {account.triagedAt && (
+              <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl p-6 mb-8 shadow-sm">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="p-2 bg-purple-600 rounded-lg text-white">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-bold text-purple-900">Triage Assessment</h3>
+                  <div className="flex gap-2 ml-auto">
+                    {account.triageAuth0Tier && (
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        account.triageAuth0Tier === 'A' ? 'bg-green-100 text-green-800' :
+                        account.triageAuth0Tier === 'B' ? 'bg-blue-100 text-blue-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        Auth0: Tier {account.triageAuth0Tier}
+                      </span>
+                    )}
+                    {account.triageOktaTier && (
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        account.triageOktaTier === 'A' ? 'bg-green-100 text-green-800' :
+                        account.triageOktaTier === 'B' ? 'bg-blue-100 text-blue-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        Okta: Tier {account.triageOktaTier}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {account.triageSummary && (
+                  <p className="text-gray-700 mb-3">{account.triageSummary}</p>
+                )}
+                {account.triageData && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    {account.triageData.estimated_arr && account.triageData.estimated_arr !== 'Unknown' && (
+                      <div>
+                        <span className="font-medium text-gray-600">Est. Revenue:</span>{' '}
+                        <span className="text-gray-800">{account.triageData.estimated_arr}</span>
+                      </div>
+                    )}
+                    {account.triageData.estimated_employees && account.triageData.estimated_employees !== 'Unknown' && (
+                      <div>
+                        <span className="font-medium text-gray-600">Est. Employees:</span>{' '}
+                        <span className="text-gray-800">{account.triageData.estimated_employees}</span>
+                      </div>
+                    )}
+                    {account.triageData.key_signals && account.triageData.key_signals.length > 0 && (
+                      <div className="md:col-span-2">
+                        <span className="font-medium text-gray-600">Key Signals:</span>{' '}
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {account.triageData.key_signals.map((signal: string, i: number) => (
+                            <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-yellow-50 text-yellow-800 border border-yellow-200">
+                              {signal}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {account.triageData.auth0_tier_reasoning && (
+                      <div>
+                        <span className="font-medium text-gray-600">Auth0 Reasoning:</span>{' '}
+                        <span className="text-gray-700">{account.triageData.auth0_tier_reasoning}</span>
+                      </div>
+                    )}
+                    {account.triageData.okta_tier_reasoning && (
+                      <div>
+                        <span className="font-medium text-gray-600">Okta Reasoning:</span>{' '}
+                        <span className="text-gray-700">{account.triageData.okta_tier_reasoning}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Research Sections — Auth0 Perspective */}
             {activePerspective === 'auth0' && (

@@ -153,6 +153,12 @@ export async function GET(
       oktaSdrNotes: account.okta_sdr_notes,
       oktaLastEditedAt: account.okta_last_edited_at,
       oktaAiSuggestions,
+      // Triage data
+      triageAuth0Tier: account.triage_auth0_tier,
+      triageOktaTier: account.triage_okta_tier,
+      triageSummary: account.triage_summary,
+      triageData: account.triage_data ? (() => { try { return JSON.parse(account.triage_data); } catch { return null; } })() : null,
+      triagedAt: account.triaged_at,
     });
   } catch (error) {
     console.error('Error fetching account:', error);

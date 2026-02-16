@@ -185,7 +185,7 @@ EOF
 # Step 1: Xcode Command Line Tools
 # ---------------------------------------------------------------------------
 install_xcode_tools() {
-  header "Step 1/8: Xcode Command Line Tools"
+  header "Step 1/7: Xcode Command Line Tools"
 
   if xcode-select -p > /dev/null 2>&1; then
     success "Xcode Command Line Tools already installed"
@@ -212,43 +212,10 @@ install_xcode_tools() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 2: Homebrew
-# ---------------------------------------------------------------------------
-install_homebrew() {
-  header "Step 2/8: Homebrew"
-
-  if command -v brew > /dev/null 2>&1; then
-    success "Homebrew already installed"
-    return
-  fi
-
-  info "Installing Homebrew (the macOS package manager)..."
-  echo "  You may be asked for your Mac password. This is normal."
-  echo ""
-
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-  # Add Homebrew to PATH for Apple Silicon Macs
-  if [[ -f /opt/homebrew/bin/brew ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-  elif [[ -f /usr/local/bin/brew ]]; then
-    eval "$(/usr/local/bin/brew shellenv)"
-  fi
-
-  if ! command -v brew > /dev/null 2>&1; then
-    fail "Homebrew installation failed."
-    echo "  Try installing it manually: https://brew.sh"
-    exit 1
-  fi
-
-  success "Homebrew installed"
-}
-
-# ---------------------------------------------------------------------------
-# Step 3: nvm (Node Version Manager)
+# Step 2: nvm (Node Version Manager)
 # ---------------------------------------------------------------------------
 install_nvm() {
-  header "Step 3/8: Node Version Manager (nvm)"
+  header "Step 2/7: Node Version Manager (nvm)"
 
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
@@ -282,10 +249,10 @@ install_nvm() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 4: Node.js 24
+# Step 3: Node.js 24
 # ---------------------------------------------------------------------------
 install_node() {
-  header "Step 4/8: Node.js 24"
+  header "Step 3/7: Node.js 24"
 
   # Ensure nvm is loaded
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
@@ -325,10 +292,10 @@ install_node() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 5: Clone or update the repository
+# Step 4: Clone or update the repository
 # ---------------------------------------------------------------------------
 clone_repo() {
-  header "Step 5/8: Agent SDR Repository"
+  header "Step 4/7: Agent SDR Repository"
 
   local repo_url="https://github.com/charlie-webber-ciam/agent-sdr.git"
   local install_dir="$HOME/agent-sdr"
@@ -360,10 +327,10 @@ clone_repo() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 6: Environment variables (.env.local)
+# Step 5: Environment variables (.env.local)
 # ---------------------------------------------------------------------------
 configure_env() {
-  header "Step 6/8: OpenAI Configuration"
+  header "Step 5/7: OpenAI Configuration"
 
   local env_file="$HOME/agent-sdr/.env.local"
 
@@ -409,10 +376,10 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Step 7: npm install
+# Step 6: npm install
 # ---------------------------------------------------------------------------
 run_npm_install() {
-  header "Step 7/8: Installing Dependencies"
+  header "Step 6/7: Installing Dependencies"
 
   local install_dir="$HOME/agent-sdr"
 
@@ -438,16 +405,16 @@ run_npm_install() {
     echo "  1. Make sure Xcode Command Line Tools are installed: xcode-select --install"
     echo "  2. Try deleting node_modules and running again:"
     echo "     rm -rf ~/agent-sdr/node_modules && cd ~/agent-sdr && npm install"
-    echo "  3. If you see Python errors, install Python 3: brew install python3"
+    echo "  3. If you see Python errors, make sure Python 3 is installed"
     exit 1
   fi
 }
 
 # ---------------------------------------------------------------------------
-# Step 8: Create Desktop launcher and start the app
+# Step 7: Create Desktop launcher and start the app
 # ---------------------------------------------------------------------------
 create_launcher_and_start() {
-  header "Step 8/8: Desktop Launcher & First Launch"
+  header "Step 7/7: Desktop Launcher & First Launch"
 
   local launcher="$HOME/Desktop/Agent SDR.command"
 
@@ -537,9 +504,8 @@ main() {
   echo ""
   echo "  What gets installed (only if not already present):"
   echo "    1. Xcode Command Line Tools (Apple developer tools)"
-  echo "    2. Homebrew (macOS package manager)"
-  echo "    3. nvm (Node.js version manager)"
-  echo "    4. Node.js 24 (JavaScript runtime)"
+  echo "    2. nvm (Node.js version manager)"
+  echo "    3. Node.js 24 (JavaScript runtime)"
   echo ""
   echo "  The app will be installed at: ~/agent-sdr"
   echo "  A launcher shortcut will be placed on your Desktop."
@@ -550,7 +516,6 @@ main() {
   preflight_checks
   detect_existing_install
   install_xcode_tools
-  install_homebrew
   install_nvm
   install_node
   clone_repo

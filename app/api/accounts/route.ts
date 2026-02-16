@@ -22,6 +22,9 @@ export async function GET(request: Request) {
       oktaUseCase: searchParams.get('oktaUseCase') || undefined,
       oktaMinPriority: searchParams.get('oktaMinPriority') ? parseInt(searchParams.get('oktaMinPriority')!) : undefined,
       oktaAccountOwner: searchParams.get('oktaAccountOwner') || undefined,
+      // Triage filters
+      triageAuth0Tier: searchParams.get('triageAuth0Tier') || undefined,
+      triageOktaTier: searchParams.get('triageOktaTier') || undefined,
       freshness: searchParams.get('freshness') || undefined,
       sortBy: searchParams.get('sortBy') || undefined,
       limit: parseInt(searchParams.get('limit') || '100'),
@@ -101,6 +104,11 @@ export async function GET(request: Request) {
           oktaOpportunityType: acc.okta_opportunity_type,
           oktaProcessedAt: acc.okta_processed_at,
           oktaAccountOwner: acc.okta_account_owner,
+          // Triage data
+          triageAuth0Tier: acc.triage_auth0_tier,
+          triageOktaTier: acc.triage_okta_tier,
+          triageSummary: acc.triage_summary,
+          triagedAt: acc.triaged_at,
         };
       }),
       total,
