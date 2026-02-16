@@ -29,9 +29,32 @@ export function getDb(): Database.Database {
 
     // Run migrations to add new columns
     migrateDatabase(db);
+
+    // Reset any accounts stuck in 'processing' from a previous server crash
+    const resetCount = resetStuckProcessingAccounts(db);
+    if (resetCount > 0) {
+      console.log(`✓ Reset ${resetCount} stuck 'processing' account(s) to 'pending'`);
+    }
   }
 
   return db;
+}
+
+/**
+ * Reset accounts stuck in 'processing' status back to 'pending'.
+ * This handles the case where the server was killed mid-processing.
+ */
+export function resetStuckProcessingAccounts(database?: Database.Database): number {
+  const d = database || getDb();
+  const stmt = d.prepare(`
+    UPDATE accounts
+    SET research_status = 'pending',
+        error_message = NULL,
+        updated_at = datetime('now')
+    WHERE research_status = 'processing'
+  `);
+  const result = stmt.run();
+  return result.changes;
 }
 
 // Account types

@@ -11,6 +11,14 @@ import { analyzeAccountData } from './categorizer';
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
 
+/**
+ * Check if a categorization job currently has an active processing loop in this server process.
+ * Used to detect orphaned jobs after server restarts.
+ */
+export function isCategorizationJobActive(jobId: number): boolean {
+  return activeJobs.has(jobId);
+}
+
 export async function processCategorizationJob(jobId: number): Promise<void> {
   // Check if job is already being processed
   if (activeJobs.has(jobId)) {

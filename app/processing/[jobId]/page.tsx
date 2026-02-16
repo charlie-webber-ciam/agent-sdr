@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
+import { useToast } from '@/lib/toast-context';
+import { humanizeError } from '@/lib/error-messages';
 
 // Utility to format domain display
 const formatDomain = (domain: string | null) => {
@@ -49,11 +51,13 @@ export default function ProcessingPage({
 }) {
   const { jobId } = use(params);
   const router = useRouter();
+  const toast = useToast();
   const [data, setData] = useState<JobData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [isOrphaned, setIsOrphaned] = useState(false);
+  const [retryingAccountId, setRetryingAccountId] = useState<number | null>(null);
 
   const checkJobActive = async (jobStatus: string) => {
     if (jobStatus === 'processing') {
@@ -96,7 +100,7 @@ export default function ProcessingPage({
       await fetchJobData();
     } catch (err) {
       console.error('Pause error:', err);
-      alert('Failed to pause job');
+      toast.error('Failed to pause job');
     } finally {
       setActionLoading(false);
     }
@@ -110,7 +114,7 @@ export default function ProcessingPage({
       await fetchJobData();
     } catch (err) {
       console.error('Resume error:', err);
-      alert('Failed to resume job');
+      toast.error('Failed to resume job');
     } finally {
       setActionLoading(false);
     }
@@ -125,10 +129,11 @@ export default function ProcessingPage({
     try {
       const res = await fetch(`/api/process/${jobId}/cancel`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to cancel job');
+      toast.info('Job cancelled');
       await fetchJobData();
     } catch (err) {
       console.error('Cancel error:', err);
-      alert('Failed to cancel job');
+      toast.error('Failed to cancel job');
     } finally {
       setActionLoading(false);
     }
@@ -149,7 +154,7 @@ export default function ProcessingPage({
       await fetchJobData();
     } catch (err) {
       console.error('Start processing error:', err);
-      alert(err instanceof Error ? err.message : 'Failed to start processing');
+      toast.error(err instanceof Error ? err.message : 'Failed to start processing');
     } finally {
       setActionLoading(false);
     }
@@ -167,7 +172,7 @@ export default function ProcessingPage({
       router.push('/');
     } catch (err) {
       console.error('Delete error:', err);
-      alert('Failed to delete job');
+      toast.error('Failed to delete job');
       setActionLoading(false);
     }
   };
@@ -176,7 +181,7 @@ export default function ProcessingPage({
     if (!data) return;
     const failedIds = data.accounts.filter(a => a.status === 'failed').map(a => a.id);
     if (failedIds.length === 0) {
-      alert('No failed accounts to delete.');
+      toast.info('No failed accounts to delete.');
       return;
     }
 
@@ -193,11 +198,11 @@ export default function ProcessingPage({
       });
       if (!res.ok) throw new Error('Failed to delete accounts');
       const result = await res.json();
-      alert(`Deleted ${result.deletedCount} failed account(s).`);
+      toast.success(`Deleted ${result.deletedCount} failed account(s).`);
       await fetchJobData();
     } catch (err) {
       console.error('Delete failed accounts error:', err);
-      alert('Failed to delete accounts');
+      toast.error('Failed to delete accounts');
     } finally {
       setActionLoading(false);
     }
@@ -207,7 +212,7 @@ export default function ProcessingPage({
     if (!data) return;
     const allIds = data.accounts.map(a => a.id);
     if (allIds.length === 0) {
-      alert('No accounts to delete.');
+      toast.info('No accounts to delete.');
       return;
     }
 
@@ -224,13 +229,63 @@ export default function ProcessingPage({
       });
       if (!res.ok) throw new Error('Failed to delete accounts');
       const result = await res.json();
-      alert(`Deleted ${result.deletedCount} account(s).`);
+      toast.success(`Deleted ${result.deletedCount} account(s).`);
       await fetchJobData();
     } catch (err) {
       console.error('Delete all accounts error:', err);
-      alert('Failed to delete accounts');
+      toast.error('Failed to delete accounts');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleRetryFailed = async () => {
+    if (!data) return;
+    const failedIds = data.accounts.filter(a => a.status === 'failed').map(a => a.id);
+    if (failedIds.length === 0) return;
+
+    setActionLoading(true);
+    try {
+      const res = await fetch('/api/accounts/retry-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountIds: failedIds }),
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to retry accounts');
+      }
+      const result = await res.json();
+      toast.success(`Retrying ${result.accountCount} account(s)`);
+      router.push(result.redirectUrl);
+    } catch (err) {
+      console.error('Retry failed accounts error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to retry accounts');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRetrySingleAccount = async (accountId: number) => {
+    setRetryingAccountId(accountId);
+    try {
+      const res = await fetch('/api/accounts/retry-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountIds: [accountId] }),
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to retry account');
+      }
+      const result = await res.json();
+      toast.success('Retrying account');
+      router.push(result.redirectUrl);
+    } catch (err) {
+      console.error('Retry single account error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to retry account');
+    } finally {
+      setRetryingAccountId(null);
     }
   };
 
@@ -373,7 +428,7 @@ export default function ProcessingPage({
               </p>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap justify-end">
             {isComplete && (
               <button
                 onClick={() => router.push('/accounts')}
@@ -469,13 +524,22 @@ export default function ProcessingPage({
             {(isFailed || isComplete) && (
               <>
                 {failedAccounts.length > 0 && (
-                  <button
-                    onClick={handleDeleteFailedAccounts}
-                    disabled={actionLoading}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition-colors flex items-center gap-2 text-sm"
-                  >
-                    {actionLoading ? 'Deleting...' : `Delete Failed (${failedAccounts.length})`}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleRetryFailed}
+                      disabled={actionLoading}
+                      className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-gray-400 transition-colors flex items-center gap-2 text-sm font-medium"
+                    >
+                      {actionLoading ? 'Retrying...' : `Retry Failed (${failedAccounts.length})`}
+                    </button>
+                    <button
+                      onClick={handleDeleteFailedAccounts}
+                      disabled={actionLoading}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition-colors flex items-center gap-2 text-sm"
+                    >
+                      {actionLoading ? 'Deleting...' : `Delete Failed (${failedAccounts.length})`}
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={handleDeleteAllJobAccounts}
@@ -552,8 +616,8 @@ export default function ProcessingPage({
                     </p>
                   )}
                   {account.errorMessage && (
-                    <p className="text-sm text-red-600 mt-1">
-                      Error: {account.errorMessage}
+                    <p className="text-sm text-red-600 mt-1" title={account.errorMessage}>
+                      {humanizeError(account.errorMessage)}
                     </p>
                   )}
                 </div>
@@ -578,9 +642,31 @@ export default function ProcessingPage({
                     </span>
                   )}
                   {account.status === 'failed' && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
-                      Failed
-                    </span>
+                    <>
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                        Failed
+                      </span>
+                      {(isComplete || isFailed) && (
+                        <button
+                          onClick={() => handleRetrySingleAccount(account.id)}
+                          disabled={retryingAccountId === account.id}
+                          className="px-3 py-1.5 bg-amber-100 text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-200 disabled:bg-gray-100 disabled:text-gray-400 transition-colors text-sm flex items-center gap-1.5"
+                          title="Retry this account"
+                        >
+                          {retryingAccountId === account.id ? (
+                            <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                          ) : (
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                          )}
+                          Retry
+                        </button>
+                      )}
+                    </>
                   )}
                   {account.status === 'pending' && (
                     <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800">

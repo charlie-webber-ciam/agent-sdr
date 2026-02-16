@@ -4,6 +4,7 @@ import "./globals.css";
 import Navigation from "@/components/Navigation";
 import { PageTransition } from "@/components/PageTransition";
 import { PerspectiveProvider } from "@/lib/perspective-context";
+import { ToastProvider } from "@/lib/toast-context";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,10 +32,12 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 text-gray-900`}
       >
         <PerspectiveProvider>
-          <Navigation />
-          <PageTransition>
-            {children}
-          </PageTransition>
+          <ToastProvider>
+            <Navigation />
+            <PageTransition>
+              {children}
+            </PageTransition>
+          </ToastProvider>
         </PerspectiveProvider>
       </body>
     </html>

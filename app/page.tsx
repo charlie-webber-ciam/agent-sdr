@@ -5,6 +5,16 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { DashboardSkeleton } from '@/components/Skeleton';
 import { usePerspective } from '@/lib/perspective-context';
+import { useToast } from '@/lib/toast-context';
+
+interface InterruptedJob {
+  id: number;
+  type: 'research' | 'categorization';
+  name: string;
+  processedCount: number;
+  totalCount: number;
+  pendingRemaining: number;
+}
 
 interface StalenessStats {
   fresh: number;
@@ -99,12 +109,15 @@ function AnimatedNumber({ value }: { value: number }) {
 export default function DashboardPage() {
   const router = useRouter();
   const { perspective } = usePerspective();
+  const toast = useToast();
   const isOkta = perspective === 'okta';
   const [stats, setStats] = useState<Stats | null>(null);
   const [recentJobs, setRecentJobs] = useState<Job[]>([]);
   const [preprocessingJobs, setPreprocessingJobs] = useState<PreprocessingJob[]>([]);
+  const [interruptedJobs, setInterruptedJobs] = useState<InterruptedJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshingStale, setRefreshingStale] = useState(false);
+  const [interruptedActionLoading, setInterruptedActionLoading] = useState<number | null>(null);
   const pollIntervalRef = useRef<number>(5000);
 
   useEffect(() => {
@@ -114,6 +127,7 @@ export default function DashboardPage() {
         if (statsRes.ok) {
           const statsData = await statsRes.json();
           setStats(statsData);
+          setInterruptedJobs(statsData.interruptedJobs || []);
         }
 
         const jobsRes = await fetch('/api/jobs');
@@ -260,6 +274,146 @@ export default function DashboardPage() {
           </motion.button>
         ))}
       </motion.div>
+
+      {/* Interrupted Jobs Banner */}
+      {interruptedJobs.length > 0 && (
+        <motion.div
+          className="bg-amber-50 border border-amber-300 rounded-xl p-6 mb-8"
+          variants={fadeSlide}
+          initial="hidden"
+          animate="show"
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <svg className="w-6 h-6 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+            <h3 className="text-lg font-bold text-amber-800">Attention Needed</h3>
+          </div>
+          <div className="space-y-3">
+            {interruptedJobs.map((ij) => (
+              <div key={`${ij.type}-${ij.id}`} className="flex items-center justify-between p-3 bg-white border border-amber-200 rounded-lg">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">
+                    {ij.type === 'research' ? 'Research' : 'Categorization'} job was interrupted
+                    {ij.pendingRemaining > 0 && ` with ${ij.pendingRemaining} account${ij.pendingRemaining !== 1 ? 's' : ''} remaining`}.
+                  </p>
+                  <p className="text-xs text-gray-600 mt-0.5">{ij.name} &mdash; {ij.processedCount} / {ij.totalCount} processed</p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {ij.type === 'research' ? (
+                    <>
+                      <button
+                        disabled={interruptedActionLoading === ij.id}
+                        onClick={async () => {
+                          setInterruptedActionLoading(ij.id);
+                          try {
+                            const res = await fetch('/api/process/restart', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ jobId: ij.id }),
+                            });
+                            if (res.ok) {
+                              toast.success('Research job resumed');
+                              router.push(`/processing/${ij.id}`);
+                            } else {
+                              toast.error('Failed to resume research job');
+                            }
+                          } catch {
+                            toast.error('Failed to resume research job');
+                          } finally {
+                            setInterruptedActionLoading(null);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium disabled:bg-gray-300 transition-colors"
+                      >
+                        {interruptedActionLoading === ij.id ? 'Resuming...' : 'Resume'}
+                      </button>
+                      <button
+                        disabled={interruptedActionLoading === ij.id}
+                        onClick={async () => {
+                          setInterruptedActionLoading(ij.id);
+                          try {
+                            const res = await fetch(`/api/process/${ij.id}/cancel`, { method: 'POST' });
+                            if (res.ok) {
+                              toast.success('Research job cancelled');
+                              setInterruptedJobs((prev) => prev.filter((j) => !(j.type === 'research' && j.id === ij.id)));
+                            } else {
+                              toast.error('Failed to cancel job');
+                            }
+                          } catch {
+                            toast.error('Failed to cancel job');
+                          } finally {
+                            setInterruptedActionLoading(null);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium disabled:bg-gray-100 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        disabled={interruptedActionLoading === ij.id}
+                        onClick={async () => {
+                          setInterruptedActionLoading(ij.id);
+                          try {
+                            const res = await fetch('/api/categorization/restart', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ jobId: ij.id }),
+                            });
+                            if (res.ok) {
+                              const data = await res.json();
+                              toast.success('Categorization job restarted');
+                              router.push(`/categorize/progress/${data.newJobId}`);
+                            } else {
+                              toast.error('Failed to restart categorization job');
+                            }
+                          } catch {
+                            toast.error('Failed to restart categorization job');
+                          } finally {
+                            setInterruptedActionLoading(null);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium disabled:bg-gray-300 transition-colors"
+                      >
+                        {interruptedActionLoading === ij.id ? 'Restarting...' : 'Restart'}
+                      </button>
+                      <button
+                        disabled={interruptedActionLoading === ij.id}
+                        onClick={async () => {
+                          setInterruptedActionLoading(ij.id);
+                          try {
+                            const res = await fetch('/api/categorization/restart', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ jobId: ij.id, cancelOnly: true }),
+                            });
+                            if (res.ok) {
+                              toast.success('Categorization job cancelled');
+                              setInterruptedJobs((prev) => prev.filter((j) => !(j.type === 'categorization' && j.id === ij.id)));
+                            } else {
+                              toast.error('Failed to cancel job');
+                            }
+                          } catch {
+                            toast.error('Failed to cancel job');
+                          } finally {
+                            setInterruptedActionLoading(null);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium disabled:bg-gray-100 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       {/* Stats */}
       {stats && (
@@ -513,10 +667,10 @@ export default function DashboardPage() {
                     router.push(data.redirectUrl);
                   } else {
                     const data = await res.json();
-                    alert(data.error || 'Failed to refresh stale accounts');
+                    toast.error(data.error || 'Failed to refresh stale accounts');
                   }
                 } catch {
-                  alert('Failed to refresh stale accounts');
+                  toast.error('Failed to refresh stale accounts');
                 } finally {
                   setRefreshingStale(false);
                 }

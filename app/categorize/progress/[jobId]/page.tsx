@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useToast } from '@/lib/toast-context';
 
 interface JobData {
   job: {
@@ -29,9 +30,28 @@ export default function CategorizationProgressPage({
 }) {
   const unwrappedParams = use(params);
   const router = useRouter();
+  const toast = useToast();
   const [jobData, setJobData] = useState<JobData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOrphaned, setIsOrphaned] = useState(false);
+  const [restartLoading, setRestartLoading] = useState(false);
+
+  const checkJobActive = async (jobStatus: string) => {
+    if (jobStatus === 'processing') {
+      try {
+        const res = await fetch(`/api/categorization/jobs/${unwrappedParams.jobId}/active`);
+        if (res.ok) {
+          const { active } = await res.json();
+          setIsOrphaned(!active);
+        }
+      } catch {
+        // If we can't reach the endpoint, don't change orphan state
+      }
+    } else {
+      setIsOrphaned(false);
+    }
+  };
 
   const fetchJobData = async () => {
     try {
@@ -47,6 +67,7 @@ export default function CategorizationProgressPage({
       const data = await res.json();
       setJobData(data);
       setLoading(false);
+      await checkJobActive(data.job.status);
       // Return whether job is still active
       return data.job.status === 'processing' || data.job.status === 'pending';
     } catch (err) {
@@ -54,6 +75,56 @@ export default function CategorizationProgressPage({
       setError('Failed to load job data');
       setLoading(false);
       return false;
+    }
+  };
+
+  const handleRestart = async () => {
+    setRestartLoading(true);
+    try {
+      const res = await fetch('/api/categorization/restart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: Number(unwrappedParams.jobId) }),
+      });
+      if (!res.ok) {
+        toast.error('Failed to restart categorization job');
+        return;
+      }
+      const data = await res.json();
+      if (data.newJobId) {
+        toast.success('Categorization job restarted');
+        router.push(`/categorize/progress/${data.newJobId}`);
+      } else {
+        toast.info('No remaining accounts to categorize');
+        setIsOrphaned(false);
+        await fetchJobData();
+      }
+    } catch {
+      toast.error('Failed to restart categorization job');
+    } finally {
+      setRestartLoading(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    setRestartLoading(true);
+    try {
+      const res = await fetch('/api/categorization/restart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: Number(unwrappedParams.jobId), cancelOnly: true }),
+      });
+      if (res.ok) {
+        toast.info('Categorization job cancelled');
+        setIsOrphaned(false);
+        await fetchJobData();
+      } else {
+        toast.error('Failed to cancel job');
+      }
+    } catch {
+      toast.error('Failed to cancel job');
+    } finally {
+      setRestartLoading(false);
     }
   };
 
@@ -107,6 +178,7 @@ export default function CategorizationProgressPage({
   const isProcessing = job.status === 'processing';
   const isCompleted = job.status === 'completed';
   const isFailed = job.status === 'failed';
+  const isInterrupted = isProcessing && isOrphaned;
 
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto">
@@ -137,6 +209,41 @@ export default function CategorizationProgressPage({
         </p>
       </div>
 
+      {/* Interrupted Banner */}
+      {isInterrupted && (
+        <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <div>
+                <p className="font-medium text-amber-800">Categorization was interrupted</p>
+                <p className="text-sm text-amber-700">
+                  The server may have restarted. {job.total_accounts - job.processed_count} account(s) remaining.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRestart}
+                disabled={restartLoading}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-gray-300 text-sm font-medium transition-colors"
+              >
+                {restartLoading ? 'Restarting...' : 'Restart Categorization'}
+              </button>
+              <button
+                onClick={handleCancel}
+                disabled={restartLoading}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:bg-gray-100 text-sm font-medium transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Status Card */}
       <div className="bg-white rounded-lg shadow-md p-6 mb-8">
         <div className="flex items-center justify-between mb-6">
@@ -146,6 +253,8 @@ export default function CategorizationProgressPage({
               className={`inline-block px-4 py-2 rounded-lg text-lg font-semibold ${
                 isCompleted
                   ? 'bg-green-100 text-green-800'
+                  : isInterrupted
+                  ? 'bg-amber-100 text-amber-800'
                   : isProcessing
                   ? 'bg-blue-100 text-blue-800'
                   : isFailed
@@ -153,7 +262,7 @@ export default function CategorizationProgressPage({
                   : 'bg-gray-100 text-gray-800'
               }`}
             >
-              {job.status.charAt(0).toUpperCase() + job.status.slice(1)}
+              {isInterrupted ? 'Interrupted' : job.status.charAt(0).toUpperCase() + job.status.slice(1)}
             </span>
           </div>
           <div className="text-right">
@@ -176,7 +285,7 @@ export default function CategorizationProgressPage({
           <div className="w-full bg-gray-200 rounded-full h-3">
             <div
               className={`h-3 rounded-full transition-all duration-500 ${
-                isCompleted ? 'bg-green-600' : isFailed ? 'bg-red-600' : 'bg-purple-600'
+                isCompleted ? 'bg-green-600' : isFailed ? 'bg-red-600' : isInterrupted ? 'bg-amber-500' : 'bg-purple-600'
               }`}
               style={{ width: `${progressPercentage}%` }}
             />
@@ -184,7 +293,7 @@ export default function CategorizationProgressPage({
         </div>
 
         {/* Current Account */}
-        {isProcessing && currentAccount && (
+        {isProcessing && !isInterrupted && currentAccount && (
           <div className="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
             <div className="flex items-center gap-2 mb-2">
               <svg
