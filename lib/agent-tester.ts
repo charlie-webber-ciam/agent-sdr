@@ -1,5 +1,8 @@
-import { Agent, run, webSearchTool, setDefaultOpenAIClient } from '@openai/agents';
+import { Agent, run, webSearchTool, setDefaultOpenAIClient, setTracingDisabled } from '@openai/agents';
 import OpenAI from 'openai';
+
+// Disable tracing — it tries to hit api.openai.com directly, which fails with a custom base URL
+setTracingDisabled(true);
 
 // Configure OpenAI client with custom base URL for agents SDK
 const openai = new OpenAI({
