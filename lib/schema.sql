@@ -96,6 +96,40 @@ CREATE TABLE IF NOT EXISTS preprocessing_results (
   FOREIGN KEY (job_id) REFERENCES preprocessing_jobs(id)
 );
 
+-- Account tags (many-to-many)
+CREATE TABLE IF NOT EXISTS account_tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL,
+  tag TEXT NOT NULL,
+  tag_type TEXT NOT NULL DEFAULT 'custom',  -- 'preset' or 'custom'
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+  UNIQUE(account_id, tag)
+);
+
+-- Per-section user comments
+CREATE TABLE IF NOT EXISTS section_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL,
+  perspective TEXT NOT NULL,        -- 'auth0' or 'okta'
+  section_key TEXT NOT NULL,        -- e.g. 'current_auth_solution', 'news_and_funding'
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+  UNIQUE(account_id, perspective, section_key)
+);
+
+-- Account notes (engagement journal)
+CREATE TABLE IF NOT EXISTS account_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(research_status);
 CREATE INDEX IF NOT EXISTS idx_accounts_job_id ON accounts(job_id);
@@ -105,3 +139,6 @@ CREATE INDEX IF NOT EXISTS idx_categorization_jobs_status ON categorization_jobs
 CREATE INDEX IF NOT EXISTS idx_preprocessing_jobs_status ON preprocessing_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_preprocessing_results_job_id ON preprocessing_results(job_id);
 CREATE INDEX IF NOT EXISTS idx_preprocessing_results_domain ON preprocessing_results(validated_domain);
+CREATE INDEX IF NOT EXISTS idx_account_tags_account_id ON account_tags(account_id);
+CREATE INDEX IF NOT EXISTS idx_section_comments_account_id ON section_comments(account_id);
+CREATE INDEX IF NOT EXISTS idx_account_notes_account_id ON account_notes(account_id);

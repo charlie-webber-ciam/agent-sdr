@@ -165,6 +165,64 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Failed to add paused column to processing_jobs:', error);
   }
 
+  // Add account_tags table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        tag TEXT NOT NULL,
+        tag_type TEXT NOT NULL DEFAULT 'custom',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+        UNIQUE(account_id, tag)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_tags_account_id ON account_tags(account_id)');
+    console.log('✓ Ensured account_tags table exists');
+  } catch (error) {
+    console.error('Failed to create account_tags table:', error);
+  }
+
+  // Add section_comments table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS section_comments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        perspective TEXT NOT NULL,
+        section_key TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+        UNIQUE(account_id, perspective, section_key)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_section_comments_account_id ON section_comments(account_id)');
+    console.log('✓ Ensured section_comments table exists');
+  } catch (error) {
+    console.error('Failed to create section_comments table:', error);
+  }
+
+  // Add account_notes table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_notes_account_id ON account_notes(account_id)');
+    console.log('✓ Ensured account_notes table exists');
+  } catch (error) {
+    console.error('Failed to create account_notes table:', error);
+  }
+
   // Add paused column to preprocessing_jobs if table exists
   try {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='preprocessing_jobs'").all() as any[];

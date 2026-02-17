@@ -90,7 +90,7 @@ detect_existing_install() {
       found_dirs+=("$dir")
     fi
   done < <(find "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads" \
-    -maxdepth 3 -type d -name "*agent*sdr*" 2>/dev/null | sort -u)
+    -maxdepth 3 -type d -name "*agent*sdr*" -not -name "*.backup.*" 2>/dev/null | sort -u)
 
   # Also check immediate children of $HOME (e.g. ~/agent-sdr-old, ~/my-agent-sdr)
   while IFS= read -r dir; do
@@ -98,7 +98,7 @@ detect_existing_install() {
     if [[ -f "$dir/data/accounts.db" ]]; then
       found_dirs+=("$dir")
     fi
-  done < <(find "$HOME" -maxdepth 1 -type d -name "*agent*sdr*" 2>/dev/null)
+  done < <(find "$HOME" -maxdepth 1 -type d -name "*agent*sdr*" -not -name "*.backup.*" 2>/dev/null)
 
   if [[ ${#found_dirs[@]} -eq 0 ]]; then
     success "No previous installation found"
@@ -171,13 +171,25 @@ EOF
     success "API key migrated (base URL set to https://llm.atko.ai)"
   fi
 
-  # Restore research database
+  # Restore research data (only if it doesn't already exist at the destination)
   if [[ -n "$MIGRATED_DB_PATH" && -f "$MIGRATED_DB_PATH" ]]; then
-    mkdir -p "$install_dir/data"
-    cp "$MIGRATED_DB_PATH" "$install_dir/data/accounts.db"
-    local db_size
-    db_size=$(du -h "$install_dir/data/accounts.db" | cut -f1)
-    success "Research database migrated ($db_size)"
+    if [[ -f "$install_dir/data/accounts.db" ]]; then
+      info "Research database already exists at $install_dir — skipping migration"
+    else
+      mkdir -p "$install_dir/data"
+      cp "$MIGRATED_DB_PATH" "$install_dir/data/accounts.db"
+      local db_size
+      db_size=$(du -h "$install_dir/data/accounts.db" | cut -f1)
+      success "Research database migrated ($db_size)"
+    fi
+
+    # Also migrate preprocessed CSV files if present
+    local old_preprocessed
+    old_preprocessed="$(dirname "$MIGRATED_DB_PATH")/preprocessed"
+    if [[ -d "$old_preprocessed" && ! -d "$install_dir/data/preprocessed" ]]; then
+      cp -R "$old_preprocessed" "$install_dir/data/preprocessed"
+      success "Preprocessed CSV files migrated"
+    fi
   fi
 }
 
@@ -313,7 +325,23 @@ clone_repo() {
   if [[ -d "$install_dir" ]]; then
     warn "$install_dir exists but is not a git repo."
     echo "  Moving it to ${install_dir}.backup and cloning fresh."
-    mv "$install_dir" "${install_dir}.backup.$(date +%s)"
+
+    # Preserve existing data directory and config before moving to backup
+    local tmp_preserve=""
+    if [[ -d "$install_dir/data" || -f "$install_dir/.env.local" ]]; then
+      tmp_preserve=$(mktemp -d)
+      if [[ -d "$install_dir/data" ]]; then
+        cp -R "$install_dir/data" "$tmp_preserve/data"
+        info "Preserving existing data directory"
+      fi
+      if [[ -f "$install_dir/.env.local" ]]; then
+        cp "$install_dir/.env.local" "$tmp_preserve/.env.local"
+        info "Preserving existing configuration"
+      fi
+    fi
+
+    local backup_path="${install_dir}.backup.$(date +%s)"
+    mv "$install_dir" "$backup_path"
   fi
 
   info "Cloning repository to $install_dir..."
@@ -321,8 +349,29 @@ clone_repo() {
     success "Repository cloned to $install_dir"
   else
     fail "Failed to clone repository."
+    # Roll back: restore the backup so the user isn't left with nothing
+    if [[ -n "${backup_path:-}" && -d "$backup_path" ]]; then
+      mv "$backup_path" "$install_dir"
+      warn "Restored previous directory from backup."
+    fi
+    if [[ -n "$tmp_preserve" ]]; then
+      rm -rf "$tmp_preserve"
+    fi
     echo "  Check your internet connection and try again."
     exit 1
+  fi
+
+  # Restore preserved data into the fresh clone
+  if [[ -n "$tmp_preserve" ]]; then
+    if [[ -d "$tmp_preserve/data" ]]; then
+      cp -R "$tmp_preserve/data" "$install_dir/data"
+      success "Existing data directory restored"
+    fi
+    if [[ -f "$tmp_preserve/.env.local" ]]; then
+      cp "$tmp_preserve/.env.local" "$install_dir/.env.local"
+      success "Existing configuration restored"
+    fi
+    rm -rf "$tmp_preserve"
   fi
 }
 

@@ -4,6 +4,8 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
 import MarkdownSection from '@/components/MarkdownSection';
+import AccountTags from '@/components/AccountTags';
+import AccountNotes from '@/components/AccountNotes';
 import TierSelector from '@/components/TierSelector';
 import PrioritySlider from '@/components/PrioritySlider';
 import UseCaseMultiSelect from '@/components/UseCaseMultiSelect';
@@ -95,6 +97,10 @@ interface AccountDetail {
     key_signals: string[];
   } | null;
   triagedAt: string | null;
+  // Enrichment data
+  tags: Array<{ id: number; tag: string; tagType: string; createdAt: string }>;
+  sectionComments: Record<string, string>;
+  notes: Array<{ id: number; content: string; createdAt: string; updatedAt: string }>;
 }
 
 // Icon components
@@ -222,6 +228,12 @@ export default function AccountDetailPage({
   // Reprocess state
   const [isReprocessing, setIsReprocessing] = useState(false);
 
+  // Enrichment state
+  const [tags, setTags] = useState<AccountDetail['tags']>([]);
+  const [sectionComments, setSectionComments] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<AccountDetail['notes']>([]);
+  const [rerunningSection, setRerunningSection] = useState<string | null>(null);
+
   // Auth0 edit data
   const [auth0EditData, setAuth0EditData] = useState({
     tier: null as 'A' | 'B' | 'C' | null,
@@ -264,6 +276,11 @@ export default function AccountDetailPage({
           priorityScore: data.priorityScore || 5,
         });
 
+        // Initialize enrichment data
+        setTags(data.tags || []);
+        setSectionComments(data.sectionComments || {});
+        setNotes(data.notes || []);
+
         // Initialize Okta edit data
         setOktaEditData({
           oktaTier: data.oktaTier || null,
@@ -288,7 +305,7 @@ export default function AccountDetailPage({
     const sectionIds = [
       'section-summary', 'section-auth', 'section-users', 'section-security',
       'section-news', 'section-tech', 'section-ecosystem', 'section-prospects',
-      'section-email', 'section-sequence',
+      'section-notes', 'section-email', 'section-sequence',
     ];
 
     const observer = new IntersectionObserver(
@@ -555,6 +572,70 @@ export default function AccountDetailPage({
     }
   };
 
+  // ─── Comment Handlers ────────────────────────────────────────────────────
+  const handleCommentSave = useCallback(async (perspective: 'auth0' | 'okta', sectionKey: string, content: string) => {
+    const res = await fetch(`/api/accounts/${id}/comments`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ perspective, sectionKey, content }),
+    });
+    if (res.ok) {
+      setSectionComments(prev => ({ ...prev, [`${perspective}:${sectionKey}`]: content }));
+    }
+  }, [id]);
+
+  const handleCommentDelete = useCallback(async (perspective: 'auth0' | 'okta', sectionKey: string) => {
+    const res = await fetch(`/api/accounts/${id}/comments`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ perspective, sectionKey }),
+    });
+    if (res.ok) {
+      setSectionComments(prev => {
+        const next = { ...prev };
+        delete next[`${perspective}:${sectionKey}`];
+        return next;
+      });
+    }
+  }, [id]);
+
+  // ─── Section Re-run Handler ──────────────────────────────────────────────
+  const handleSectionRerun = useCallback(async (sections: string[], additionalContext: string) => {
+    if (!account) return;
+    setRerunningSection(sections[0]);
+    try {
+      const res = await fetch(`/api/accounts/${id}/rerun-section`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          perspective: activePerspective,
+          sections,
+          additionalContext: additionalContext || undefined,
+        }),
+      });
+      if (res.ok) {
+        // Refresh account data to get updated sections
+        const updatedRes = await fetch(`/api/accounts/${id}`);
+        const updatedData = await updatedRes.json();
+        setAccount(updatedData);
+        setTags(updatedData.tags || []);
+        setSectionComments(updatedData.sectionComments || {});
+        setNotes(updatedData.notes || []);
+      } else {
+        const errData = await res.json();
+        alert(errData.error || 'Failed to re-run section');
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to re-run section');
+    } finally {
+      setRerunningSection(null);
+    }
+  }, [id, account, activePerspective]);
+
+  // Section key maps for re-run
+  const auth0SectionKeys = ['current_auth_solution', 'customer_base_info', 'security_incidents', 'news_and_funding', 'tech_transformation', 'prospects'];
+  const oktaSectionKeys = ['okta_current_iam_solution', 'okta_workforce_info', 'okta_security_incidents', 'okta_news_and_funding', 'okta_tech_transformation', 'okta_ecosystem', 'okta_prospects'];
+
   if (loading) {
     return (
       <main className="min-h-screen p-8 max-w-7xl mx-auto">
@@ -627,6 +708,11 @@ export default function AccountDetailPage({
                     </span>
                   </>
                 )}
+              </div>
+
+              {/* Account Tags */}
+              <div className="mb-3">
+                <AccountTags accountId={account.id} tags={tags} onTagsChange={setTags} />
               </div>
 
               {/* Tier, SKU, Priority Badges + Research Status Indicators */}
@@ -1370,6 +1456,14 @@ export default function AccountDetailPage({
                     title="Current Authentication Solution"
                     content={account.currentAuthSolution}
                     icon={<LockIcon />}
+                    sectionKey="current_auth_solution"
+                    perspective="auth0"
+                    allSectionKeys={auth0SectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'current_auth_solution'}
+                    comment={sectionComments['auth0:current_auth_solution']}
+                    onCommentSave={(content) => handleCommentSave('auth0', 'current_auth_solution', content)}
+                    onCommentDelete={() => handleCommentDelete('auth0', 'current_auth_solution')}
                   />
                 </div>
 
@@ -1378,6 +1472,14 @@ export default function AccountDetailPage({
                     title="Customer Base & Scale"
                     content={account.customerBaseInfo}
                     icon={<UsersIcon />}
+                    sectionKey="customer_base_info"
+                    perspective="auth0"
+                    allSectionKeys={auth0SectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'customer_base_info'}
+                    comment={sectionComments['auth0:customer_base_info']}
+                    onCommentSave={(content) => handleCommentSave('auth0', 'customer_base_info', content)}
+                    onCommentDelete={() => handleCommentDelete('auth0', 'customer_base_info')}
                   />
                 </div>
 
@@ -1386,6 +1488,14 @@ export default function AccountDetailPage({
                     title="Security & Compliance"
                     content={account.securityIncidents}
                     icon={<ShieldIcon />}
+                    sectionKey="security_incidents"
+                    perspective="auth0"
+                    allSectionKeys={auth0SectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'security_incidents'}
+                    comment={sectionComments['auth0:security_incidents']}
+                    onCommentSave={(content) => handleCommentSave('auth0', 'security_incidents', content)}
+                    onCommentDelete={() => handleCommentDelete('auth0', 'security_incidents')}
                   />
                 </div>
 
@@ -1394,6 +1504,14 @@ export default function AccountDetailPage({
                     title="Recent News & Funding"
                     content={account.newsAndFunding}
                     icon={<NewspaperIcon />}
+                    sectionKey="news_and_funding"
+                    perspective="auth0"
+                    allSectionKeys={auth0SectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'news_and_funding'}
+                    comment={sectionComments['auth0:news_and_funding']}
+                    onCommentSave={(content) => handleCommentSave('auth0', 'news_and_funding', content)}
+                    onCommentDelete={() => handleCommentDelete('auth0', 'news_and_funding')}
                   />
                 </div>
 
@@ -1402,6 +1520,14 @@ export default function AccountDetailPage({
                     title="Tech Transformation Initiatives"
                     content={account.techTransformation}
                     icon={<LightningIcon />}
+                    sectionKey="tech_transformation"
+                    perspective="auth0"
+                    allSectionKeys={auth0SectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'tech_transformation'}
+                    comment={sectionComments['auth0:tech_transformation']}
+                    onCommentSave={(content) => handleCommentSave('auth0', 'tech_transformation', content)}
+                    onCommentDelete={() => handleCommentDelete('auth0', 'tech_transformation')}
                   />
                 </div>
 
@@ -1521,6 +1647,14 @@ export default function AccountDetailPage({
                     title="Current IAM Solution"
                     content={account.oktaCurrentIamSolution}
                     icon={<LockIcon />}
+                    sectionKey="okta_current_iam_solution"
+                    perspective="okta"
+                    allSectionKeys={oktaSectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'okta_current_iam_solution'}
+                    comment={sectionComments['okta:okta_current_iam_solution']}
+                    onCommentSave={(content) => handleCommentSave('okta', 'okta_current_iam_solution', content)}
+                    onCommentDelete={() => handleCommentDelete('okta', 'okta_current_iam_solution')}
                   />
                 </div>
 
@@ -1529,6 +1663,14 @@ export default function AccountDetailPage({
                     title="Workforce & IT Complexity"
                     content={account.oktaWorkforceInfo}
                     icon={<UsersIcon />}
+                    sectionKey="okta_workforce_info"
+                    perspective="okta"
+                    allSectionKeys={oktaSectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'okta_workforce_info'}
+                    comment={sectionComments['okta:okta_workforce_info']}
+                    onCommentSave={(content) => handleCommentSave('okta', 'okta_workforce_info', content)}
+                    onCommentDelete={() => handleCommentDelete('okta', 'okta_workforce_info')}
                   />
                 </div>
 
@@ -1537,6 +1679,14 @@ export default function AccountDetailPage({
                     title="Security & Compliance"
                     content={account.oktaSecurityIncidents}
                     icon={<ShieldIcon />}
+                    sectionKey="okta_security_incidents"
+                    perspective="okta"
+                    allSectionKeys={oktaSectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'okta_security_incidents'}
+                    comment={sectionComments['okta:okta_security_incidents']}
+                    onCommentSave={(content) => handleCommentSave('okta', 'okta_security_incidents', content)}
+                    onCommentDelete={() => handleCommentDelete('okta', 'okta_security_incidents')}
                   />
                 </div>
 
@@ -1545,6 +1695,14 @@ export default function AccountDetailPage({
                     title="Recent News & Funding"
                     content={account.oktaNewsAndFunding}
                     icon={<NewspaperIcon />}
+                    sectionKey="okta_news_and_funding"
+                    perspective="okta"
+                    allSectionKeys={oktaSectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'okta_news_and_funding'}
+                    comment={sectionComments['okta:okta_news_and_funding']}
+                    onCommentSave={(content) => handleCommentSave('okta', 'okta_news_and_funding', content)}
+                    onCommentDelete={() => handleCommentDelete('okta', 'okta_news_and_funding')}
                   />
                 </div>
 
@@ -1553,6 +1711,14 @@ export default function AccountDetailPage({
                     title="Tech Transformation Initiatives"
                     content={account.oktaTechTransformation}
                     icon={<LightningIcon />}
+                    sectionKey="okta_tech_transformation"
+                    perspective="okta"
+                    allSectionKeys={oktaSectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'okta_tech_transformation'}
+                    comment={sectionComments['okta:okta_tech_transformation']}
+                    onCommentSave={(content) => handleCommentSave('okta', 'okta_tech_transformation', content)}
+                    onCommentDelete={() => handleCommentDelete('okta', 'okta_tech_transformation')}
                   />
                 </div>
 
@@ -1561,6 +1727,14 @@ export default function AccountDetailPage({
                     title="Okta Ecosystem & Relationship"
                     content={account.oktaEcosystem}
                     icon={<TargetIcon />}
+                    sectionKey="okta_ecosystem"
+                    perspective="okta"
+                    allSectionKeys={oktaSectionKeys}
+                    onRerun={handleSectionRerun}
+                    isRerunning={rerunningSection === 'okta_ecosystem'}
+                    comment={sectionComments['okta:okta_ecosystem']}
+                    onCommentSave={(content) => handleCommentSave('okta', 'okta_ecosystem', content)}
+                    onCommentDelete={() => handleCommentDelete('okta', 'okta_ecosystem')}
                   />
                 </div>
 
@@ -1634,6 +1808,24 @@ export default function AccountDetailPage({
                 )}
               </>
             )}
+
+            {/* Account Notes */}
+            <div id="section-notes" className="scroll-mt-24 bg-white rounded-xl shadow-lg p-8 mb-8 border border-gray-200">
+              <div className="flex items-center gap-3 mb-6">
+                <svg className="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                <h2 className="text-3xl font-bold text-gray-900">Account Notes</h2>
+              </div>
+              <p className="text-gray-600 mb-6">
+                Track engagement history, meeting notes, and observations about this account.
+              </p>
+              <AccountNotes
+                accountId={account.id}
+                notes={notes}
+                onNotesChange={setNotes}
+              />
+            </div>
 
             {/* Email Writer — always rendered inline */}
             <div id="section-email" className="scroll-mt-24 mb-8">

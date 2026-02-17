@@ -38,6 +38,7 @@ const DEFAULT_FILTERS: FilterState = {
   accountOwner: '',
   sortBy: 'priority_score',
   freshness: '',
+  tag: '',
 };
 
 const ITEMS_PER_PAGE = 30;

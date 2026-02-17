@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAccount, updateAccountMetadata, updateOktaAccountMetadata, deleteAccount } from '@/lib/db';
+import { getAccount, updateAccountMetadata, updateOktaAccountMetadata, deleteAccount, getAccountTags, getSectionComments, getAccountNotes } from '@/lib/db';
 
 export async function GET(
   request: Request,
@@ -100,6 +100,17 @@ export async function GET(
       }
     }
 
+    // Fetch enrichment data
+    const tags = getAccountTags(accountId);
+    const sectionCommentsRaw = getSectionComments(accountId);
+    const notes = getAccountNotes(accountId);
+
+    // Build sectionComments as a map keyed by `{perspective}:{sectionKey}`
+    const sectionComments: Record<string, string> = {};
+    for (const c of sectionCommentsRaw) {
+      sectionComments[`${c.perspective}:${c.section_key}`] = c.content;
+    }
+
     return NextResponse.json({
       id: account.id,
       companyName: account.company_name,
@@ -159,6 +170,10 @@ export async function GET(
       triageSummary: account.triage_summary,
       triageData: account.triage_data ? (() => { try { return JSON.parse(account.triage_data); } catch { return null; } })() : null,
       triagedAt: account.triaged_at,
+      // Enrichment data
+      tags: tags.map(t => ({ id: t.id, tag: t.tag, tagType: t.tag_type, createdAt: t.created_at })),
+      sectionComments,
+      notes: notes.map(n => ({ id: n.id, content: n.content, createdAt: n.created_at, updatedAt: n.updated_at })),
     });
   } catch (error) {
     console.error('Error fetching account:', error);

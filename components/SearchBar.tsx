@@ -62,6 +62,7 @@ export interface FilterState {
   accountOwner: string;
   sortBy: string;
   freshness: string;
+  tag: string;
   // Okta-specific filter keys (used when in Okta perspective)
   oktaTier?: string;
   oktaSku?: string;
@@ -79,12 +80,13 @@ interface SearchBarProps {
   industries?: string[];
   accountOwners?: string[];
   oktaAccountOwners?: string[];
+  availableTags?: string[];
 }
 
 const selectClass = "w-full px-4 py-2 bg-white border border-gray-300 text-gray-900 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50";
 const inputClass = "w-full px-4 py-2 bg-white border border-gray-300 text-gray-900 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 placeholder-gray-400";
 
-export default function SearchBar({ filters, onFiltersChange, industries = [], accountOwners = [], oktaAccountOwners = [] }: SearchBarProps) {
+export default function SearchBar({ filters, onFiltersChange, industries = [], accountOwners = [], oktaAccountOwners = [], availableTags = [] }: SearchBarProps) {
   const { perspective } = usePerspective();
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
 
@@ -157,6 +159,7 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
     minPriorityValue !== null && (minPriorityValue as number) > 1,
     filters.revenue,
     ownerValue,
+    filters.tag,
     filters.triageAuth0Tier,
     filters.triageOktaTier,
     filters.freshness,
@@ -270,6 +273,25 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
                     {ownersList.map((owner) => (
                       <option key={owner} value={owner}>
                         {owner}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="tag" className="block text-sm font-medium text-gray-600 mb-2">
+                    Tag
+                  </label>
+                  <select
+                    id="tag"
+                    value={filters.tag}
+                    onChange={(e) => handleFilterChange('tag', e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">All Tags</option>
+                    {availableTags.map((tag) => (
+                      <option key={tag} value={tag}>
+                        {tag}
                       </option>
                     ))}
                   </select>

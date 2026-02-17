@@ -30,13 +30,9 @@ export interface CompanyInfo {
   industry: string;
 }
 
-export async function researchCompany(company: CompanyInfo, model?: string): Promise<ResearchResult> {
-  const agentModel = model || 'gpt-5.2';
-  const agent = new Agent({
-    model: agentModel,
-    name: 'Auth0 SDR Researcher - ANZ',
+// ─── Auth0 Agent Instructions ────────────────────────────────────────────────
 
-    instructions: `You are an expert SDR (Sales Development Representative) researcher working for Auth0 in the Australia/New Zealand region. Your role is to build comprehensive account profiles for CIAM (Customer Identity and Access Management) opportunities.
+const AUTH0_AGENT_INSTRUCTIONS = `You are an expert SDR (Sales Development Representative) researcher working for Auth0 in the Australia/New Zealand region. Your role is to build comprehensive account profiles for CIAM (Customer Identity and Access Management) opportunities.
 
 **Your Perspective:**
 - You work for Auth0, a leading CIAM platform
@@ -60,15 +56,20 @@ export async function researchCompany(company: CompanyInfo, model?: string): Pro
 - Always provide factual, detailed findings with specific data points and sources
 - Be thorough and professional; if information is not publicly available, state that clearly
 
-Format all responses in markdown with bold text, bullet points, and links to sources.`,
-    tools: [webSearchTool()],
-  });
+Format all responses in markdown with bold text, bullet points, and links to sources.`;
 
-  try {
-    const companyIdentifier = company.domain ? `${company.company_name} (${company.domain})` : company.company_name;
+// ─── Research Section Definitions ────────────────────────────────────────────
 
-    // Research current authentication solution
-    const authPrompt = `Research ${companyIdentifier} and identify their current authentication and identity management solution. Look for:
+export const AUTH0_RESEARCH_SECTIONS: Record<string, {
+  label: string;
+  dbColumn: string;
+  buildPrompt: (companyIdentifier: string, companyName: string, industry: string, extraContext?: string) => string;
+}> = {
+  current_auth_solution: {
+    label: 'Current Auth Solution',
+    dbColumn: 'current_auth_solution',
+    buildPrompt: (companyIdentifier, _companyName, _industry, extraContext) => {
+      let prompt = `Research ${companyIdentifier} and identify their current authentication and identity management solution. Look for:
 - What authentication providers or platforms they use (Auth0, Okta, Firebase, custom, etc.)
 - How they handle user authentication (SSO, MFA, social login)
 - Any public information about their identity infrastructure
@@ -81,11 +82,15 @@ Format all responses in markdown with bold text, bullet points, and links to sou
 - Organize with clear sections if helpful
 
 Provide detailed, well-formatted findings.`;
-
-    const authResult = await run(agent, authPrompt);
-
-    // Research customer base
-    const customerPrompt = `Research ${company.company_name}'s customer base and scale:
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  customer_base_info: {
+    label: 'Customer Base',
+    dbColumn: 'customer_base_info',
+    buildPrompt: (_companyIdentifier, companyName, _industry, extraContext) => {
+      let prompt = `Research ${companyName}'s customer base and scale:
 - Approximate number of users/customers they serve
 - B2C vs B2B model
 - Growth indicators and user base trends
@@ -98,11 +103,15 @@ Provide detailed, well-formatted findings.`;
 - Include [links](url) to sources when available
 
 Provide specific, well-formatted findings with data.`;
-
-    const customerResult = await run(agent, customerPrompt);
-
-    // Research security incidents
-    const securityPrompt = `Search for security incidents, data breaches, and compliance information for ${company.company_name}:
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  security_incidents: {
+    label: 'Security & Compliance',
+    dbColumn: 'security_incidents',
+    buildPrompt: (_companyIdentifier, companyName, _industry, extraContext) => {
+      let prompt = `Search for security incidents, data breaches, and compliance information for ${companyName}:
 - Any reported security incidents or breaches (especially affecting ANZ customers)
 - Compliance requirements (Australian Privacy Act, NZ Privacy Act, GDPR, SOC2, HIPAA, etc.)
 - Security certifications
@@ -117,11 +126,15 @@ Provide specific, well-formatted findings with data.`;
 - Highlight ANZ-relevant compliance and security considerations
 
 Provide detailed, chronological findings from an Auth0 ANZ SDR perspective.`;
-
-    const securityResult = await run(agent, securityPrompt);
-
-    // Research news and funding
-    const newsPrompt = `Find recent news and funding information for ${company.company_name}:
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  news_and_funding: {
+    label: 'News & Funding',
+    dbColumn: 'news_and_funding',
+    buildPrompt: (_companyIdentifier, companyName, _industry, extraContext) => {
+      let prompt = `Find recent news and funding information for ${companyName}:
 - Recent funding rounds (amounts, investors, dates) - prioritize ANZ market activity
 - Annual reports or financial highlights
 - ANZ expansion plans or regional growth initiatives
@@ -137,11 +150,15 @@ Focus on news from the last 12-18 months, with emphasis on ANZ market presence.
 - Highlight ANZ-specific news and regional relevance
 
 Provide chronological, well-formatted news with sources from an Auth0 ANZ SDR perspective.`;
-
-    const newsResult = await run(agent, newsPrompt);
-
-    // Research tech transformation
-    const techPrompt = `Research ${company.company_name}'s technology transformation and modernization efforts:
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  tech_transformation: {
+    label: 'Tech Transformation',
+    dbColumn: 'tech_transformation',
+    buildPrompt: (_companyIdentifier, companyName, _industry, extraContext) => {
+      let prompt = `Research ${companyName}'s technology transformation and modernization efforts:
 - Cloud migration initiatives
 - Digital transformation projects
 - Platform modernization
@@ -155,11 +172,15 @@ Provide chronological, well-formatted news with sources from an Auth0 ANZ SDR pe
 - Include [links](url) to blog posts and announcements
 
 Provide specific, well-formatted examples.`;
-
-    const techResult = await run(agent, techPrompt);
-
-    // Research prospects
-    const prospectsPrompt = `Find key decision-makers at ${company.company_name} for Auth0 CIAM sales outreach in the ANZ market.
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  prospects: {
+    label: 'Prospects',
+    dbColumn: 'prospects',
+    buildPrompt: (_companyIdentifier, companyName, industry, extraContext) => {
+      let prompt = `Find key decision-makers at ${companyName} for Auth0 CIAM sales outreach in the ANZ market.
 
 **CRITICAL REQUIREMENT: You MUST provide EXACTLY 5 entries.**
 
@@ -176,14 +197,65 @@ Provide specific, well-formatted examples.`;
 **For personas (when real names unavailable):**
 - Create realistic role-based personas relevant to ANZ market
 - Format name as: "Persona: [Role Title]"
-- Example: {"name": "Persona: VP of Engineering (ANZ)", "title": "VP Engineering ANZ", "background": "Typical persona for ${company.industry} in ANZ: Leads regional engineering team, manages local compliance requirements (AU Privacy Act), reports to APAC/Global CTO"}
+- Example: {"name": "Persona: VP of Engineering (ANZ)", "title": "VP Engineering ANZ", "background": "Typical persona for ${industry} in ANZ: Leads regional engineering team, manages local compliance requirements (AU Privacy Act), reports to APAC/Global CTO"}
 
 **Return as JSON array with EXACTLY 5 entries:**
 [{"name": "...", "title": "...", "background": "..."}]
 
 Mix real people and personas as needed to reach exactly 5 entries. For real individuals, note if they are ANZ-based or global. Only include publicly available information.`;
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+};
 
-    const prospectsResult = await run(agent, prospectsPrompt);
+/**
+ * Research a single section for a company.
+ */
+export async function researchSection(
+  company: CompanyInfo,
+  sectionKey: string,
+  additionalContext?: string,
+  model?: string
+): Promise<string> {
+  const section = AUTH0_RESEARCH_SECTIONS[sectionKey];
+  if (!section) {
+    throw new Error(`Unknown Auth0 section key: ${sectionKey}`);
+  }
+
+  const agentModel = model || 'gpt-5.2';
+  const agent = new Agent({
+    model: agentModel,
+    name: 'Auth0 SDR Researcher - ANZ',
+    instructions: AUTH0_AGENT_INSTRUCTIONS,
+    tools: [webSearchTool()],
+  });
+
+  const companyIdentifier = company.domain ? `${company.company_name} (${company.domain})` : company.company_name;
+  const prompt = section.buildPrompt(companyIdentifier, company.company_name, company.industry, additionalContext);
+  const result = await run(agent, prompt);
+  return result.finalOutput || 'No information found';
+}
+
+export async function researchCompany(company: CompanyInfo, model?: string): Promise<ResearchResult> {
+  const agentModel = model || 'gpt-5.2';
+  const agent = new Agent({
+    model: agentModel,
+    name: 'Auth0 SDR Researcher - ANZ',
+    instructions: AUTH0_AGENT_INSTRUCTIONS,
+    tools: [webSearchTool()],
+  });
+
+  try {
+    const companyIdentifier = company.domain ? `${company.company_name} (${company.domain})` : company.company_name;
+
+    // Research using section definitions
+    const authResult = await run(agent, AUTH0_RESEARCH_SECTIONS.current_auth_solution.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    const customerResult = await run(agent, AUTH0_RESEARCH_SECTIONS.customer_base_info.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    const securityResult = await run(agent, AUTH0_RESEARCH_SECTIONS.security_incidents.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    const newsResult = await run(agent, AUTH0_RESEARCH_SECTIONS.news_and_funding.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    const techResult = await run(agent, AUTH0_RESEARCH_SECTIONS.tech_transformation.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    const prospectsResult = await run(agent, AUTH0_RESEARCH_SECTIONS.prospects.buildPrompt(companyIdentifier, company.company_name, company.industry));
 
     // Generate summary
     const summaryPrompt = `Based on all the research about ${company.company_name}, create a concise 2-3 paragraph executive summary for an Auth0 SDR in the ANZ market.

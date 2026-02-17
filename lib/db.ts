@@ -2255,6 +2255,143 @@ export function getAccountsByJobAndTriageTier(
   return stmt.all(jobId, tier) as Account[];
 }
 
+// ─── Preset Tags ────────────────────────────────────────────────────────────
+
+export const PRESET_TAGS = [
+  'Current Auth0 Customer',
+  'Current Okta Customer',
+  'Common Customer (Auth0 + Okta)',
+  'Former Auth0 Customer',
+  'Former Okta Customer',
+  'Competitor Customer',
+  'Partner',
+  'Strategic Account',
+  'Do Not Contact',
+] as const;
+
+// ─── Account Tags ───────────────────────────────────────────────────────────
+
+export interface AccountTag {
+  id: number;
+  account_id: number;
+  tag: string;
+  tag_type: string;
+  created_at: string;
+}
+
+export function getAccountTags(accountId: number): AccountTag[] {
+  const db = getDb();
+  const stmt = db.prepare('SELECT * FROM account_tags WHERE account_id = ? ORDER BY created_at');
+  return stmt.all(accountId) as AccountTag[];
+}
+
+export function addAccountTag(accountId: number, tag: string, tagType: 'preset' | 'custom'): AccountTag {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO account_tags (account_id, tag, tag_type)
+    VALUES (?, ?, ?)
+  `);
+  const result = stmt.run(accountId, tag, tagType);
+  return {
+    id: result.lastInsertRowid as number,
+    account_id: accountId,
+    tag,
+    tag_type: tagType,
+    created_at: new Date().toISOString(),
+  };
+}
+
+export function removeAccountTag(accountId: number, tag: string): boolean {
+  const db = getDb();
+  const stmt = db.prepare('DELETE FROM account_tags WHERE account_id = ? AND tag = ?');
+  const result = stmt.run(accountId, tag);
+  return result.changes > 0;
+}
+
+export function getAllUniqueTags(): string[] {
+  const db = getDb();
+  const stmt = db.prepare('SELECT DISTINCT tag FROM account_tags ORDER BY tag');
+  return (stmt.all() as Array<{ tag: string }>).map(r => r.tag);
+}
+
+// ─── Section Comments ───────────────────────────────────────────────────────
+
+export interface SectionComment {
+  id: number;
+  account_id: number;
+  perspective: string;
+  section_key: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getSectionComments(accountId: number): SectionComment[] {
+  const db = getDb();
+  const stmt = db.prepare('SELECT * FROM section_comments WHERE account_id = ? ORDER BY created_at');
+  return stmt.all(accountId) as SectionComment[];
+}
+
+export function upsertSectionComment(accountId: number, perspective: string, sectionKey: string, content: string): SectionComment {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO section_comments (account_id, perspective, section_key, content)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(account_id, perspective, section_key)
+    DO UPDATE SET content = excluded.content, updated_at = datetime('now')
+  `);
+  stmt.run(accountId, perspective, sectionKey, content);
+  const result = db.prepare(
+    'SELECT * FROM section_comments WHERE account_id = ? AND perspective = ? AND section_key = ?'
+  ).get(accountId, perspective, sectionKey) as SectionComment;
+  return result;
+}
+
+export function deleteSectionComment(accountId: number, perspective: string, sectionKey: string): boolean {
+  const db = getDb();
+  const stmt = db.prepare('DELETE FROM section_comments WHERE account_id = ? AND perspective = ? AND section_key = ?');
+  const result = stmt.run(accountId, perspective, sectionKey);
+  return result.changes > 0;
+}
+
+// ─── Account Notes ──────────────────────────────────────────────────────────
+
+export interface AccountNote {
+  id: number;
+  account_id: number;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getAccountNotes(accountId: number): AccountNote[] {
+  const db = getDb();
+  const stmt = db.prepare('SELECT * FROM account_notes WHERE account_id = ? ORDER BY created_at DESC');
+  return stmt.all(accountId) as AccountNote[];
+}
+
+export function createAccountNote(accountId: number, content: string): AccountNote {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO account_notes (account_id, content)
+    VALUES (?, ?)
+  `);
+  const result = stmt.run(accountId, content);
+  return db.prepare('SELECT * FROM account_notes WHERE id = ?').get(result.lastInsertRowid) as AccountNote;
+}
+
+export function updateAccountNote(noteId: number, content: string): AccountNote | undefined {
+  const db = getDb();
+  db.prepare("UPDATE account_notes SET content = ?, updated_at = datetime('now') WHERE id = ?").run(content, noteId);
+  return db.prepare('SELECT * FROM account_notes WHERE id = ?').get(noteId) as AccountNote | undefined;
+}
+
+export function deleteAccountNote(noteId: number): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM account_notes WHERE id = ?').run(noteId);
+  return result.changes > 0;
+}
+
 export function deleteEmployeeCountJob(jobId: number): boolean {
   const db = getDb();
 

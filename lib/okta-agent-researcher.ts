@@ -271,6 +271,199 @@ function getDefaultPersonas(industry: string) {
   ];
 }
 
+// ─── Research Section Definitions ────────────────────────────────────────────
+
+export const OKTA_RESEARCH_SECTIONS: Record<string, {
+  label: string;
+  dbColumn: string;
+  buildPrompt: (companyIdentifier: string, companyName: string, industry: string, extraContext?: string) => string;
+}> = {
+  okta_current_iam_solution: {
+    label: 'IAM Solution',
+    dbColumn: 'okta_current_iam_solution',
+    buildPrompt: (companyIdentifier, _companyName, _industry, extraContext) => {
+      let prompt = `Research ${companyIdentifier} and identify their current identity and access management (IAM) solution for their workforce. Look for:
+
+- What IAM providers or platforms they use for employees and contractors (Okta, Microsoft Entra ID / Azure AD, Ping Identity, ForgeRock, CyberArk, SailPoint, on-prem Active Directory, LDAP, custom, etc.)
+- How they handle workforce authentication (Single Sign-On, Multi-Factor Authentication, passwordless, passkeys)
+- Directory services and user provisioning/deprovisioning approach
+- Identity governance posture
+- Privileged access management (PAM) tools in use
+- Any Zero Trust architecture initiatives
+
+**Return your findings in MARKDOWN format with:**
+- Use **bold** for important terms and platform names
+- Use bullet points for multiple findings
+- Include [links](url) to sources when available
+
+Provide detailed, well-formatted findings.`;
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  okta_workforce_info: {
+    label: 'Workforce & IT',
+    dbColumn: 'okta_workforce_info',
+    buildPrompt: (_companyIdentifier, companyName, _industry, extraContext) => {
+      let prompt = `Research ${companyName}'s workforce, IT environment, and organisational complexity:
+
+- Approximate number of employees and contractors
+- Number of office locations and remote/hybrid work policies
+- Organisational structure (divisions, subsidiaries)
+- Recent M&A activity
+- IT complexity indicators
+
+**Return your findings in MARKDOWN format with:**
+- Use **bold** for key numbers and metrics
+- Use bullet points to organize different aspects
+- Include [links](url) to sources when available
+
+Provide specific, well-formatted findings with data.`;
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  okta_security_incidents: {
+    label: 'Security & Compliance',
+    dbColumn: 'okta_security_incidents',
+    buildPrompt: (_companyIdentifier, companyName, _industry, extraContext) => {
+      let prompt = `Search for security incidents, data breaches, Zero Trust maturity, and compliance information for ${companyName}:
+
+- Any reported security incidents or breaches
+- Compliance requirements (APRA CPS 234, ASD Essential Eight, Australian Privacy Act, etc.)
+- Zero Trust strategy announcements
+- Security certifications held
+
+**Return your findings in MARKDOWN format with:**
+- Use **bold** for dates, certifications, and compliance standards
+- Use bullet points for incidents and requirements
+- Include [links](url) to news sources and reports
+
+Provide detailed findings from an Okta ANZ SDR perspective.`;
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  okta_news_and_funding: {
+    label: 'News & Funding',
+    dbColumn: 'okta_news_and_funding',
+    buildPrompt: (_companyIdentifier, companyName, _industry, extraContext) => {
+      let prompt = `Find recent news and funding information for ${companyName}:
+
+- Recent funding rounds, IPO status, financial highlights
+- Mergers and acquisitions
+- IT modernisation initiatives
+- Leadership changes (new CIO, CISO)
+- AI adoption or agentic AI initiatives
+
+Focus on news from the last 12-18 months.
+
+**Return your findings in MARKDOWN format with:**
+- Use **bold** for funding amounts, dates, and key announcements
+- Use bullet points to organize different news items
+- Include [links](url) to news sources
+
+Provide chronological, well-formatted news from an Okta ANZ SDR perspective.`;
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  okta_tech_transformation: {
+    label: 'Tech Transformation',
+    dbColumn: 'okta_tech_transformation',
+    buildPrompt: (_companyIdentifier, companyName, _industry, extraContext) => {
+      let prompt = `Research ${companyName}'s technology transformation and IT modernisation efforts:
+
+- Cloud migration initiatives
+- Active Directory migration or consolidation
+- Zero Trust architecture implementation
+- Platform modernisation and SaaS adoption
+- AI and automation initiatives
+
+**Return your findings in MARKDOWN format with:**
+- Use **bold** for technology names and platforms
+- Use bullet points for different initiatives
+- Include [links](url) to blog posts and announcements
+
+Provide specific, well-formatted examples.`;
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  okta_ecosystem: {
+    label: 'Okta Ecosystem',
+    dbColumn: 'okta_ecosystem',
+    buildPrompt: (_companyIdentifier, companyName, _industry, extraContext) => {
+      let prompt = `Research ${companyName}'s existing relationship with the Okta ecosystem:
+
+- Are they an existing Okta customer?
+- Do they use Auth0?
+- Are they listed in the Okta Integration Network (OIN)?
+- Do they use competing IAM platforms?
+
+**Based on findings, classify opportunity as:** expansion, competitive_displacement, net_new, or unknown.
+
+**Return your findings in MARKDOWN format with:**
+- A clear **Opportunity Classification** section
+- Use **bold** for vendor names and classifications
+- Include [links](url) to sources
+
+Provide detailed findings.`;
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+  okta_prospects: {
+    label: 'Prospects',
+    dbColumn: 'okta_prospects',
+    buildPrompt: (_companyIdentifier, companyName, industry, extraContext) => {
+      let prompt = `Find key decision-makers at ${companyName} for Okta Workforce Identity sales outreach in the ANZ market.
+
+**CRITICAL REQUIREMENT: You MUST provide EXACTLY 5 entries.**
+
+**Prioritize ANZ-based decision makers.** If you cannot find 5 specific named individuals, fill remaining slots with IDEAL PERSONAS.
+
+**Return as JSON array with EXACTLY 5 entries. Each entry MUST have these exact fields:**
+[{"name": "...", "title": "...", "background": "...", "location": "ANZ|APAC|Global|Unknown", "isPersona": true|false}]
+
+Mix real people and personas as needed. Only include publicly available information.`;
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
+};
+
+/**
+ * Research a single Okta section for a company.
+ */
+export async function researchOktaSection(
+  company: CompanyInfo,
+  sectionKey: string,
+  additionalContext?: string,
+  model?: string
+): Promise<string> {
+  const section = OKTA_RESEARCH_SECTIONS[sectionKey];
+  if (!section) {
+    throw new Error(`Unknown Okta section key: ${sectionKey}`);
+  }
+
+  const agentModel = model || 'gpt-5.2';
+  // Use a generic agent for single-section re-runs
+  const agent = new Agent({
+    model: agentModel,
+    name: 'Okta SDR Section Researcher',
+    instructions: OKTA_BASE_INSTRUCTIONS,
+    tools: [webSearchTool()],
+  });
+
+  const companyIdentifier = company.domain
+    ? `${company.company_name} (${company.domain})`
+    : company.company_name;
+  const prompt = section.buildPrompt(companyIdentifier, company.company_name, company.industry, additionalContext);
+  const result = await run(agent, prompt);
+  return result.finalOutput || 'No information found';
+}
+
 // ─── Main Research Function ────────────────────────────────────────────────────
 
 export async function researchCompany(company: CompanyInfo, model?: string): Promise<ResearchResult> {
