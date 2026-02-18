@@ -5,9 +5,7 @@
 # A guided installer for non-technical users.
 # Run with: bash <(curl -fsSL https://raw.githubusercontent.com/charlie-webber-ciam/agent-sdr/main/scripts/setup.sh)
 # =============================================================================
-
 set -eo pipefail
-
 # ---------------------------------------------------------------------------
 # Colors and formatting
 # ---------------------------------------------------------------------------
@@ -17,13 +15,11 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
-
 success() { echo -e "${GREEN}✔${NC} $1"; }
 fail()    { echo -e "${RED}✘ $1${NC}"; }
 info()    { echo -e "${BLUE}→${NC} $1"; }
 warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
 header()  { echo -e "\n${BOLD}$1${NC}"; }
-
 # ---------------------------------------------------------------------------
 # Cleanup on exit
 # ---------------------------------------------------------------------------
@@ -33,27 +29,23 @@ cleanup() {
   :
 }
 trap cleanup EXIT
-
 # ---------------------------------------------------------------------------
 # Migration state (set by detect_existing_install, used by restore_migrated_data)
 # ---------------------------------------------------------------------------
 MIGRATED_DB_PATH=""
 MIGRATED_API_KEY=""
 MIGRATED_OLD_DIR=""
-
 # ---------------------------------------------------------------------------
 # Pre-flight checks
 # ---------------------------------------------------------------------------
 preflight_checks() {
   header "Running pre-flight checks..."
-
   # macOS only
   if [[ "$(uname)" != "Darwin" ]]; then
     fail "This script only supports macOS. Detected: $(uname)"
     exit 1
   fi
   success "Running on macOS"
-
   # Internet connectivity
   if ! curl -s --connect-timeout 5 https://github.com > /dev/null 2>&1; then
     fail "No internet connection detected."
@@ -61,7 +53,6 @@ preflight_checks() {
     exit 1
   fi
   success "Internet connection OK"
-
   # Disk space (need at least 2 GB free)
   free_space_mb=$(df -m "$HOME" | awk 'NR==2 {print $4}')
   if [[ "$free_space_mb" -lt 2048 ]]; then
@@ -71,16 +62,13 @@ preflight_checks() {
   fi
   success "Disk space OK (${free_space_mb} MB free)"
 }
-
 # ---------------------------------------------------------------------------
 # Detect existing installation in a non-standard location
 # ---------------------------------------------------------------------------
 detect_existing_install() {
   header "Checking for existing installation..."
-
   local canonical="$HOME/agent-sdr"
   local found_dirs=()
-
   # Search for agent-sdr directories in common locations (shallow search).
   # Only checks places the old setup script or a casual user would have put it.
   while IFS= read -r dir; do
@@ -91,7 +79,6 @@ detect_existing_install() {
     fi
   done < <(find "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads" \
     -maxdepth 3 -type d -name "*agent*sdr*" -not -name "*.backup.*" 2>/dev/null | sort -u)
-
   # Also check immediate children of $HOME (e.g. ~/agent-sdr-old, ~/my-agent-sdr)
   while IFS= read -r dir; do
     [[ "$dir" == "$canonical" ]] && continue
@@ -99,24 +86,19 @@ detect_existing_install() {
       found_dirs+=("$dir")
     fi
   done < <(find "$HOME" -maxdepth 1 -type d -name "*agent*sdr*" -not -name "*.backup.*" 2>/dev/null)
-
   if [[ ${#found_dirs[@]} -eq 0 ]]; then
     success "No previous installation found"
     return
   fi
-
   local old_install="${found_dirs[0]}"
   local old_db="$old_install/data/accounts.db"
   local old_env="$old_install/.env.local"
-
   if [[ ! -f "$old_db" ]]; then
     success "No research data to migrate"
     return
   fi
-
   local db_size
   db_size=$(du -h "$old_db" | cut -f1)
-
   echo ""
   info "Found a previous installation at:"
   echo "    $old_install"
@@ -127,10 +109,8 @@ detect_existing_install() {
     info "Skipping migration. Starting fresh."
     return
   fi
-
   MIGRATED_DB_PATH="$old_db"
   MIGRATED_OLD_DIR="$old_install"
-
   # Extract API key from old .env.local so user doesn't have to re-enter it
   if [[ -f "$old_env" ]]; then
     MIGRATED_API_KEY=$(grep -E '^OPENAI_API_KEY=' "$old_env" 2>/dev/null | cut -d'=' -f2-)
@@ -138,10 +118,8 @@ detect_existing_install() {
       info "API key found in previous configuration"
     fi
   fi
-
   success "Data will be migrated after setup completes"
 }
-
 # ---------------------------------------------------------------------------
 # Restore migrated data into the new install
 # ---------------------------------------------------------------------------
@@ -149,11 +127,8 @@ restore_migrated_data() {
   if [[ -z "$MIGRATED_DB_PATH" && -z "$MIGRATED_API_KEY" ]]; then
     return
   fi
-
   header "Migrating data from previous installation..."
-
   local install_dir="$HOME/agent-sdr"
-
   # Restore .env.local with migrated API key (before configure_env runs)
   if [[ -n "$MIGRATED_API_KEY" && ! -f "$install_dir/.env.local" ]]; then
     (
@@ -162,7 +137,6 @@ restore_migrated_data() {
 # Agent SDR - OpenAI Configuration
 OPENAI_API_KEY=$MIGRATED_API_KEY
 OPENAI_BASE_URL=https://llm.atko.ai
-
 # Optional parallel processing (uncomment to enable)
 # ENABLE_PARALLEL_PROCESSING=true
 # PROCESSING_CONCURRENCY=5
@@ -170,7 +144,6 @@ EOF
     )
     success "API key migrated (base URL set to https://llm.atko.ai)"
   fi
-
   # Restore research data (only if it doesn't already exist at the destination)
   if [[ -n "$MIGRATED_DB_PATH" && -f "$MIGRATED_DB_PATH" ]]; then
     if [[ -f "$install_dir/data/accounts.db" ]]; then
@@ -182,7 +155,6 @@ EOF
       db_size=$(du -h "$install_dir/data/accounts.db" | cut -f1)
       success "Research database migrated ($db_size)"
     fi
-
     # Also migrate preprocessed CSV files if present
     local old_preprocessed
     old_preprocessed="$(dirname "$MIGRATED_DB_PATH")/preprocessed"
@@ -192,94 +164,73 @@ EOF
     fi
   fi
 }
-
 # ---------------------------------------------------------------------------
 # Step 1: Xcode Command Line Tools
 # ---------------------------------------------------------------------------
 install_xcode_tools() {
   header "Step 1/7: Xcode Command Line Tools"
-
   if xcode-select -p > /dev/null 2>&1; then
     success "Xcode Command Line Tools already installed"
     return
   fi
-
   info "Installing Xcode Command Line Tools..."
   echo "  A system dialog will appear asking you to install. Click \"Install\" and wait."
   echo ""
-
   xcode-select --install 2>/dev/null || true
-
   # Wait for the user to finish the GUI installer
   echo ""
   info "Waiting for installation to complete..."
   echo "  (This can take several minutes. Do NOT close the installer dialog.)"
   echo ""
-
   until xcode-select -p > /dev/null 2>&1; do
     sleep 5
   done
-
   success "Xcode Command Line Tools installed"
 }
-
 # ---------------------------------------------------------------------------
 # Step 2: nvm (Node Version Manager)
 # ---------------------------------------------------------------------------
 install_nvm() {
   header "Step 2/7: Node Version Manager (nvm)"
-
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-
   # Source nvm if it exists
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
     source "$NVM_DIR/nvm.sh"
   fi
-
   if command -v nvm > /dev/null 2>&1; then
     success "nvm already installed"
     return
   fi
-
   info "Installing nvm..."
-
   # Install via official install script (more reliable across setups than Homebrew)
   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-
   export NVM_DIR="$HOME/.nvm"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
     source "$NVM_DIR/nvm.sh"
   fi
-
   if ! command -v nvm > /dev/null 2>&1; then
     fail "nvm installation failed."
     echo "  Try installing it manually: https://github.com/nvm-sh/nvm#installing-and-updating"
     exit 1
   fi
-
   success "nvm installed"
 }
-
 # ---------------------------------------------------------------------------
 # Step 3: Node.js 24
 # ---------------------------------------------------------------------------
 install_node() {
   header "Step 3/7: Node.js 24"
-
   # Ensure nvm is loaded
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
     source "$NVM_DIR/nvm.sh"
   fi
-
   local current_node
   current_node=$(nvm current 2>/dev/null || echo "none")
-
   if [[ "$current_node" == v24.* ]]; then
     success "Node.js 24 already active ($current_node)"
     return
   fi
-
   # Check if Node 24 is installed but not active
   if nvm ls 24 > /dev/null 2>&1; then
     info "Switching to Node.js 24..."
@@ -289,10 +240,8 @@ install_node() {
     nvm install 24
     nvm use 24
   fi
-
   # Set as default so future terminals use it
   nvm alias default 24 > /dev/null 2>&1 || true
-
   local version
   version=$(node --version 2>/dev/null || echo "unknown")
   if [[ "$version" == v24.* ]]; then
@@ -302,16 +251,13 @@ install_node() {
     exit 1
   fi
 }
-
 # ---------------------------------------------------------------------------
 # Step 4: Clone or update the repository
 # ---------------------------------------------------------------------------
 clone_repo() {
   header "Step 4/7: Agent SDR Repository"
-
   local repo_url="https://github.com/charlie-webber-ciam/agent-sdr.git"
   local install_dir="$HOME/agent-sdr"
-
   if [[ -d "$install_dir/.git" ]]; then
     info "Repository already exists. Pulling latest changes..."
     if git -C "$install_dir" pull --ff-only; then
@@ -321,11 +267,9 @@ clone_repo() {
     fi
     return
   fi
-
   if [[ -d "$install_dir" ]]; then
     warn "$install_dir exists but is not a git repo."
     echo "  Moving it to ${install_dir}.backup and cloning fresh."
-
     # Preserve existing data directory and config before moving to backup
     local tmp_preserve=""
     if [[ -d "$install_dir/data" || -f "$install_dir/.env.local" ]]; then
@@ -339,11 +283,9 @@ clone_repo() {
         info "Preserving existing configuration"
       fi
     fi
-
     local backup_path="${install_dir}.backup.$(date +%s)"
     mv "$install_dir" "$backup_path"
   fi
-
   info "Cloning repository to $install_dir..."
   if git clone "$repo_url" "$install_dir"; then
     success "Repository cloned to $install_dir"
@@ -360,7 +302,6 @@ clone_repo() {
     echo "  Check your internet connection and try again."
     exit 1
   fi
-
   # Restore preserved data into the fresh clone
   if [[ -n "$tmp_preserve" ]]; then
     if [[ -d "$tmp_preserve/data" ]]; then
@@ -374,27 +315,22 @@ clone_repo() {
     rm -rf "$tmp_preserve"
   fi
 }
-
 # ---------------------------------------------------------------------------
 # Step 5: Environment variables (.env.local)
 # ---------------------------------------------------------------------------
 configure_env() {
   header "Step 5/7: OpenAI Configuration"
-
   local env_file="$HOME/agent-sdr/.env.local"
-
   if [[ -f "$env_file" ]]; then
     success "Configuration file already exists (.env.local)"
     info "Keeping your existing credentials. Delete $env_file and re-run to reconfigure."
     return
   fi
-
   echo ""
   echo "  The Agent SDR uses an API key to research accounts."
   echo ""
   echo "  If you don't have your API key yet, ask your team lead."
   echo ""
-
   # Prompt for API key (silent input to avoid exposing the key)
   local api_key=""
   while [[ -z "$api_key" ]]; do
@@ -404,9 +340,7 @@ configure_env() {
       warn "API key cannot be empty. Please try again."
     fi
   done
-
   local base_url="https://llm.atko.ai"
-
   # Write the env file with restrictive permissions
   (
     umask 077
@@ -414,35 +348,28 @@ configure_env() {
 # Agent SDR - OpenAI Configuration
 OPENAI_API_KEY=$api_key
 OPENAI_BASE_URL=$base_url
-
 # Optional parallel processing (uncomment to enable)
 # ENABLE_PARALLEL_PROCESSING=true
 # PROCESSING_CONCURRENCY=5
 EOF
   )
-
   success "Configuration saved to .env.local"
 }
-
 # ---------------------------------------------------------------------------
 # Step 6: npm install
 # ---------------------------------------------------------------------------
 run_npm_install() {
   header "Step 6/7: Installing Dependencies"
-
   local install_dir="$HOME/agent-sdr"
-
   # Ensure nvm/node is available
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
     source "$NVM_DIR/nvm.sh"
   fi
   nvm use 24 > /dev/null 2>&1 || true
-
   info "Running npm install (this may take a couple of minutes)..."
   echo "  (The better-sqlite3 package needs to compile native code -- this is normal.)"
   echo ""
-
   if (cd "$install_dir" && npm install 2>&1); then
     echo ""
     success "All dependencies installed"
@@ -458,15 +385,12 @@ run_npm_install() {
     exit 1
   fi
 }
-
 # ---------------------------------------------------------------------------
 # Step 7: Create Desktop launcher and start the app
 # ---------------------------------------------------------------------------
 create_launcher_and_start() {
   header "Step 7/7: Desktop Launcher & First Launch"
-
   local launcher="$HOME/Desktop/Agent SDR.command"
-
   # Create the Desktop launcher
   cat > "$launcher" <<'LAUNCHER'
 #!/bin/bash
@@ -474,58 +398,46 @@ create_launcher_and_start() {
 # Agent SDR - Double-click to start
 # ================================================
 cd ~/agent-sdr || { echo "Error: ~/agent-sdr not found."; read -rp "Press Enter to close."; exit 1; }
-
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 if [[ -s "$NVM_DIR/nvm.sh" ]]; then
   source "$NVM_DIR/nvm.sh"
 fi
 nvm use 24 2>/dev/null
-
 # Kill any existing process on port 3000
 if lsof -ti :3000 > /dev/null 2>&1; then
   echo "  Stopping existing process on port 3000..."
   kill $(lsof -ti :3000) 2>/dev/null || true
   sleep 1
 fi
-
 echo ""
 echo "  Starting Agent SDR..."
 echo "  The app will open in your browser at http://localhost:3000"
 echo "  Keep this window open while using the app. Close it to stop."
 echo ""
-
 npm run dev &
 DEV_PID=$!
-
 sleep 4
 open http://localhost:3000
-
 # Wait for the dev server process; when this window is closed, it stops
 wait $DEV_PID
 LAUNCHER
-
   chmod +x "$launcher"
   success "Desktop launcher created: Agent SDR.command"
-
   # Kill any existing process on port 3000
   if lsof -ti :3000 > /dev/null 2>&1; then
     info "Stopping existing process on port 3000..."
     kill $(lsof -ti :3000) 2>/dev/null || true
     sleep 1
   fi
-
   # Start the app
   info "Starting Agent SDR for the first time..."
-
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
     source "$NVM_DIR/nvm.sh"
   fi
   nvm use 24 > /dev/null 2>&1 || true
-
   (cd "$HOME/agent-sdr" && npm run dev > /dev/null 2>&1) &
   local dev_pid=$!
-
   # Give the dev server a moment to start
   info "Waiting for the dev server to start..."
   local attempts=0
@@ -538,13 +450,10 @@ LAUNCHER
       return
     fi
   done
-
   open http://localhost:3000
-
   echo ""
   success "Agent SDR is running at http://localhost:3000"
 }
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -566,9 +475,7 @@ main() {
   echo "  The app will be installed at: ~/agent-sdr"
   echo "  A launcher shortcut will be placed on your Desktop."
   echo ""
-
   read -rp "  Press Enter to begin (or Ctrl+C to cancel)... "
-
   preflight_checks
   detect_existing_install
   install_xcode_tools
@@ -579,7 +486,6 @@ main() {
   configure_env
   run_npm_install
   create_launcher_and_start
-
   echo ""
   echo -e "${BOLD}============================================${NC}"
   echo -e "${GREEN}${BOLD}  Setup complete!${NC}"
@@ -593,7 +499,6 @@ main() {
   echo "  To stop the app:"
   echo "    - Close the Terminal window running it"
   echo ""
-
   # If we migrated from an old location, tell the user they can clean it up
   if [[ -n "$MIGRATED_OLD_DIR" ]]; then
     echo "  Your data was migrated from:"
@@ -603,9 +508,7 @@ main() {
     echo "    rm -rf \"$MIGRATED_OLD_DIR\""
     echo ""
   fi
-
   echo "  If you have any issues, reach out to your team lead."
   echo ""
 }
-
 main "$@"
