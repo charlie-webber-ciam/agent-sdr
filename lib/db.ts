@@ -18,6 +18,7 @@ export function getDb(): Database.Database {
   if (!db) {
     db = new Database(DB_PATH);
     db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
 
     // Initialize schema
     const schema = readFileSync(join(process.cwd(), 'lib', 'schema.sql'), 'utf-8');
@@ -640,7 +641,11 @@ export function deleteAccount(id: number): boolean {
   const db = getDb();
 
   try {
-    // Delete the account (CASCADE will handle foreign keys if needed)
+    // Explicitly delete child rows as a safety net alongside CASCADE
+    db.prepare('DELETE FROM account_tags WHERE account_id = ?').run(id);
+    db.prepare('DELETE FROM section_comments WHERE account_id = ?').run(id);
+    db.prepare('DELETE FROM account_notes WHERE account_id = ?').run(id);
+
     const stmt = db.prepare('DELETE FROM accounts WHERE id = ?');
     const result = stmt.run(id);
 
@@ -657,6 +662,12 @@ export function deleteAccountsByIds(ids: number[]): number {
 
   const db = getDb();
   const placeholders = ids.map(() => '?').join(',');
+
+  // Explicitly delete child rows as a safety net alongside CASCADE
+  db.prepare(`DELETE FROM account_tags WHERE account_id IN (${placeholders})`).run(...ids);
+  db.prepare(`DELETE FROM section_comments WHERE account_id IN (${placeholders})`).run(...ids);
+  db.prepare(`DELETE FROM account_notes WHERE account_id IN (${placeholders})`).run(...ids);
+
   const stmt = db.prepare(`DELETE FROM accounts WHERE id IN (${placeholders})`);
   const result = stmt.run(...ids);
   return result.changes;
@@ -1738,14 +1749,14 @@ export function resumeProcessingJob(jobId: number): void {
 export function cancelProcessingJob(jobId: number): void {
   const db = getDb();
 
-  // Update job status to failed (cancelled)
+  // Only cancel jobs that are still pending or processing
   db.prepare(`
     UPDATE processing_jobs
     SET status = 'failed',
         paused = 0,
         updated_at = datetime('now'),
         completed_at = datetime('now')
-    WHERE id = ?
+    WHERE id = ? AND status IN ('pending', 'processing')
   `).run(jobId);
 
   // Reset any accounts that were processing to pending
@@ -1761,6 +1772,11 @@ export function deleteProcessingJob(jobId: number): boolean {
   const db = getDb();
 
   try {
+    // Delete child rows of accounts belonging to this job
+    db.prepare('DELETE FROM account_tags WHERE account_id IN (SELECT id FROM accounts WHERE job_id = ?)').run(jobId);
+    db.prepare('DELETE FROM section_comments WHERE account_id IN (SELECT id FROM accounts WHERE job_id = ?)').run(jobId);
+    db.prepare('DELETE FROM account_notes WHERE account_id IN (SELECT id FROM accounts WHERE job_id = ?)').run(jobId);
+
     // Delete associated accounts
     db.prepare('DELETE FROM accounts WHERE job_id = ?').run(jobId);
 
@@ -2253,6 +2269,65 @@ export function getAccountsByJobAndTriageTier(
     ORDER BY id
   `);
   return stmt.all(jobId, tier) as Account[];
+}
+
+// Triage job cancel/delete operations
+
+export function cancelTriageJob(jobId: number): void {
+  const db = getDb();
+
+  // Only cancel jobs that are still pending or processing
+  db.prepare(`
+    UPDATE triage_jobs
+    SET status = 'failed',
+        paused = 0,
+        updated_at = datetime('now'),
+        completed_at = datetime('now')
+    WHERE id = ? AND status IN ('pending', 'processing')
+  `).run(jobId);
+}
+
+export function deleteTriageJob(jobId: number): boolean {
+  const db = getDb();
+
+  try {
+    // Reset triage data on associated accounts (triage jobs use processing_jobs.id as job_id)
+    // We can't know the processing job ID from the triage job alone, so we clear based
+    // on the triage job's filename matching. Instead, just delete the triage job record.
+    const result = db.prepare('DELETE FROM triage_jobs WHERE id = ?').run(jobId);
+    return result.changes > 0;
+  } catch (error) {
+    console.error('Error deleting triage job:', error);
+    return false;
+  }
+}
+
+// Categorization job cancel/delete operations
+
+export function cancelCategorizationJob(jobId: number): void {
+  const db = getDb();
+
+  // Only cancel jobs that are still pending or processing
+  db.prepare(`
+    UPDATE categorization_jobs
+    SET status = 'failed',
+        current_account_id = NULL,
+        updated_at = datetime('now'),
+        completed_at = datetime('now')
+    WHERE id = ? AND status IN ('pending', 'processing')
+  `).run(jobId);
+}
+
+export function deleteCategorizationJob(jobId: number): boolean {
+  const db = getDb();
+
+  try {
+    const result = db.prepare('DELETE FROM categorization_jobs WHERE id = ?').run(jobId);
+    return result.changes > 0;
+  } catch (error) {
+    console.error('Error deleting categorization job:', error);
+    return false;
+  }
 }
 
 // ─── Preset Tags ────────────────────────────────────────────────────────────

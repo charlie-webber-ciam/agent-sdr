@@ -2,6 +2,44 @@ import { NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
 import { createPreprocessingJob } from '@/lib/db';
 
+// Map common CSV header variations to internal field names.
+const COLUMN_ALIASES: Record<string, string> = {
+  'account name':        'company_name',
+  'account_name':        'company_name',
+  'company name':        'company_name',
+  'company_name':        'company_name',
+  'website':             'domain',
+  'domain':              'domain',
+  'primary industry':    'industry',
+  'primary_industry':    'industry',
+  'industry':            'industry',
+  'auth0 account owner': 'auth0_account_owner',
+  'auth0_account_owner': 'auth0_account_owner',
+  'account owner':       'okta_account_owner',
+  'account_owner':       'okta_account_owner',
+  'okta account owner':  'okta_account_owner',
+  'okta_account_owner':  'okta_account_owner',
+};
+
+function normalizeRecords(records: any[]): any[] {
+  if (records.length === 0) return records;
+  const actualHeaders = Object.keys(records[0]);
+  const headerMap: Record<string, string> = {};
+  for (const header of actualHeaders) {
+    const normalized = COLUMN_ALIASES[header.toLowerCase().trim()];
+    if (normalized) headerMap[header] = normalized;
+  }
+  if (actualHeaders.every(h => !headerMap[h] || headerMap[h] === h)) return records;
+  return records.map(record => {
+    const mapped: any = {};
+    for (const [origKey, value] of Object.entries(record)) {
+      const internalKey = headerMap[origKey] || origKey;
+      if (!(internalKey in mapped)) mapped[internalKey] = value;
+    }
+    return mapped;
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -33,15 +71,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'CSV file is empty' }, { status: 400 });
     }
 
-    // Validate required columns
-    const requiredColumns = ['company_name', 'industry'];
-    const firstRecord = records[0];
-    const missingColumns = requiredColumns.filter(col => !(col in firstRecord));
+    // Normalize column names (supports both old and new header conventions)
+    records = normalizeRecords(records);
 
-    if (missingColumns.length > 0) {
+    const firstRecord = records[0];
+    if (!('company_name' in firstRecord)) {
       return NextResponse.json(
         {
-          error: `Missing required columns: ${missingColumns.join(', ')}. Required: company_name, industry. Optional: domain`,
+          error: 'Missing required column: Account Name',
+          hint: 'CSV must have an "Account Name" column. Optional: Website, Primary Industry',
         },
         { status: 400 }
       );
@@ -63,7 +101,7 @@ export async function POST(request: Request) {
     }));
 
     // Filter out empty company names
-    const validCompanies = companies.filter((c: any) => c.company_name && c.industry);
+    const validCompanies = companies.filter((c: any) => c.company_name);
 
     if (validCompanies.length === 0) {
       return NextResponse.json(

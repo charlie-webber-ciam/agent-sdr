@@ -25,16 +25,19 @@ export async function POST(req: NextRequest) {
     }
 
     const firstRecord = records[0] as any;
-    if (!firstRecord.account_name && !firstRecord.company_name && !firstRecord.Account_Name && !firstRecord.Company_Name) {
+    // Support multiple naming conventions for the account name column
+    const nameKey = ['Account Name', 'account_name', 'company_name', 'Account_Name', 'Company_Name']
+      .find(k => firstRecord[k] !== undefined);
+    if (!nameKey) {
       return NextResponse.json(
-        { error: 'CSV must have an "account_name" or "company_name" column' },
+        { error: 'CSV must have an "Account Name" or "company_name" column' },
         { status: 400 }
       );
     }
 
     // Normalize to account_name
     const accounts = records.map((record: any) => ({
-      account_name: record.account_name || record.company_name || record.Account_Name || record.Company_Name,
+      account_name: record[nameKey],
     })).filter((account: any) => account.account_name); // Remove empty entries
 
     if (accounts.length === 0) {

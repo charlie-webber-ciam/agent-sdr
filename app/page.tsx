@@ -118,6 +118,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshingStale, setRefreshingStale] = useState(false);
   const [interruptedActionLoading, setInterruptedActionLoading] = useState<number | null>(null);
+  const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
   const pollIntervalRef = useRef<number>(5000);
 
   useEffect(() => {
@@ -796,6 +797,33 @@ export default function DashboardPage() {
                     }`}>
                       {job.status.charAt(0).toUpperCase() + job.status.slice(1)}
                     </span>
+                    <button
+                      disabled={deletingJobId === job.id}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!confirm(`Delete job "${job.filename}" and all its accounts?`)) return;
+                        setDeletingJobId(job.id);
+                        try {
+                          const res = await fetch(`/api/process/${job.id}/delete`, { method: 'DELETE' });
+                          if (res.ok) {
+                            setRecentJobs((prev) => prev.filter((j) => j.id !== job.id));
+                            toast.success('Job deleted');
+                          } else {
+                            toast.error('Failed to delete job');
+                          }
+                        } catch {
+                          toast.error('Failed to delete job');
+                        } finally {
+                          setDeletingJobId(null);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                      title="Delete job"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                     <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>

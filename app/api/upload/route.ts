@@ -2,6 +2,58 @@ import { NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
 import { createJob, createAccount, findDuplicateDomains, updateJobTotalAccounts } from '@/lib/db';
 
+// Map common CSV header variations to internal field names.
+// Keys are lowercased for case-insensitive matching.
+const COLUMN_ALIASES: Record<string, string> = {
+  'account name':        'company_name',
+  'account_name':        'company_name',
+  'company name':        'company_name',
+  'company_name':        'company_name',
+  'website':             'domain',
+  'domain':              'domain',
+  'primary industry':    'industry',
+  'primary_industry':    'industry',
+  'industry':            'industry',
+  'auth0 account owner': 'auth0_account_owner',
+  'auth0_account_owner': 'auth0_account_owner',
+  'account owner':       'okta_account_owner',
+  'account_owner':       'okta_account_owner',
+  'okta account owner':  'okta_account_owner',
+  'okta_account_owner':  'okta_account_owner',
+};
+
+/** Normalize CSV records so any supported header variation maps to internal field names. */
+function normalizeRecords(records: any[]): any[] {
+  if (records.length === 0) return records;
+
+  // Build a mapping from the actual CSV headers to internal names
+  const actualHeaders = Object.keys(records[0]);
+  const headerMap: Record<string, string> = {};
+  for (const header of actualHeaders) {
+    const normalized = COLUMN_ALIASES[header.toLowerCase().trim()];
+    if (normalized) {
+      headerMap[header] = normalized;
+    }
+  }
+
+  // If no remapping needed, return as-is
+  if (actualHeaders.every(h => !headerMap[h] || headerMap[h] === h)) {
+    return records;
+  }
+
+  return records.map(record => {
+    const mapped: any = {};
+    for (const [origKey, value] of Object.entries(record)) {
+      const internalKey = headerMap[origKey] || origKey;
+      // Don't overwrite if already set (first alias wins)
+      if (!(internalKey in mapped)) {
+        mapped[internalKey] = value;
+      }
+    }
+    return mapped;
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -41,15 +93,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const requiredColumns = ['company_name', 'industry'];
-    const firstRecord = records[0];
-    const missingColumns = requiredColumns.filter(col => !(col in firstRecord));
+    // Normalize column names (supports both old and new header conventions)
+    records = normalizeRecords(records);
 
-    if (missingColumns.length > 0) {
+    const firstRecord = records[0];
+    if (!('company_name' in firstRecord)) {
       return NextResponse.json(
         {
-          error: `Missing required columns: ${missingColumns.join(', ')}`,
-          hint: 'CSV must have columns: company_name, industry (domain is optional)'
+          error: 'Missing required column: Account Name',
+          hint: 'CSV must have an "Account Name" column. Optional: Website, Primary Industry, Auth0 Account Owner, Account Owner'
         },
         { status: 400 }
       );
@@ -63,13 +115,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate each record has non-empty required values
+    // Validate each record has a non-empty account name (industry is optional)
     for (let i = 0; i < records.length; i++) {
       const record = records[i];
-      if (!record.company_name || !record.industry) {
+      if (!record.company_name) {
         return NextResponse.json(
           {
-            error: `Row ${i + 2} has empty required fields (company_name or industry)`
+            error: `Row ${i + 2} has an empty Account Name`
           },
           { status: 400 }
         );
@@ -147,7 +199,7 @@ export async function POST(request: Request) {
         createAccount(
           record.company_name,
           domain,
-          record.industry,
+          record.industry || '',
           jobId,
           record.auth0_account_owner || undefined,
           record.okta_account_owner || undefined

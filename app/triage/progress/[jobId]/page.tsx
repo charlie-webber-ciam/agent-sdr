@@ -39,6 +39,7 @@ export default function TriageProgressPage({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [processingJobId, setProcessingJobId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Read processingJobId from URL search params
   useEffect(() => {
@@ -151,13 +152,58 @@ export default function TriageProgressPage({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {isComplete && (
+            {isProcessing && (
               <button
-                onClick={() => router.push(`/triage/results/${jobId}?processingJobId=${processingJobId}`)}
-                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+                disabled={actionLoading === 'cancel'}
+                onClick={async () => {
+                  setActionLoading('cancel');
+                  try {
+                    const res = await fetch(`/api/triage/jobs/${jobId}/cancel`, { method: 'POST' });
+                    if (res.ok) {
+                      fetchJobData();
+                    }
+                  } catch {
+                    // ignore
+                  } finally {
+                    setActionLoading(null);
+                  }
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium disabled:bg-gray-300 transition-colors"
               >
-                View Results
+                {actionLoading === 'cancel' ? 'Cancelling...' : 'Cancel'}
               </button>
+            )}
+            {(isComplete || isFailed) && (
+              <>
+                <button
+                  disabled={actionLoading === 'delete'}
+                  onClick={async () => {
+                    if (!confirm('Delete this triage job?')) return;
+                    setActionLoading('delete');
+                    try {
+                      const res = await fetch(`/api/triage/jobs/${jobId}/delete`, { method: 'DELETE' });
+                      if (res.ok) {
+                        router.push('/');
+                      }
+                    } catch {
+                      // ignore
+                    } finally {
+                      setActionLoading(null);
+                    }
+                  }}
+                  className="px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded-lg hover:bg-red-200 font-medium disabled:bg-gray-100 transition-colors"
+                >
+                  {actionLoading === 'delete' ? 'Deleting...' : 'Delete'}
+                </button>
+                {isComplete && (
+                  <button
+                    onClick={() => router.push(`/triage/results/${jobId}?processingJobId=${processingJobId}`)}
+                    className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+                  >
+                    View Results
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
