@@ -481,6 +481,13 @@ if [[ -s "$NVM_DIR/nvm.sh" ]]; then
 fi
 nvm use 24 2>/dev/null
 
+# Kill any existing process on port 3000
+if lsof -ti :3000 > /dev/null 2>&1; then
+  echo "  Stopping existing process on port 3000..."
+  kill $(lsof -ti :3000) 2>/dev/null || true
+  sleep 1
+fi
+
 echo ""
 echo "  Starting Agent SDR..."
 echo "  The app will open in your browser at http://localhost:3000"
@@ -500,11 +507,11 @@ LAUNCHER
   chmod +x "$launcher"
   success "Desktop launcher created: Agent SDR.command"
 
-  # Check if port 3000 is in use
-  if lsof -i :3000 > /dev/null 2>&1; then
-    warn "Port 3000 is already in use. The app may not start correctly."
-    echo "  Close whatever is using port 3000, then double-click \"Agent SDR\" on your Desktop."
-    return
+  # Kill any existing process on port 3000
+  if lsof -ti :3000 > /dev/null 2>&1; then
+    info "Stopping existing process on port 3000..."
+    kill $(lsof -ti :3000) 2>/dev/null || true
+    sleep 1
   fi
 
   # Start the app
