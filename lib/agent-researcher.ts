@@ -1,5 +1,6 @@
 import { Agent, run, webSearchTool, setDefaultOpenAIClient, setTracingDisabled } from '@openai/agents';
 import OpenAI from 'openai';
+import { logDetailedError } from './error-logger';
 
 // Disable tracing — it tries to hit api.openai.com directly, which fails with a custom base URL
 setTracingDisabled(true);
@@ -338,7 +339,7 @@ Provide a compelling, well-formatted summary from an Auth0 ANZ SDR perspective.`
       research_summary: summaryResult.finalOutput || 'No summary available',
     };
   } catch (error) {
-    console.error(`Research error for ${company.company_name}:`, error);
+    logDetailedError(`[Auth0 Agent] Research error for ${company.company_name} (domain: ${company.domain || 'none'}, industry: ${company.industry})`, error);
     throw error;
   }
 }

@@ -1,6 +1,7 @@
 import { Agent, run, webSearchTool, setDefaultOpenAIClient, setTracingDisabled } from '@openai/agents';
 import OpenAI from 'openai';
 import { z } from 'zod';
+import { logDetailedError } from './error-logger';
 
 // Disable tracing — it tries to hit api.openai.com directly, which fails with a custom base URL
 setTracingDisabled(true);
@@ -835,7 +836,7 @@ ${ecosystemResult.finalOutput || 'No information found'}
       priority_score: priorityScore,
     };
   } catch (error) {
-    console.error(`[Okta SDR] Research error for ${company.company_name}:`, error);
+    logDetailedError(`[Okta Agent] Research error for ${company.company_name} (domain: ${company.domain || 'none'}, industry: ${company.industry})`, error);
     throw error;
   }
 }

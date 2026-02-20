@@ -15,6 +15,7 @@ import { analyzeAccountData } from './categorizer';
 import { analyzeOktaAccountData } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
 import { processJobParallel } from './parallel-processor';
+import { logDetailedError } from './error-logger';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -177,7 +178,7 @@ export async function processJobSequential(
             `✓ Auth0 categorization: ${account.company_name} → Tier ${suggestions.tier} (Priority: ${suggestions.priorityScore})`
           );
         } catch (categorizationError) {
-          console.error(`Failed to categorize Auth0 for ${account.company_name}:`, categorizationError);
+          logDetailedError(`[Job ${jobId}] Auth0 categorization failed for account ${account.id} (${account.company_name})`, categorizationError);
           // Continue even if categorization fails - the research is still valuable
         }
       }
@@ -214,7 +215,7 @@ export async function processJobSequential(
             `✓ Okta categorization: ${account.company_name} → Tier ${oktaSuggestions.tier} (Priority: ${oktaSuggestions.priorityScore})`
           );
         } catch (categorizationError) {
-          console.error(`Failed to categorize Okta for ${account.company_name}:`, categorizationError);
+          logDetailedError(`[Job ${jobId}] Okta categorization failed for account ${account.id} (${account.company_name})`, categorizationError);
           // Continue even if categorization fails - the research is still valuable
         }
       }
@@ -238,7 +239,7 @@ export async function processJobSequential(
       await new Promise(resolve => setTimeout(resolve, 1000));
 
     } catch (error) {
-      console.error(`Failed to research ${account.company_name}:`, error);
+      logDetailedError(`[Job ${jobId}] Failed to research account ${account.id} (${account.company_name}, domain: ${account.domain || 'none'}, industry: ${account.industry})`, error);
 
       // Mark account as failed
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

@@ -7,6 +7,7 @@ import {
   researchCompany as researchOkta,
   ResearchResult as OktaResearchResult,
 } from './okta-agent-researcher';
+import { logDetailedError } from './error-logger';
 
 export interface DualResearchResult {
   auth0?: Auth0ResearchResult;
@@ -42,7 +43,7 @@ export async function researchCompanyDual(
         result.auth0 = auth0Result.value;
         console.log(`[Dual Researcher] ✓ Auth0 research completed for ${company.company_name}`);
       } else {
-        console.error(`[Dual Researcher] ✗ Auth0 research failed for ${company.company_name}:`, auth0Result.reason);
+        logDetailedError(`[Dual Researcher] Auth0 research failed for ${company.company_name} (domain: ${company.domain || 'none'}, industry: ${company.industry})`, auth0Result.reason);
       }
 
       // Handle Okta result
@@ -50,7 +51,7 @@ export async function researchCompanyDual(
         result.okta = oktaResult.value;
         console.log(`[Dual Researcher] ✓ Okta research completed for ${company.company_name}`);
       } else {
-        console.error(`[Dual Researcher] ✗ Okta research failed for ${company.company_name}:`, oktaResult.reason);
+        logDetailedError(`[Dual Researcher] Okta research failed for ${company.company_name} (domain: ${company.domain || 'none'}, industry: ${company.industry})`, oktaResult.reason);
       }
 
       // If both failed, throw an error
@@ -69,7 +70,7 @@ export async function researchCompanyDual(
 
     return result;
   } catch (error) {
-    console.error(`[Dual Researcher] Research error for ${company.company_name}:`, error);
+    logDetailedError(`[Dual Researcher] Research error for ${company.company_name} (domain: ${company.domain || 'none'}, industry: ${company.industry})`, error);
     throw error;
   }
 }

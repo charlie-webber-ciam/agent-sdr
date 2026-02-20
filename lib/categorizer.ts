@@ -1,5 +1,6 @@
 import { Account } from './db';
 import OpenAI from 'openai';
+import { logDetailedError } from './error-logger';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -199,7 +200,7 @@ Provide ONLY the JSON response, no additional text.`;
 
     return suggestions;
   } catch (error) {
-    console.error('Error analyzing account:', error);
+    logDetailedError(`[Auth0 Categorizer] Failed to analyze account ${account.company_name} (domain: ${account.domain || 'none'}, industry: ${account.industry})`, error);
     // Return default suggestions on error
     return {
       tier: 'B',

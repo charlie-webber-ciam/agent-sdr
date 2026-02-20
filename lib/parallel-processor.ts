@@ -19,6 +19,7 @@ import {
 import { processAccountWithRetry, AccountProcessingResult } from './account-worker';
 import { ResearchMode } from './dual-researcher';
 import { PROCESSING_CONFIG } from './config';
+import { logDetailedError } from './error-logger';
 
 export async function processJobParallel(
   jobId: number,
@@ -97,7 +98,7 @@ export async function processJobParallel(
           }
         } else {
           // Promise was rejected (shouldn't happen with our error handling, but just in case)
-          console.error(`Unexpected error processing account:`, result.reason);
+          logDetailedError(`[Job ${jobId}] Unexpected promise rejection for account at batch index ${index}`, result.reason);
           failedCount++;
         }
       });
@@ -128,7 +129,7 @@ export async function processJobParallel(
     console.log(`   Success Rate: ${((processedCount / job.total_accounts) * 100).toFixed(1)}%`);
     console.log(`${'='.repeat(60)}\n`);
   } catch (error) {
-    console.error(`\n❌ Job ${jobId} failed:`, error);
+    logDetailedError(`[Parallel Processor] Job ${jobId} failed completely`, error);
     updateJobStatus(jobId, 'failed');
     throw error;
   }
