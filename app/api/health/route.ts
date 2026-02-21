@@ -40,7 +40,7 @@ export async function GET() {
     checks.push({
       name: 'API Key',
       status: 'pass',
-      message: `Set (${apiKey.slice(0, 7)}...${apiKey.slice(-4)})`,
+      message: 'Configured',
     });
   }
 

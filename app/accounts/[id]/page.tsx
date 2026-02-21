@@ -16,6 +16,7 @@ import AIAutoCategorizePanel from '@/components/AIAutoCategorizePanel';
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal';
 import EmailWriter from '@/components/EmailWriter';
 import SequenceWriter from '@/components/SequenceWriter';
+import PovWriter from '@/components/PovWriter';
 import ReportSidebar, { SidebarSection } from '@/components/ReportSidebar';
 import OpportunitiesSection from '@/components/OpportunitiesSection';
 import { usePerspective } from '@/lib/perspective-context';
@@ -315,7 +316,7 @@ export default function AccountDetailPage({
     const sectionIds = [
       'section-summary', 'section-auth', 'section-users', 'section-security',
       'section-news', 'section-tech', 'section-ecosystem', 'section-prospects',
-      'section-notes', 'section-email', 'section-sequence',
+      'section-notes', 'section-email', 'section-sequence', 'section-pov',
     ];
 
     const observer = new IntersectionObserver(
@@ -962,6 +963,12 @@ export default function AccountDetailPage({
                     className="block w-full text-left px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 rounded"
                   >
                     Sequence Builder
+                  </button>
+                  <button
+                    onClick={() => { document.getElementById('section-pov')?.scrollIntoView({ behavior: 'smooth' }); setShowMobileToc(false); }}
+                    className="block w-full text-left px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 rounded"
+                  >
+                    POV Writer
                   </button>
                 </div>
                 {/* Actions */}
@@ -1893,6 +1900,11 @@ export default function AccountDetailPage({
             {/* Sequence Builder — always rendered inline */}
             <div id="section-sequence" className="scroll-mt-24 mb-8">
               <SequenceWriter accountId={account.id} account={account} />
+            </div>
+
+            {/* POV Writer — always rendered inline */}
+            <div id="section-pov" className="scroll-mt-24 mb-8">
+              <PovWriter accountId={account.id} account={account} />
             </div>
           </div>
         </div>
