@@ -1,6 +1,7 @@
 import { Account } from './db';
 import OpenAI from 'openai';
 import { logDetailedError } from './error-logger';
+import { resolveAndUpdateDomain } from './domain-resolver';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -49,6 +50,8 @@ export interface AISuggestions {
 }
 
 export async function analyzeAccountData(account: Account, opportunityContext?: string): Promise<AISuggestions> {
+  const resolvedDomain = await resolveAndUpdateDomain(account);
+
   const oppSection = opportunityContext
     ? `\n### Salesforce Opportunity History:\n${opportunityContext}\n`
     : '';
@@ -57,7 +60,7 @@ export async function analyzeAccountData(account: Account, opportunityContext?: 
 
 Company: ${account.company_name}
 Industry: ${account.industry}
-Domain: ${account.domain}
+Domain: ${resolvedDomain}
 
 ## Research Data:
 

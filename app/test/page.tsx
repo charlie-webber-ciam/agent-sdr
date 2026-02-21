@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Navigation from '@/components/Navigation';
 import type { HealthCheck, HealthResponse } from '@/app/api/health/route';
 import type { TestErrorType } from '@/app/api/test/route';
 
@@ -250,9 +249,7 @@ export default function TestPage() {
   };
 
   return (
-    <>
-      <Navigation />
-      <div className="max-w-3xl mx-auto px-4 py-10">
+    <div className="max-w-3xl mx-auto px-4 py-10">
 
         {/* Page header */}
         <div className="mb-8">
@@ -461,7 +458,6 @@ export default function TestPage() {
           </div>
         )}
 
-      </div>
-    </>
+    </div>
   );
 }

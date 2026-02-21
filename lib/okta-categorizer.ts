@@ -1,6 +1,7 @@
 import { Account } from './db';
 import OpenAI from 'openai';
 import { logDetailedError } from './error-logger';
+import { resolveAndUpdateDomain } from './domain-resolver';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -57,6 +58,8 @@ export interface OktaAISuggestions {
 }
 
 export async function analyzeOktaAccountData(account: Account, opportunityContext?: string): Promise<OktaAISuggestions> {
+  const resolvedDomain = await resolveAndUpdateDomain(account);
+
   const oppSection = opportunityContext
     ? `\n### Salesforce Opportunity History:\n${opportunityContext}\n`
     : '';
@@ -65,7 +68,7 @@ export async function analyzeOktaAccountData(account: Account, opportunityContex
 
 Company: ${account.company_name}
 Industry: ${account.industry}
-Domain: ${account.domain}
+Domain: ${resolvedDomain}
 
 ## Research Data:
 
