@@ -53,9 +53,9 @@ write_env_file() {
       printf '# Agent SDR - OpenAI Configuration\n'
       printf 'OPENAI_API_KEY=%s\n' "$api_key"
       printf 'OPENAI_BASE_URL=%s\n' "$base_url"
-      printf '# Optional parallel processing (uncomment to enable)\n'
-      printf '# ENABLE_PARALLEL_PROCESSING=true\n'
-      printf '# PROCESSING_CONCURRENCY=5\n'
+      printf '# Parallel processing configuration\n'
+      printf 'ENABLE_PARALLEL_PROCESSING=true\n'
+      printf 'PROCESSING_CONCURRENCY=10\n'
     } > "$path"
   )
 }
@@ -459,6 +459,9 @@ create_launcher_and_start() {
 
   local launcher="$HOME/Desktop/Agent SDR.command"
 
+  # Remove any existing launcher before writing the new one.
+  rm -f "$launcher"
+
   # The launcher is written with a quoted heredoc delimiter ('LAUNCHER') so
   # that no variable expansion occurs here — the script is stored verbatim.
   # Inside the launcher, .env.local is rewritten via printf (not a heredoc)
@@ -540,9 +543,9 @@ if [[ "$update_key" == "y" || "$update_key" == "Y" ]]; then
       printf '# Agent SDR - OpenAI Configuration\n'
       printf 'OPENAI_API_KEY=%s\n' "$NEW_KEY"
       printf 'OPENAI_BASE_URL=%s\n' "$BASE_URL"
-      printf '# Optional parallel processing (uncomment to enable)\n'
-      printf '# ENABLE_PARALLEL_PROCESSING=true\n'
-      printf '# PROCESSING_CONCURRENCY=5\n'
+      printf '# Parallel processing configuration\n'
+      printf 'ENABLE_PARALLEL_PROCESSING=true\n'
+      printf 'PROCESSING_CONCURRENCY=10\n'
     } > "$ENV_FILE"
   )
   echo "  ✔ API key updated successfully"
