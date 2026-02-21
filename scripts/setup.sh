@@ -6,6 +6,7 @@
 # Run with: bash <(curl -fsSL https://raw.githubusercontent.com/charlie-webber-ciam/agent-sdr/main/scripts/setup.sh)
 # =============================================================================
 set -eo pipefail
+
 # ---------------------------------------------------------------------------
 # Colors and formatting
 # ---------------------------------------------------------------------------
@@ -17,7 +18,7 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 success() { echo -e "${GREEN}✔${NC} $1"; }
-fail()    { echo -e "${RED}✘ $1${NC}"; }
+fail()    { echo -e "${RED}✘${NC} $1"; }
 info()    { echo -e "${BLUE}→${NC} $1"; }
 warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
 header()  { echo -e "\n${BOLD}$1${NC}"; }
@@ -26,8 +27,7 @@ header()  { echo -e "\n${BOLD}$1${NC}"; }
 # Cleanup on exit
 # ---------------------------------------------------------------------------
 cleanup() {
-  # If the dev server was started by this script, it will be left running
-  # intentionally so the user can use the app.
+  # The dev server is left running intentionally so the user can use the app.
   :
 }
 trap cleanup EXIT
@@ -38,6 +38,27 @@ trap cleanup EXIT
 MIGRATED_DB_PATH=""
 MIGRATED_API_KEY=""
 MIGRATED_OLD_DIR=""
+
+# ---------------------------------------------------------------------------
+# Safe .env.local writer
+# Avoids heredoc variable expansion corrupting keys that contain $, `, or \
+# ---------------------------------------------------------------------------
+write_env_file() {
+  local path="$1"
+  local api_key="$2"
+  local base_url="$3"
+  (
+    umask 077
+    {
+      printf '# Agent SDR - OpenAI Configuration\n'
+      printf 'OPENAI_API_KEY=%s\n' "$api_key"
+      printf 'OPENAI_BASE_URL=%s\n' "$base_url"
+      printf '# Optional parallel processing (uncomment to enable)\n'
+      printf '# ENABLE_PARALLEL_PROCESSING=true\n'
+      printf '# PROCESSING_CONCURRENCY=5\n'
+    } > "$path"
+  )
+}
 
 # ---------------------------------------------------------------------------
 # Pre-flight checks
@@ -61,6 +82,7 @@ preflight_checks() {
   success "Internet connection OK"
 
   # Disk space (need at least 2 GB free)
+  local free_space_mb
   free_space_mb=$(df -m "$HOME" | awk 'NR==2 {print $4}')
   if [[ "$free_space_mb" -lt 2048 ]]; then
     fail "Less than 2 GB of free disk space available (${free_space_mb} MB)."
@@ -117,7 +139,6 @@ detect_existing_install() {
   echo "    $old_install"
   info "Research database found ($db_size)"
   echo ""
-
   read -rp "  Migrate your existing research data to the new location? (Y/n): " migrate_choice
   if [[ "$migrate_choice" == "n" || "$migrate_choice" == "N" ]]; then
     info "Skipping migration. Starting fresh."
@@ -150,18 +171,7 @@ restore_migrated_data() {
   local install_dir="$HOME/agent-sdr"
 
   if [[ -n "$MIGRATED_API_KEY" && ! -f "$install_dir/.env.local" ]]; then
-    (
-      umask 077
-      cat > "$install_dir/.env.local" <<EOF
-# Agent SDR - OpenAI Configuration
-OPENAI_API_KEY=$MIGRATED_API_KEY
-OPENAI_BASE_URL=https://llm.atko.ai
-
-# Optional parallel processing (uncomment to enable)
-# ENABLE_PARALLEL_PROCESSING=true
-# PROCESSING_CONCURRENCY=5
-EOF
-    )
+    write_env_file "$install_dir/.env.local" "$MIGRATED_API_KEY" "https://llm.atko.ai"
     success "API key migrated (base URL set to https://llm.atko.ai)"
   fi
 
@@ -199,9 +209,7 @@ install_xcode_tools() {
   info "Installing Xcode Command Line Tools..."
   echo "  A system dialog will appear asking you to install. Click \"Install\" and wait."
   echo ""
-
   xcode-select --install 2>/dev/null || true
-
   echo ""
   info "Waiting for installation to complete..."
   echo "  (This can take several minutes. Do NOT close the installer dialog.)"
@@ -221,11 +229,12 @@ install_nvm() {
   header "Step 2/7: Node Version Manager (nvm)"
 
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
-  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
-    source "$NVM_DIR/nvm.sh"
-  fi
 
-  if command -v nvm > /dev/null 2>&1; then
+  # Source nvm if the script exists — this is the reliable check for an
+  # existing install, since nvm is a shell function rather than a binary.
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$NVM_DIR/nvm.sh"
     success "nvm already installed"
     return
   fi
@@ -235,6 +244,7 @@ install_nvm() {
 
   export NVM_DIR="$HOME/.nvm"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck source=/dev/null
     source "$NVM_DIR/nvm.sh"
   fi
 
@@ -255,6 +265,7 @@ install_node() {
 
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck source=/dev/null
     source "$NVM_DIR/nvm.sh"
   fi
 
@@ -306,11 +317,15 @@ clone_repo() {
     return
   fi
 
+  # Declare both locals at function scope so the error-handler block below
+  # can safely reference them regardless of which branch was taken.
+  local tmp_preserve=""
+  local backup_path=""
+
   if [[ -d "$install_dir" ]]; then
     warn "$install_dir exists but is not a git repo."
     echo "  Moving it to ${install_dir}.backup and cloning fresh."
 
-    local tmp_preserve=""
     if [[ -d "$install_dir/data" || -f "$install_dir/.env.local" ]]; then
       tmp_preserve=$(mktemp -d)
       if [[ -d "$install_dir/data" ]]; then
@@ -323,7 +338,7 @@ clone_repo() {
       fi
     fi
 
-    local backup_path="${install_dir}.backup.$(date +%s)"
+    backup_path="${install_dir}.backup.$(date +%s)"
     mv "$install_dir" "$backup_path"
   fi
 
@@ -332,7 +347,7 @@ clone_repo() {
     success "Repository cloned to $install_dir"
   else
     fail "Failed to clone repository."
-    if [[ -n "${backup_path:-}" && -d "$backup_path" ]]; then
+    if [[ -n "$backup_path" && -d "$backup_path" ]]; then
       mv "$backup_path" "$install_dir"
       warn "Restored previous directory from backup."
     fi
@@ -385,21 +400,7 @@ configure_env() {
     fi
   done
 
-  local base_url="https://llm.atko.ai"
-
-  (
-    umask 077
-    cat > "$env_file" <<EOF
-# Agent SDR - OpenAI Configuration
-OPENAI_API_KEY=$api_key
-OPENAI_BASE_URL=$base_url
-
-# Optional parallel processing (uncomment to enable)
-# ENABLE_PARALLEL_PROCESSING=true
-# PROCESSING_CONCURRENCY=5
-EOF
-  )
-
+  write_env_file "$env_file" "$api_key" "https://llm.atko.ai"
   success "Configuration saved to .env.local"
 }
 
@@ -413,6 +414,7 @@ run_npm_install() {
 
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck source=/dev/null
     source "$NVM_DIR/nvm.sh"
   fi
   nvm use 24 > /dev/null 2>&1 || true
@@ -438,6 +440,18 @@ run_npm_install() {
 }
 
 # ---------------------------------------------------------------------------
+# Kill any process bound to port 3000, safely.
+# ---------------------------------------------------------------------------
+kill_port_3000() {
+  local pids
+  pids=$(lsof -ti :3000 2>/dev/null || true)
+  if [[ -n "$pids" ]]; then
+    echo "$pids" | xargs kill 2>/dev/null || true
+    sleep 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Step 7: Create Desktop launcher and start the app
 # ---------------------------------------------------------------------------
 create_launcher_and_start() {
@@ -445,7 +459,10 @@ create_launcher_and_start() {
 
   local launcher="$HOME/Desktop/Agent SDR.command"
 
-  # Create the Desktop launcher with API key update prompt
+  # The launcher is written with a quoted heredoc delimiter ('LAUNCHER') so
+  # that no variable expansion occurs here — the script is stored verbatim.
+  # Inside the launcher, .env.local is rewritten via printf (not a heredoc)
+  # for the same reason: to survive API keys that contain $, `, or \.
   cat > "$launcher" <<'LAUNCHER'
 #!/bin/bash
 # ================================================
@@ -457,13 +474,43 @@ export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 if [[ -s "$NVM_DIR/nvm.sh" ]]; then
   source "$NVM_DIR/nvm.sh"
 fi
-nvm use 24 2>/dev/null
+nvm use 24 2>/dev/null || true
+
+# --- Pull latest changes from git ---
+echo ""
+echo "  Checking for updates..."
+if git -C ~/agent-sdr remote get-url origin > /dev/null 2>&1; then
+  # Stash any local uncommitted changes so the pull can never be blocked.
+  STASH_OUTPUT=$(git -C ~/agent-sdr stash 2>&1)
+  PULL_OUTPUT=$(git -C ~/agent-sdr pull --ff-only 2>&1)
+  PULL_EXIT=$?
+
+  if [[ $PULL_EXIT -eq 0 ]]; then
+    if echo "$PULL_OUTPUT" | grep -q "Already up to date"; then
+      echo "  ✔ Already up to date"
+    else
+      echo "  ✔ Updates pulled — running npm install to sync dependencies..."
+      (cd ~/agent-sdr && npm install 2>&1)
+      echo "  ✔ Dependencies synced"
+    fi
+  else
+    echo "  ⚠ Could not pull updates (no internet, or diverged history). Continuing with existing code."
+    echo "    $PULL_OUTPUT"
+  fi
+
+  # Restore any stashed changes — only if something was actually stashed.
+  if echo "$STASH_OUTPUT" | grep -q "Saved working directory"; then
+    git -C ~/agent-sdr stash pop 2>/dev/null || true
+  fi
+else
+  echo "  ⚠ ~/agent-sdr is not a git repository — skipping update check."
+fi
 
 # --- API Key Update Prompt ---
 ENV_FILE=~/agent-sdr/.env.local
 echo ""
+
 if [[ -f "$ENV_FILE" ]]; then
-  # Mask the current key: show first 8 chars + asterisks
   CURRENT_KEY=$(grep -E '^OPENAI_API_KEY=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2-)
   if [[ -n "$CURRENT_KEY" ]]; then
     MASKED_KEY="${CURRENT_KEY:0:8}************************"
@@ -482,33 +529,34 @@ if [[ "$update_key" == "y" || "$update_key" == "Y" ]]; then
     fi
   done
 
-  # Preserve the base URL if it exists, otherwise default
   BASE_URL=$(grep -E '^OPENAI_BASE_URL=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2-)
   BASE_URL="${BASE_URL:-https://llm.atko.ai}"
 
-  # Rewrite .env.local with the new key
+  # Write .env.local via printf so that special characters in the key
+  # ($, `, \) are stored literally and never interpreted by the shell.
   (
     umask 077
-    cat > "$ENV_FILE" <<EOF
-# Agent SDR - OpenAI Configuration
-OPENAI_API_KEY=$NEW_KEY
-OPENAI_BASE_URL=$BASE_URL
-
-# Optional parallel processing (uncomment to enable)
-# ENABLE_PARALLEL_PROCESSING=true
-# PROCESSING_CONCURRENCY=5
-EOF
+    {
+      printf '# Agent SDR - OpenAI Configuration\n'
+      printf 'OPENAI_API_KEY=%s\n' "$NEW_KEY"
+      printf 'OPENAI_BASE_URL=%s\n' "$BASE_URL"
+      printf '# Optional parallel processing (uncomment to enable)\n'
+      printf '# ENABLE_PARALLEL_PROCESSING=true\n'
+      printf '# PROCESSING_CONCURRENCY=5\n'
+    } > "$ENV_FILE"
   )
   echo "  ✔ API key updated successfully"
 else
   echo "  → Keeping existing API key"
 fi
+
 echo ""
 
-# Kill any existing process on port 3000
-if lsof -ti :3000 > /dev/null 2>&1; then
+# Kill any existing process on port 3000, safely.
+EXISTING_PIDS=$(lsof -ti :3000 2>/dev/null || true)
+if [[ -n "$EXISTING_PIDS" ]]; then
   echo "  Stopping existing process on port 3000..."
-  kill $(lsof -ti :3000) 2>/dev/null || true
+  echo "$EXISTING_PIDS" | xargs kill 2>/dev/null || true
   sleep 1
 fi
 
@@ -520,29 +568,28 @@ echo ""
 
 npm run dev &
 DEV_PID=$!
-
 sleep 4
 open http://localhost:3000
 
-# Wait for the dev server process; when this window is closed, it stops
+# Wait for the dev server; closing this Terminal window stops it.
 wait $DEV_PID
 LAUNCHER
 
   chmod +x "$launcher"
   success "Desktop launcher created: Agent SDR.command"
 
-  # Kill any existing process on port 3000
+  # Kill any existing process on port 3000 before starting a fresh one.
   if lsof -ti :3000 > /dev/null 2>&1; then
     info "Stopping existing process on port 3000..."
-    kill $(lsof -ti :3000) 2>/dev/null || true
-    sleep 1
+    kill_port_3000
   fi
 
-  # Start the app
+  # Start the dev server.
   info "Starting Agent SDR for the first time..."
 
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck source=/dev/null
     source "$NVM_DIR/nvm.sh"
   fi
   nvm use 24 > /dev/null 2>&1 || true
@@ -553,6 +600,13 @@ LAUNCHER
   info "Waiting for the dev server to start..."
   local attempts=0
   while ! curl -s --connect-timeout 2 http://localhost:3000 > /dev/null 2>&1; do
+    # If the process has already exited, there is no point continuing to poll.
+    if ! kill -0 "$dev_pid" 2>/dev/null; then
+      fail "Dev server process exited unexpectedly."
+      echo "  Try running manually: cd ~/agent-sdr && npm run dev"
+      return 1
+    fi
+
     sleep 2
     attempts=$((attempts + 1))
     if [[ $attempts -ge 15 ]]; then
@@ -563,7 +617,6 @@ LAUNCHER
   done
 
   open http://localhost:3000
-
   echo ""
   success "Agent SDR is running at http://localhost:3000"
 }
@@ -615,7 +668,6 @@ main() {
   echo "  To stop the app:"
   echo "    - Close the Terminal window running it"
   echo ""
-
   if [[ -n "$MIGRATED_OLD_DIR" ]]; then
     echo "  Your data was migrated from:"
     echo "    $MIGRATED_OLD_DIR"
@@ -624,7 +676,6 @@ main() {
     echo "    rm -rf \"$MIGRATED_OLD_DIR\""
     echo ""
   fi
-
   echo "  If you have any issues, reach out to your team lead."
   echo ""
 }

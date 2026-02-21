@@ -9,6 +9,8 @@ import {
   updateAccountMetadata,
   updateOktaAccountMetadata,
   updateAccountResearchModel,
+  insertJobEvent,
+  updateJobCurrentStep,
 } from '@/lib/db';
 import { researchCompanyDual } from '@/lib/dual-researcher';
 import { analyzeAccountData } from '@/lib/categorizer';
@@ -39,13 +41,14 @@ export async function POST(request: NextRequest) {
     );
 
     // Start research in the background (don't await - return immediately)
-    performResearch(accountId, companyName, domain, industry, model).catch(error => {
+    performResearch(accountId, jobId, companyName, domain, industry, model).catch(error => {
       console.error('Research error for account', accountId, ':', error);
       updateAccountStatus(accountId, 'failed', error instanceof Error ? error.message : 'Research failed');
     });
 
     return NextResponse.json({
       accountId,
+      jobId,
       message: 'Research started. You will be redirected to view progress.',
     });
   } catch (error) {
@@ -60,6 +63,7 @@ export async function POST(request: NextRequest) {
 // Perform research asynchronously
 async function performResearch(
   accountId: number,
+  jobId: number,
   companyName: string,
   domain: string | null,
   industry: string,
@@ -68,6 +72,27 @@ async function performResearch(
   try {
     // Update status to processing
     updateAccountStatus(accountId, 'processing');
+
+    // Emit account_start event
+    insertJobEvent(jobId, 'processing', 'account_start', {
+      accountId,
+      companyName,
+      message: `Starting: ${companyName}`,
+    });
+    updateJobCurrentStep(jobId, 'Researching...');
+
+    // Build onStep callback for SSE streaming
+    const onStep = (source: 'auth0' | 'okta', step: string, i: number, total: number) => {
+      const label = source === 'auth0' ? '[Auth0]' : '[Okta]';
+      insertJobEvent(jobId, 'processing', 'research_step', {
+        accountId,
+        companyName,
+        message: `${label} ${step}`,
+        stepIndex: i,
+        totalSteps: total,
+      });
+      updateJobCurrentStep(jobId, `${label} ${step} (${i}/${total})`);
+    };
 
     // Run dual research (Auth0 + Okta)
     console.log(`Starting dual research for: ${companyName}${model ? ` (model: ${model})` : ''}`);
@@ -78,7 +103,9 @@ async function performResearch(
         industry,
       },
       'both',
-      model
+      model,
+      undefined,
+      onStep
     );
 
     // Update Auth0 research if available
@@ -100,6 +127,14 @@ async function performResearch(
     updateAccountResearchModel(accountId, model || 'gpt-5.2');
 
     console.log(`Research completed for: ${companyName}, starting categorization...`);
+
+    // Emit categorizing event
+    insertJobEvent(jobId, 'processing', 'categorizing', {
+      accountId,
+      companyName,
+      message: `Categorizing: ${companyName}`,
+    });
+    updateJobCurrentStep(jobId, 'Categorizing...');
 
     // Run Auth0 categorization
     if (dualResearch.auth0) {
@@ -149,13 +184,25 @@ async function performResearch(
         console.error(`Failed to categorize Okta for ${companyName}:`, categorizationError);
       }
     }
+
+    // Emit account_complete event
+    insertJobEvent(jobId, 'processing', 'account_complete', {
+      accountId,
+      companyName,
+      message: `Done: ${companyName}`,
+    });
+    insertJobEvent(jobId, 'processing', 'job_complete', {
+      message: `Research complete for ${companyName}`,
+    });
   } catch (error) {
     console.error(`Research failed for account ${accountId}:`, error);
-    updateAccountStatus(
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    updateAccountStatus(accountId, 'failed', errorMessage);
+    insertJobEvent(jobId, 'processing', 'account_failed', {
       accountId,
-      'failed',
-      error instanceof Error ? error.message : 'Unknown error'
-    );
+      companyName,
+      message: `Failed: ${companyName} — ${errorMessage}`,
+    });
     throw error;
   }
 }

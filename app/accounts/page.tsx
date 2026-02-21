@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AccountCard from '@/components/AccountCard';
 import SearchBar, { FilterState } from '@/components/SearchBar';
@@ -575,6 +576,12 @@ function AccountsPageContent() {
                   {isAllSelected ? 'Deselect All' : 'Select All'}
                 </button>
               )}
+              <Link
+                href="/accounts/duplicates"
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 font-medium transition-colors text-sm"
+              >
+                Find Duplicates
+              </Link>
               <button
                 onClick={() => setShowExportModal(true)}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold transition-colors flex items-center gap-2"

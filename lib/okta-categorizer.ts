@@ -56,7 +56,11 @@ export interface OktaAISuggestions {
   };
 }
 
-export async function analyzeOktaAccountData(account: Account): Promise<OktaAISuggestions> {
+export async function analyzeOktaAccountData(account: Account, opportunityContext?: string): Promise<OktaAISuggestions> {
+  const oppSection = opportunityContext
+    ? `\n### Salesforce Opportunity History:\n${opportunityContext}\n`
+    : '';
+
   const prompt = `You are an Okta Workforce Identity sales intelligence analyst. Analyze the following company research data and provide structured categorization for sales prioritization.
 
 Company: ${account.company_name}
@@ -88,7 +92,7 @@ ${account.okta_research_summary || 'Not available'}
 
 ### Opportunity Type:
 ${account.okta_opportunity_type || 'Not available'}
-
+${oppSection}
 ---
 
 ## Your Task:

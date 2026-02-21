@@ -467,7 +467,7 @@ export async function researchOktaSection(
 
 // ─── Main Research Function ────────────────────────────────────────────────────
 
-export async function researchCompany(company: CompanyInfo, model?: string): Promise<ResearchResult> {
+export async function researchCompany(company: CompanyInfo, model?: string, opportunityContext?: string, onStep?: (step: string, stepIndex: number, totalSteps: number) => void): Promise<ResearchResult> {
   // Validate input
   validateCompanyInput(company);
 
@@ -475,8 +475,15 @@ export async function researchCompany(company: CompanyInfo, model?: string): Pro
     ? `${company.company_name} (${company.domain})`
     : company.company_name;
 
-  // Create specialist agents
-  const iamAgent = createIAMDiscoveryAgent(model);
+  // Create specialist agents (inject opportunity context into IAM agent as it's the primary discovery agent)
+  const iamAgent = opportunityContext
+    ? new Agent({
+        model: model || 'gpt-5.2',
+        name: 'Okta IAM Discovery Agent',
+        instructions: `${OKTA_BASE_INSTRUCTIONS}\n\n**Your Specialisation:** You are the IAM Discovery specialist. Your sole focus is identifying the target company's current identity and access management infrastructure, tools, vendors, and maturity.\n\n**HISTORICAL OPPORTUNITY CONTEXT:**\n${opportunityContext}\n\nUse this context to inform your research. Do not repeat this information verbatim — use it to guide your research focus and identify patterns.`,
+        tools: [webSearchTool()],
+      })
+    : createIAMDiscoveryAgent(model);
   const workforceAgent = createWorkforceIntelAgent(model);
   const securityAgent = createSecurityComplianceAgent(model);
   const newsAgent = createNewsAgent(model);
@@ -676,20 +683,28 @@ Mix real people and personas as needed to reach exactly 5 entries. For real indi
     // ─── Phase 1: Parallel Independent Research ────────────────────────────────
     console.log(`[Okta SDR] Starting parallel research for ${company.company_name}...`);
 
+    const TOTAL_STEPS = 8;
+    let completedSteps = 0;
+    const trackStep = (label: string) => {
+      completedSteps++;
+      onStep?.(label, completedSteps, TOTAL_STEPS);
+    };
+
     const [iamResult, workforceResult, securityResult, newsResult, techResult, ecosystemResult] =
       await Promise.all([
-        runWithRetry(iamAgent, iamPrompt),
-        runWithRetry(workforceAgent, workforcePrompt),
-        runWithRetry(securityAgent, securityPrompt),
-        runWithRetry(newsAgent, newsPrompt),
-        runWithRetry(techAgent, techPrompt),
-        runWithRetry(ecosystemAgent, ecosystemPrompt),
+        runWithRetry(iamAgent, iamPrompt).then(r => { trackStep('IAM Discovery'); return r; }),
+        runWithRetry(workforceAgent, workforcePrompt).then(r => { trackStep('Workforce & IT'); return r; }),
+        runWithRetry(securityAgent, securityPrompt).then(r => { trackStep('Security & Compliance'); return r; }),
+        runWithRetry(newsAgent, newsPrompt).then(r => { trackStep('News & Funding'); return r; }),
+        runWithRetry(techAgent, techPrompt).then(r => { trackStep('Tech Transformation'); return r; }),
+        runWithRetry(ecosystemAgent, ecosystemPrompt).then(r => { trackStep('Okta Ecosystem'); return r; }),
       ]);
 
     console.log(`[Okta SDR] Phase 1 complete. Running prospects discovery...`);
 
     // ─── Phase 2: Prospects (can run independently) ────────────────────────────
     const prospectsResult = await runWithRetry(prospectsAgent, prospectsPrompt);
+    trackStep('Prospects');
 
     console.log(`[Okta SDR] Phase 2 complete. Generating executive summary...`);
 
@@ -756,6 +771,7 @@ ${ecosystemResult.finalOutput || 'No information found'}
 - Make it actionable and sales-focused for ANZ market
 - Include specific Okta value propositions for this account`;
 
+    trackStep('Executive Summary');
     const summaryResult = await runWithRetry(summaryAgent, summaryPrompt);
 
     console.log(`[Okta SDR] Phase 3 complete. Parsing results...`);

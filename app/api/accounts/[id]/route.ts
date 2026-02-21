@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAccount, updateAccountMetadata, updateOktaAccountMetadata, deleteAccount, getAccountTags, getSectionComments, getAccountNotes } from '@/lib/db';
+import { getAccount, updateAccountMetadata, updateOktaAccountMetadata, deleteAccount, getAccountTags, getSectionComments, getAccountNotes, getProspectCountByAccount } from '@/lib/db';
 
 export async function GET(
   request: Request,
@@ -104,6 +104,7 @@ export async function GET(
     const tags = getAccountTags(accountId);
     const sectionCommentsRaw = getSectionComments(accountId);
     const notes = getAccountNotes(accountId);
+    const prospectCount = getProspectCountByAccount(accountId);
 
     // Build sectionComments as a map keyed by `{perspective}:{sectionKey}`
     const sectionComments: Record<string, string> = {};
@@ -174,6 +175,7 @@ export async function GET(
       tags: tags.map(t => ({ id: t.id, tag: t.tag, tagType: t.tag_type, createdAt: t.created_at })),
       sectionComments,
       notes: notes.map(n => ({ id: n.id, content: n.content, createdAt: n.created_at, updatedAt: n.updated_at })),
+      prospectCount,
     });
   } catch (error) {
     console.error('Error fetching account:', error);

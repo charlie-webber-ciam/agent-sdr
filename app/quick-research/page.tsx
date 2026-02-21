@@ -58,8 +58,8 @@ export default function QuickResearchPage() {
 
       const data = await response.json();
 
-      // Redirect to the account detail page
-      router.push(`/accounts/${data.accountId}`);
+      // Redirect to the live progress page
+      router.push(`/quick-research/progress/${data.jobId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start research');
       setIsResearching(false);

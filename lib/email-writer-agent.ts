@@ -1,6 +1,7 @@
 import { Agent, run, setDefaultOpenAIClient, setTracingDisabled } from '@openai/agents';
 import OpenAI from 'openai';
 import { Account } from './db';
+import { buildOpportunityContext } from './opportunity-context';
 
 // Disable tracing — it tries to hit api.openai.com directly, which fails with a custom base URL
 setTracingDisabled(true);
@@ -235,6 +236,15 @@ function prepareAccountContext(account: Account, researchContext: 'auth0' | 'okt
       }
     }
   }
+
+  // Append opportunity history if available
+  if (account.id) {
+    const oppContext = buildOpportunityContext(account.id);
+    if (oppContext) {
+      parts.push(`\n${oppContext}`);
+    }
+  }
+
   return parts.join('\n');
 }
 

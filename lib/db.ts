@@ -642,6 +642,7 @@ export function deleteAccount(id: number): boolean {
 
   try {
     // Explicitly delete child rows as a safety net alongside CASCADE
+    db.prepare('DELETE FROM prospects WHERE account_id = ?').run(id);
     db.prepare('DELETE FROM account_tags WHERE account_id = ?').run(id);
     db.prepare('DELETE FROM section_comments WHERE account_id = ?').run(id);
     db.prepare('DELETE FROM account_notes WHERE account_id = ?').run(id);
@@ -664,6 +665,7 @@ export function deleteAccountsByIds(ids: number[]): number {
   const placeholders = ids.map(() => '?').join(',');
 
   // Explicitly delete child rows as a safety net alongside CASCADE
+  db.prepare(`DELETE FROM prospects WHERE account_id IN (${placeholders})`).run(...ids);
   db.prepare(`DELETE FROM account_tags WHERE account_id IN (${placeholders})`).run(...ids);
   db.prepare(`DELETE FROM section_comments WHERE account_id IN (${placeholders})`).run(...ids);
   db.prepare(`DELETE FROM account_notes WHERE account_id IN (${placeholders})`).run(...ids);
@@ -1773,6 +1775,7 @@ export function deleteProcessingJob(jobId: number): boolean {
 
   try {
     // Delete child rows of accounts belonging to this job
+    db.prepare('DELETE FROM prospects WHERE account_id IN (SELECT id FROM accounts WHERE job_id = ?)').run(jobId);
     db.prepare('DELETE FROM account_tags WHERE account_id IN (SELECT id FROM accounts WHERE job_id = ?)').run(jobId);
     db.prepare('DELETE FROM section_comments WHERE account_id IN (SELECT id FROM accounts WHERE job_id = ?)').run(jobId);
     db.prepare('DELETE FROM account_notes WHERE account_id IN (SELECT id FROM accounts WHERE job_id = ?)').run(jobId);
@@ -2467,6 +2470,332 @@ export function deleteAccountNote(noteId: number): boolean {
   return result.changes > 0;
 }
 
+// ─── Prospects ──────────────────────────────────────────────────────────────
+
+export interface Prospect {
+  id: number;
+  account_id: number;
+  first_name: string;
+  last_name: string;
+  title: string | null;
+  email: string | null;
+  phone: string | null;
+  mobile: string | null;
+  linkedin_url: string | null;
+  department: string | null;
+  notes: string | null;
+  role_type: 'decision_maker' | 'champion' | 'influencer' | 'blocker' | 'end_user' | 'unknown' | null;
+  relationship_status: 'new' | 'engaged' | 'warm' | 'cold';
+  source: 'manual' | 'salesforce_import' | 'ai_research';
+  mailing_address: string | null;
+  lead_source: string | null;
+  last_activity_date: string | null;
+  do_not_call: number;
+  description: string | null;
+  parent_prospect_id: number | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProspectImportJob {
+  id: number;
+  filename: string;
+  total_contacts: number;
+  matched_count: number;
+  unmatched_count: number;
+  created_count: number;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export function createProspect(data: {
+  account_id: number;
+  first_name: string;
+  last_name: string;
+  title?: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  linkedin_url?: string;
+  department?: string;
+  notes?: string;
+  role_type?: string;
+  relationship_status?: string;
+  source?: string;
+  mailing_address?: string;
+  lead_source?: string;
+  last_activity_date?: string;
+  do_not_call?: number;
+  description?: string;
+  parent_prospect_id?: number;
+  sort_order?: number;
+}): Prospect {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO prospects (
+      account_id, first_name, last_name, title, email, phone, mobile, linkedin_url,
+      department, notes, role_type, relationship_status, source,
+      mailing_address, lead_source, last_activity_date, do_not_call,
+      description, parent_prospect_id, sort_order
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.account_id,
+    data.first_name,
+    data.last_name,
+    data.title || null,
+    data.email || null,
+    data.phone || null,
+    data.mobile || null,
+    data.linkedin_url || null,
+    data.department || null,
+    data.notes || null,
+    data.role_type || null,
+    data.relationship_status || 'new',
+    data.source || 'manual',
+    data.mailing_address || null,
+    data.lead_source || null,
+    data.last_activity_date || null,
+    data.do_not_call || 0,
+    data.description || null,
+    data.parent_prospect_id || null,
+    data.sort_order || 0
+  );
+  return db.prepare('SELECT * FROM prospects WHERE id = ?').get(result.lastInsertRowid) as Prospect;
+}
+
+export function getProspect(id: number): Prospect | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospects WHERE id = ?').get(id) as Prospect | undefined;
+}
+
+export function updateProspect(id: number, data: Partial<Omit<Prospect, 'id' | 'created_at' | 'updated_at'>>): Prospect | undefined {
+  const db = getDb();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  Object.entries(data).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) return getProspect(id);
+
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+
+  db.prepare(`UPDATE prospects SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return db.prepare('SELECT * FROM prospects WHERE id = ?').get(id) as Prospect | undefined;
+}
+
+export function deleteProspect(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM prospects WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+export function getProspectsByAccount(accountId: number): Prospect[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospects WHERE account_id = ? ORDER BY sort_order, id').all(accountId) as Prospect[];
+}
+
+export function getProspectCountByAccount(accountId: number): number {
+  const db = getDb();
+  const result = db.prepare('SELECT COUNT(*) as count FROM prospects WHERE account_id = ?').get(accountId) as { count: number };
+  return result.count;
+}
+
+export function reorderProspects(accountId: number, orderedIds: number[], parentChanges?: { id: number; newParentId: number | null }[]): void {
+  const db = getDb();
+  const transaction = db.transaction(() => {
+    orderedIds.forEach((prospectId, index) => {
+      db.prepare("UPDATE prospects SET sort_order = ?, updated_at = datetime('now') WHERE id = ? AND account_id = ?")
+        .run(index, prospectId, accountId);
+    });
+    if (parentChanges) {
+      for (const change of parentChanges) {
+        db.prepare("UPDATE prospects SET parent_prospect_id = ?, updated_at = datetime('now') WHERE id = ? AND account_id = ?")
+          .run(change.newParentId, change.id, accountId);
+      }
+    }
+  });
+  transaction();
+}
+
+export function getProspectsWithFilters(filters: {
+  search?: string;
+  tier?: string;
+  oktaTier?: string;
+  roleType?: string;
+  industry?: string;
+  source?: string;
+  relationshipStatus?: string;
+  limit?: number;
+  offset?: number;
+}): { prospects: (Prospect & { company_name: string; domain: string; account_tier: string | null; account_okta_tier: string | null; account_industry: string })[]; total: number } {
+  const db = getDb();
+  let query = `
+    SELECT p.*, a.company_name, a.domain, a.tier as account_tier, a.okta_tier as account_okta_tier, a.industry as account_industry
+    FROM prospects p
+    JOIN accounts a ON p.account_id = a.id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+
+  if (filters.search) {
+    query += " AND (p.first_name LIKE ? OR p.last_name LIKE ? OR p.email LIKE ? OR p.title LIKE ? OR a.company_name LIKE ?)";
+    const s = `%${filters.search}%`;
+    params.push(s, s, s, s, s);
+  }
+
+  if (filters.tier) {
+    query += ' AND a.tier = ?';
+    params.push(filters.tier);
+  }
+
+  if (filters.oktaTier) {
+    query += ' AND a.okta_tier = ?';
+    params.push(filters.oktaTier);
+  }
+
+  if (filters.roleType) {
+    query += ' AND p.role_type = ?';
+    params.push(filters.roleType);
+  }
+
+  if (filters.industry) {
+    query += ' AND a.industry = ?';
+    params.push(filters.industry);
+  }
+
+  if (filters.source) {
+    query += ' AND p.source = ?';
+    params.push(filters.source);
+  }
+
+  if (filters.relationshipStatus) {
+    query += ' AND p.relationship_status = ?';
+    params.push(filters.relationshipStatus);
+  }
+
+  const countQuery = query.replace(/SELECT p\.\*, a\.company_name.*?FROM/, 'SELECT COUNT(*) as total FROM');
+  const countResult = db.prepare(countQuery).get(...params) as { total: number };
+
+  query += ' ORDER BY a.company_name, p.sort_order, p.id';
+
+  const limit = filters.limit || 100;
+  const offset = filters.offset || 0;
+  query += ' LIMIT ? OFFSET ?';
+  params.push(limit, offset);
+
+  const prospects = db.prepare(query).all(...params) as any[];
+  return { prospects, total: countResult.total };
+}
+
+export function bulkCreateProspects(prospects: Array<{
+  account_id: number;
+  first_name: string;
+  last_name: string;
+  title?: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  linkedin_url?: string;
+  department?: string;
+  notes?: string;
+  role_type?: string;
+  relationship_status?: string;
+  source?: string;
+  mailing_address?: string;
+  lead_source?: string;
+  last_activity_date?: string;
+  do_not_call?: number;
+  description?: string;
+}>): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO prospects (
+      account_id, first_name, last_name, title, email, phone, mobile, linkedin_url,
+      department, notes, role_type, relationship_status, source,
+      mailing_address, lead_source, last_activity_date, do_not_call, description
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const transaction = db.transaction(() => {
+    let count = 0;
+    for (const p of prospects) {
+      stmt.run(
+        p.account_id,
+        p.first_name,
+        p.last_name,
+        p.title || null,
+        p.email || null,
+        p.phone || null,
+        p.mobile || null,
+        p.linkedin_url || null,
+        p.department || null,
+        p.notes || null,
+        p.role_type || null,
+        p.relationship_status || 'new',
+        p.source || 'salesforce_import',
+        p.mailing_address || null,
+        p.lead_source || null,
+        p.last_activity_date || null,
+        p.do_not_call || 0,
+        p.description || null
+      );
+      count++;
+    }
+    return count;
+  });
+
+  return transaction();
+}
+
+export function findAccountByDomainOrName(domain: string | null, companyName: string): Account | undefined {
+  const db = getDb();
+  if (domain) {
+    const byDomain = db.prepare("SELECT * FROM accounts WHERE domain = ? AND domain NOT LIKE '%.placeholder'").get(domain) as Account | undefined;
+    if (byDomain) return byDomain;
+  }
+  return db.prepare('SELECT * FROM accounts WHERE LOWER(company_name) = LOWER(?)').get(companyName) as Account | undefined;
+}
+
+// Prospect import job CRUD
+
+export function createProspectImportJob(filename: string, totalContacts: number): number {
+  const db = getDb();
+  const stmt = db.prepare('INSERT INTO prospect_import_jobs (filename, total_contacts) VALUES (?, ?)');
+  return stmt.run(filename, totalContacts).lastInsertRowid as number;
+}
+
+export function getProspectImportJob(id: number): ProspectImportJob | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospect_import_jobs WHERE id = ?').get(id) as ProspectImportJob | undefined;
+}
+
+export function updateProspectImportJob(id: number, updates: Partial<Omit<ProspectImportJob, 'id' | 'created_at'>>): void {
+  const db = getDb();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE prospect_import_jobs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
 export function deleteEmployeeCountJob(jobId: number): boolean {
   const db = getDb();
 
@@ -2482,4 +2811,519 @@ export function deleteEmployeeCountJob(jobId: number): boolean {
     console.error('Error deleting employee count job:', error);
     return false;
   }
+}
+
+// ─── Opportunity Import Types & Functions ────────────────────────────────────
+
+export interface OpportunityImportJob {
+  id: number;
+  filename: string;
+  total_rows: number;
+  unique_opportunities: number;
+  unique_contacts: number;
+  matched_accounts: number;
+  unmatched_accounts: number;
+  prospects_created: number;
+  opportunities_created: number;
+  champions_tagged: number;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface SalesforceOpportunity {
+  id: number;
+  account_id: number;
+  import_job_id: number;
+  opportunity_name: string;
+  stage: string | null;
+  last_stage_change_date: string | null;
+  business_use_case: string | null;
+  win_loss_description: string | null;
+  why_do_anything: string | null;
+  why_do_it_now: string | null;
+  why_solve_problem: string | null;
+  why_okta: string | null;
+  steps_to_close: string | null;
+  economic_buyer: string | null;
+  metrics: string | null;
+  decision_process: string | null;
+  paper_process: string | null;
+  identify_pain: string | null;
+  decision_criteria: string | null;
+  champions: string | null;
+  champion_title: string | null;
+  compelling_event: string | null;
+  competition: string | null;
+  created_at: string;
+}
+
+export interface OpportunityProspectLink {
+  id: number;
+  opportunity_id: number;
+  prospect_id: number;
+  created_at: string;
+}
+
+// Fuzzy account matching
+const COMPANY_SUFFIXES = /\s*(,?\s*(Inc\.?|Corp\.?|Corporation|Ltd\.?|Pty\.?\s*Ltd\.?|LLC|L\.L\.C\.?|Co\.?|Limited|Group|Holdings|PLC|GmbH|AG|S\.A\.?|N\.V\.?|B\.V\.?))+\s*$/i;
+
+function normalizeCompanyName(name: string): string {
+  return name.replace(COMPANY_SUFFIXES, '').trim();
+}
+
+export function findAccountFuzzy(name: string): { exact?: Account; fuzzy: Account[] } {
+  const db = getDb();
+
+  // 1. Exact match (case-insensitive)
+  const exact = db.prepare('SELECT * FROM accounts WHERE LOWER(company_name) = LOWER(?)').get(name) as Account | undefined;
+  if (exact) {
+    return { exact, fuzzy: [] };
+  }
+
+  // 2. Suffix-stripped match
+  const normalized = normalizeCompanyName(name);
+  const suffixMatches = db.prepare(`
+    SELECT * FROM accounts
+    WHERE LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(company_name,
+      ' Inc.', ''), ' Inc', ''), ' Corp.', ''), ' Corp', ''), ' Corporation', ''), ' Ltd.', ''),
+      ' Ltd', ''), ' LLC', ''), ' Co.', ''), ' Co', ''), ' Limited', ''), ' Group', ''))
+    LIKE LOWER(?)
+  `).all(normalized) as Account[];
+
+  if (suffixMatches.length === 1) {
+    return { exact: suffixMatches[0], fuzzy: [] };
+  }
+  if (suffixMatches.length > 1) {
+    return { fuzzy: suffixMatches };
+  }
+
+  // 3. LIKE match
+  const likeMatches = db.prepare(
+    "SELECT * FROM accounts WHERE LOWER(company_name) LIKE '%' || LOWER(?) || '%'"
+  ).all(normalized) as Account[];
+
+  if (likeMatches.length === 1) {
+    return { exact: likeMatches[0], fuzzy: [] };
+  }
+
+  return { fuzzy: likeMatches };
+}
+
+// Opportunity import job CRUD
+export function createOpportunityImportJob(filename: string): number {
+  const db = getDb();
+  const stmt = db.prepare('INSERT INTO opportunity_import_jobs (filename) VALUES (?)');
+  return stmt.run(filename).lastInsertRowid as number;
+}
+
+export function getOpportunityImportJob(id: number): OpportunityImportJob | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM opportunity_import_jobs WHERE id = ?').get(id) as OpportunityImportJob | undefined;
+}
+
+export function updateOpportunityImportJob(id: number, updates: Partial<Omit<OpportunityImportJob, 'id' | 'created_at'>>): void {
+  const db = getDb();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE opportunity_import_jobs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+// Salesforce opportunity CRUD
+export function createSalesforceOpportunity(data: {
+  account_id: number;
+  import_job_id: number;
+  opportunity_name: string;
+  stage?: string;
+  last_stage_change_date?: string;
+  business_use_case?: string;
+  win_loss_description?: string;
+  why_do_anything?: string;
+  why_do_it_now?: string;
+  why_solve_problem?: string;
+  why_okta?: string;
+  steps_to_close?: string;
+  economic_buyer?: string;
+  metrics?: string;
+  decision_process?: string;
+  paper_process?: string;
+  identify_pain?: string;
+  decision_criteria?: string;
+  champions?: string;
+  champion_title?: string;
+  compelling_event?: string;
+  competition?: string;
+}): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO salesforce_opportunities (
+      account_id, import_job_id, opportunity_name, stage, last_stage_change_date,
+      business_use_case, win_loss_description, why_do_anything, why_do_it_now,
+      why_solve_problem, why_okta, steps_to_close,
+      economic_buyer, metrics, decision_process, paper_process,
+      identify_pain, decision_criteria, champions, champion_title,
+      compelling_event, competition
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  return stmt.run(
+    data.account_id, data.import_job_id, data.opportunity_name,
+    data.stage || null, data.last_stage_change_date || null,
+    data.business_use_case || null, data.win_loss_description || null,
+    data.why_do_anything || null, data.why_do_it_now || null,
+    data.why_solve_problem || null, data.why_okta || null,
+    data.steps_to_close || null,
+    data.economic_buyer || null, data.metrics || null,
+    data.decision_process || null, data.paper_process || null,
+    data.identify_pain || null, data.decision_criteria || null,
+    data.champions || null, data.champion_title || null,
+    data.compelling_event || null, data.competition || null
+  ).lastInsertRowid as number;
+}
+
+export function findExistingOpportunity(accountId: number, opportunityName: string): SalesforceOpportunity | undefined {
+  const db = getDb();
+  return db.prepare(
+    'SELECT * FROM salesforce_opportunities WHERE account_id = ? AND opportunity_name = ?'
+  ).get(accountId, opportunityName) as SalesforceOpportunity | undefined;
+}
+
+export function getOpportunitiesByAccount(accountId: number): SalesforceOpportunity[] {
+  const db = getDb();
+  return db.prepare(
+    'SELECT * FROM salesforce_opportunities WHERE account_id = ? ORDER BY last_stage_change_date DESC, created_at DESC'
+  ).all(accountId) as SalesforceOpportunity[];
+}
+
+export function getOpportunityProspects(opportunityId: number): Prospect[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT p.* FROM prospects p
+    JOIN opportunity_prospects op ON op.prospect_id = p.id
+    WHERE op.opportunity_id = ?
+    ORDER BY p.sort_order, p.last_name
+  `).all(opportunityId) as Prospect[];
+}
+
+export function linkOpportunityProspect(opportunityId: number, prospectId: number): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT OR IGNORE INTO opportunity_prospects (opportunity_id, prospect_id) VALUES (?, ?)
+  `).run(opportunityId, prospectId);
+}
+
+export function getOpportunitiesWithProspects(accountId: number): Array<SalesforceOpportunity & { linkedProspects: Prospect[] }> {
+  const opportunities = getOpportunitiesByAccount(accountId);
+  return opportunities.map(opp => ({
+    ...opp,
+    linkedProspects: getOpportunityProspects(opp.id),
+  }));
+}
+
+// ─── Feature 1: Global opportunities listing ────────────────────────────────
+
+export interface OpportunityWithAccount extends SalesforceOpportunity {
+  company_name: string;
+  domain: string | null;
+  industry: string;
+  tier: string | null;
+  okta_tier: string | null;
+  prospect_count: number;
+}
+
+export function getOpportunitiesWithFilters(filters: {
+  search?: string;
+  stage?: string;
+  tier?: string;
+  industry?: string;
+  limit?: number;
+  offset?: number;
+}): { opportunities: OpportunityWithAccount[]; total: number } {
+  const db = getDb();
+  const { search, stage, tier, industry, limit = 50, offset = 0 } = filters;
+
+  const whereClauses: string[] = [];
+  const params: any[] = [];
+
+  if (search) {
+    whereClauses.push(`(so.opportunity_name LIKE ? OR a.company_name LIKE ? OR so.business_use_case LIKE ?)`);
+    const like = `%${search}%`;
+    params.push(like, like, like);
+  }
+  if (stage) {
+    whereClauses.push(`so.stage = ?`);
+    params.push(stage);
+  }
+  if (tier) {
+    whereClauses.push(`a.tier = ?`);
+    params.push(tier);
+  }
+  if (industry) {
+    whereClauses.push(`a.industry = ?`);
+    params.push(industry);
+  }
+
+  const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  const countRow = db.prepare(`
+    SELECT COUNT(*) as total
+    FROM salesforce_opportunities so
+    JOIN accounts a ON a.id = so.account_id
+    ${where}
+  `).get(...params) as { total: number };
+
+  const rows = db.prepare(`
+    SELECT
+      so.*,
+      a.company_name,
+      a.domain,
+      a.industry,
+      a.tier,
+      a.okta_tier,
+      (SELECT COUNT(*) FROM opportunity_prospects op WHERE op.opportunity_id = so.id) as prospect_count
+    FROM salesforce_opportunities so
+    JOIN accounts a ON a.id = so.account_id
+    ${where}
+    ORDER BY so.last_stage_change_date DESC, so.created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset) as OpportunityWithAccount[];
+
+  return { opportunities: rows, total: countRow.total };
+}
+
+// ─── Feature 2: Prospect deduplication ──────────────────────────────────────
+
+export function findExistingProspectByEmailOrName(
+  accountId: number,
+  email: string | undefined,
+  firstName: string,
+  lastName: string
+): Prospect | undefined {
+  const db = getDb();
+  // Check by email first (case-insensitive)
+  if (email) {
+    const byEmail = db.prepare(
+      'SELECT * FROM prospects WHERE account_id = ? AND email IS NOT NULL AND lower(email) = lower(?)'
+    ).get(accountId, email) as Prospect | undefined;
+    if (byEmail) return byEmail;
+  }
+  // Fallback: check by first + last name
+  return db.prepare(
+    'SELECT * FROM prospects WHERE account_id = ? AND lower(first_name) = lower(?) AND lower(last_name) = lower(?)'
+  ).get(accountId, firstName, lastName) as Prospect | undefined;
+}
+
+// ─── Feature 4: Duplicate account detection and cleanup ─────────────────────
+
+export interface DuplicatePairRow {
+  id1: number;
+  company_name_1: string;
+  domain_1: string | null;
+  industry_1: string;
+  tier_1: string | null;
+  prospect_count_1: number;
+  opportunity_count_1: number;
+  id2: number;
+  company_name_2: string;
+  domain_2: string | null;
+  industry_2: string;
+  tier_2: string | null;
+  prospect_count_2: number;
+  opportunity_count_2: number;
+}
+
+export function findPotentialDuplicateAccounts(): DuplicatePairRow[] {
+  const db = getDb();
+  return db.prepare(`
+    WITH cleaned AS (
+      SELECT
+        id,
+        company_name,
+        domain,
+        industry,
+        tier,
+        lower(
+          trim(
+            replace(replace(replace(replace(replace(replace(
+              company_name,
+              ' Inc.', ''), ' Inc', ''), ' Corp.', ''), ' Corp', ''),
+              ' LLC', ''), ' Ltd', '')
+          )
+        ) AS cleaned_name
+      FROM accounts
+    )
+    SELECT
+      a1.id AS id1,
+      a1.company_name AS company_name_1,
+      a1.domain AS domain_1,
+      a1.industry AS industry_1,
+      a1.tier AS tier_1,
+      (SELECT COUNT(*) FROM prospects WHERE account_id = a1.id) AS prospect_count_1,
+      (SELECT COUNT(*) FROM salesforce_opportunities WHERE account_id = a1.id) AS opportunity_count_1,
+      a2.id AS id2,
+      a2.company_name AS company_name_2,
+      a2.domain AS domain_2,
+      a2.industry AS industry_2,
+      a2.tier AS tier_2,
+      (SELECT COUNT(*) FROM prospects WHERE account_id = a2.id) AS prospect_count_2,
+      (SELECT COUNT(*) FROM salesforce_opportunities WHERE account_id = a2.id) AS opportunity_count_2
+    FROM cleaned a1
+    JOIN cleaned a2 ON a1.cleaned_name = a2.cleaned_name AND a1.id < a2.id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM account_relationships ar
+      WHERE (ar.account_id_1 = a1.id AND ar.account_id_2 = a2.id)
+         OR (ar.account_id_1 = a2.id AND ar.account_id_2 = a1.id)
+    )
+    ORDER BY a1.company_name
+    LIMIT 200
+  `).all() as DuplicatePairRow[];
+}
+
+export function mergeAccounts(keepId: number, deleteId: number): { prospectsTransferred: number; opportunitiesTransferred: number } {
+  const db = getDb();
+  return db.transaction(() => {
+    const prospectsResult = db.prepare(
+      'UPDATE prospects SET account_id = ? WHERE account_id = ?'
+    ).run(keepId, deleteId);
+
+    const opportunitiesResult = db.prepare(
+      'UPDATE salesforce_opportunities SET account_id = ? WHERE account_id = ?'
+    ).run(keepId, deleteId);
+
+    // Transfer tags (ignore conflicts)
+    db.prepare(
+      'INSERT OR IGNORE INTO account_tags (account_id, tag, tag_type) SELECT ?, tag, tag_type FROM account_tags WHERE account_id = ?'
+    ).run(keepId, deleteId);
+
+    // Transfer notes
+    db.prepare(
+      'UPDATE account_notes SET account_id = ? WHERE account_id = ?'
+    ).run(keepId, deleteId);
+
+    // Delete the merged account (CASCADE will clean up remaining foreign-key refs)
+    db.prepare('DELETE FROM accounts WHERE id = ?').run(deleteId);
+
+    return {
+      prospectsTransferred: prospectsResult.changes,
+      opportunitiesTransferred: opportunitiesResult.changes,
+    };
+  })();
+}
+
+export function createAccountRelationship(
+  id1: number,
+  id2: number,
+  type: 'duplicate' | 'parent' | 'subsidiary' | 'formerly_known_as' | 'not_duplicate'
+): void {
+  const db = getDb();
+  // Always store min id first to match UNIQUE constraint
+  const [a, b] = id1 < id2 ? [id1, id2] : [id2, id1];
+  db.prepare(`
+    INSERT INTO account_relationships (account_id_1, account_id_2, relationship_type)
+    VALUES (?, ?, ?)
+    ON CONFLICT(account_id_1, account_id_2) DO UPDATE SET relationship_type = excluded.relationship_type
+  `).run(a, b, type);
+}
+
+export interface AccountRelationshipRow {
+  id: number;
+  account_id_1: number;
+  account_id_2: number;
+  relationship_type: string;
+  created_at: string;
+  related_id: number;
+  related_company_name: string;
+  related_domain: string | null;
+  related_industry: string;
+  related_tier: string | null;
+}
+
+export function getAccountRelationships(accountId: number): AccountRelationshipRow[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT
+      ar.*,
+      CASE WHEN ar.account_id_1 = ? THEN ar.account_id_2 ELSE ar.account_id_1 END AS related_id,
+      a.company_name AS related_company_name,
+      a.domain AS related_domain,
+      a.industry AS related_industry,
+      a.tier AS related_tier
+    FROM account_relationships ar
+    JOIN accounts a ON a.id = CASE WHEN ar.account_id_1 = ? THEN ar.account_id_2 ELSE ar.account_id_1 END
+    WHERE ar.account_id_1 = ? OR ar.account_id_2 = ?
+    ORDER BY ar.created_at DESC
+  `).all(accountId, accountId, accountId, accountId) as AccountRelationshipRow[];
+}
+
+// ─── Job Events (SSE streaming) ────────────────────────────────────────────────
+
+export interface JobEvent {
+  id: number;
+  job_id: number;
+  job_type: 'processing' | 'preprocessing';
+  event_type: string;
+  account_id: number | null;
+  company_name: string | null;
+  message: string;
+  step_index: number | null;
+  total_steps: number | null;
+  created_at: string;
+}
+
+export function insertJobEvent(
+  jobId: number,
+  jobType: 'processing' | 'preprocessing',
+  eventType: string,
+  opts: {
+    accountId?: number;
+    companyName?: string;
+    message: string;
+    stepIndex?: number;
+    totalSteps?: number;
+  }
+): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO job_events (job_id, job_type, event_type, account_id, company_name, message, step_index, total_steps)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    jobId,
+    jobType,
+    eventType,
+    opts.accountId ?? null,
+    opts.companyName ?? null,
+    opts.message,
+    opts.stepIndex ?? null,
+    opts.totalSteps ?? null
+  );
+}
+
+export function getJobEventsSince(
+  jobId: number,
+  jobType: 'processing' | 'preprocessing',
+  sinceId: number
+): JobEvent[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT * FROM job_events
+    WHERE job_id = ? AND job_type = ? AND id > ?
+    ORDER BY id ASC
+  `).all(jobId, jobType, sinceId) as JobEvent[];
+}
+
+export function updateJobCurrentStep(jobId: number, step: string): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE processing_jobs SET current_step = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(step, jobId);
 }

@@ -223,6 +223,165 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Failed to create account_notes table:', error);
   }
 
+  // Add prospects table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        title TEXT,
+        email TEXT,
+        phone TEXT,
+        linkedin_url TEXT,
+        department TEXT,
+        notes TEXT,
+        role_type TEXT CHECK(role_type IN ('decision_maker','champion','influencer','blocker','end_user','unknown')),
+        relationship_status TEXT CHECK(relationship_status IN ('new','engaged','warm','cold')) DEFAULT 'new',
+        source TEXT CHECK(source IN ('manual','salesforce_import','ai_research')) DEFAULT 'manual',
+        mailing_address TEXT,
+        lead_source TEXT,
+        last_activity_date TEXT,
+        do_not_call INTEGER DEFAULT 0,
+        description TEXT,
+        parent_prospect_id INTEGER,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+        FOREIGN KEY (parent_prospect_id) REFERENCES prospects(id) ON DELETE SET NULL
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_account_id ON prospects(account_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_parent_id ON prospects(parent_prospect_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_email ON prospects(email)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_role_type ON prospects(role_type)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_source ON prospects(source)');
+    console.log('✓ Ensured prospects table exists');
+  } catch (error) {
+    console.error('Failed to create prospects table:', error);
+  }
+
+  // Add mobile column to prospects table if missing
+  try {
+    const prospectCols = db.prepare('PRAGMA table_info(prospects)').all() as any[];
+    const hasMobile = prospectCols.some((col: any) => col.name === 'mobile');
+    if (!hasMobile) {
+      db.exec('ALTER TABLE prospects ADD COLUMN mobile TEXT');
+      console.log('✓ Added mobile column to prospects');
+    }
+  } catch (error) {
+    console.error('Failed to add mobile column to prospects:', error);
+  }
+
+  // Add prospect_import_jobs table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_import_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL,
+        total_contacts INTEGER NOT NULL DEFAULT 0,
+        matched_count INTEGER NOT NULL DEFAULT 0,
+        unmatched_count INTEGER NOT NULL DEFAULT 0,
+        created_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT
+      )
+    `);
+    console.log('✓ Ensured prospect_import_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create prospect_import_jobs table:', error);
+  }
+
+  // Add opportunity_import_jobs table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS opportunity_import_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL,
+        total_rows INTEGER NOT NULL DEFAULT 0,
+        unique_opportunities INTEGER NOT NULL DEFAULT 0,
+        unique_contacts INTEGER NOT NULL DEFAULT 0,
+        matched_accounts INTEGER NOT NULL DEFAULT 0,
+        unmatched_accounts INTEGER NOT NULL DEFAULT 0,
+        prospects_created INTEGER NOT NULL DEFAULT 0,
+        opportunities_created INTEGER NOT NULL DEFAULT 0,
+        champions_tagged INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_opp_import_jobs_status ON opportunity_import_jobs(status)');
+    console.log('✓ Ensured opportunity_import_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create opportunity_import_jobs table:', error);
+  }
+
+  // Add salesforce_opportunities table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS salesforce_opportunities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        import_job_id INTEGER NOT NULL,
+        opportunity_name TEXT NOT NULL,
+        stage TEXT,
+        last_stage_change_date TEXT,
+        business_use_case TEXT,
+        win_loss_description TEXT,
+        why_do_anything TEXT,
+        why_do_it_now TEXT,
+        why_solve_problem TEXT,
+        why_okta TEXT,
+        steps_to_close TEXT,
+        economic_buyer TEXT,
+        metrics TEXT,
+        decision_process TEXT,
+        paper_process TEXT,
+        identify_pain TEXT,
+        decision_criteria TEXT,
+        champions TEXT,
+        champion_title TEXT,
+        compelling_event TEXT,
+        competition TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+        FOREIGN KEY (import_job_id) REFERENCES opportunity_import_jobs(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sf_opportunities_account_id ON salesforce_opportunities(account_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sf_opportunities_import_job ON salesforce_opportunities(import_job_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sf_opportunities_stage ON salesforce_opportunities(stage)');
+    console.log('✓ Ensured salesforce_opportunities table exists');
+  } catch (error) {
+    console.error('Failed to create salesforce_opportunities table:', error);
+  }
+
+  // Add opportunity_prospects join table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS opportunity_prospects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        opportunity_id INTEGER NOT NULL,
+        prospect_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (opportunity_id) REFERENCES salesforce_opportunities(id) ON DELETE CASCADE,
+        FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE,
+        UNIQUE(opportunity_id, prospect_id)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_opp_prospects_opp_id ON opportunity_prospects(opportunity_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_opp_prospects_prospect_id ON opportunity_prospects(prospect_id)');
+    console.log('✓ Ensured opportunity_prospects table exists');
+  } catch (error) {
+    console.error('Failed to create opportunity_prospects table:', error);
+  }
+
   // Add paused column to preprocessing_jobs if table exists
   try {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='preprocessing_jobs'").all() as any[];
@@ -237,5 +396,75 @@ export function migrateDatabase(db: Database.Database) {
     }
   } catch (error) {
     console.error('Failed to add paused column to preprocessing_jobs:', error);
+  }
+
+  // Add current_step column to processing_jobs if missing
+  try {
+    const processingJobsCols2 = db.prepare('PRAGMA table_info(processing_jobs)').all() as any[];
+    const hasCurrentStep = processingJobsCols2.some((col: any) => col.name === 'current_step');
+    if (!hasCurrentStep) {
+      db.exec('ALTER TABLE processing_jobs ADD COLUMN current_step TEXT');
+      console.log('✓ Added current_step column to processing_jobs');
+    }
+  } catch (error) {
+    console.error('Failed to add current_step column to processing_jobs:', error);
+  }
+
+  // Add current_step column to preprocessing_jobs if it exists and is missing the column
+  try {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='preprocessing_jobs'").all() as any[];
+    if (tables.length > 0) {
+      const preprocessingJobsCols2 = db.prepare('PRAGMA table_info(preprocessing_jobs)').all() as any[];
+      const hasPreprocessingCurrentStep = preprocessingJobsCols2.some((col: any) => col.name === 'current_step');
+      if (!hasPreprocessingCurrentStep) {
+        db.exec('ALTER TABLE preprocessing_jobs ADD COLUMN current_step TEXT');
+        console.log('✓ Added current_step column to preprocessing_jobs');
+      }
+    }
+  } catch (error) {
+    console.error('Failed to add current_step column to preprocessing_jobs:', error);
+  }
+
+  // Create job_events table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS job_events (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id       INTEGER NOT NULL,
+        job_type     TEXT NOT NULL DEFAULT 'processing',
+        event_type   TEXT NOT NULL,
+        account_id   INTEGER,
+        company_name TEXT,
+        message      TEXT NOT NULL,
+        step_index   INTEGER,
+        total_steps  INTEGER,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_job_events_lookup ON job_events(job_id, job_type, id)');
+    console.log('✓ Ensured job_events table exists');
+  } catch (error) {
+    console.error('Failed to create job_events table:', error);
+  }
+
+  // Add account_relationships table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_relationships (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id_1 INTEGER NOT NULL,
+        account_id_2 INTEGER NOT NULL,
+        relationship_type TEXT NOT NULL CHECK(relationship_type IN ('duplicate', 'parent', 'subsidiary', 'formerly_known_as', 'not_duplicate')),
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id_1) REFERENCES accounts(id) ON DELETE CASCADE,
+        FOREIGN KEY (account_id_2) REFERENCES accounts(id) ON DELETE CASCADE,
+        UNIQUE(account_id_1, account_id_2)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_relationships_a1 ON account_relationships(account_id_1)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_relationships_a2 ON account_relationships(account_id_2)');
+    console.log('✓ Ensured account_relationships table exists');
+  } catch (error) {
+    console.error('Failed to create account_relationships table:', error);
   }
 }

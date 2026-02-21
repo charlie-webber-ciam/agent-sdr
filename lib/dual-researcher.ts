@@ -24,18 +24,27 @@ export type ResearchMode = 'both' | 'auth0' | 'okta';
 export async function researchCompanyDual(
   company: CompanyInfo,
   mode: ResearchMode = 'both',
-  model?: string
+  model?: string,
+  opportunityContext?: string,
+  onStep?: (source: 'auth0' | 'okta', step: string, stepIndex: number, total: number) => void
 ): Promise<DualResearchResult> {
-  console.log(`[Dual Researcher] Starting ${mode} research for ${company.company_name}${model ? ` (model: ${model})` : ''}`);
+  console.log(`[Dual Researcher] Starting ${mode} research for ${company.company_name}${model ? ` (model: ${model})` : ''}${opportunityContext ? ' (with opportunity context)' : ''}`);
 
   const result: DualResearchResult = {};
 
   try {
     if (mode === 'both') {
+      const auth0OnStep = onStep
+        ? (step: string, i: number, total: number) => onStep('auth0', step, i, total)
+        : undefined;
+      const oktaOnStep = onStep
+        ? (step: string, i: number, total: number) => onStep('okta', step, i, total)
+        : undefined;
+
       // Run both agents in parallel
       const [auth0Result, oktaResult] = await Promise.allSettled([
-        researchAuth0(company, model),
-        researchOkta(company, model),
+        researchAuth0(company, model, opportunityContext, auth0OnStep),
+        researchOkta(company, model, opportunityContext, oktaOnStep),
       ]);
 
       // Handle Auth0 result
@@ -59,12 +68,18 @@ export async function researchCompanyDual(
         throw new Error('Both Auth0 and Okta research agents failed');
       }
     } else if (mode === 'auth0') {
+      const auth0OnStep = onStep
+        ? (step: string, i: number, total: number) => onStep('auth0', step, i, total)
+        : undefined;
       // Run Auth0 agent only
-      result.auth0 = await researchAuth0(company, model);
+      result.auth0 = await researchAuth0(company, model, opportunityContext, auth0OnStep);
       console.log(`[Dual Researcher] ✓ Auth0 research completed for ${company.company_name}`);
     } else if (mode === 'okta') {
+      const oktaOnStep = onStep
+        ? (step: string, i: number, total: number) => onStep('okta', step, i, total)
+        : undefined;
       // Run Okta agent only
-      result.okta = await researchOkta(company, model);
+      result.okta = await researchOkta(company, model, opportunityContext, oktaOnStep);
       console.log(`[Dual Researcher] ✓ Okta research completed for ${company.company_name}`);
     }
 

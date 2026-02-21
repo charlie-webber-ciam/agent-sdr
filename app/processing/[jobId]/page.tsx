@@ -1,10 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
 import { useToast } from '@/lib/toast-context';
 import { humanizeError } from '@/lib/error-messages';
+
+interface JobEvent {
+  id: number;
+  job_id: number;
+  event_type: string;
+  account_id: number | null;
+  company_name: string | null;
+  message: string;
+  step_index: number | null;
+  total_steps: number | null;
+  created_at: string;
+}
 
 // Utility to format domain display
 const formatDomain = (domain: string | null) => {
@@ -59,6 +71,22 @@ export default function ProcessingPage({
   const [isOrphaned, setIsOrphaned] = useState(false);
   const [retryingAccountId, setRetryingAccountId] = useState<number | null>(null);
 
+  // SSE live event state
+  const [liveEvents, setLiveEvents] = useState<JobEvent[]>([]);
+  const [currentStep, setCurrentStep] = useState<string | null>(null);
+  const [subProgress, setSubProgress] = useState(0); // fraction 0-1 within current account
+  const liveEventsEndRef = useRef<HTMLDivElement>(null);
+
+  // SSE-derived completion — updated immediately from stream, before the API round-trip
+  const [sseJobDone, setSseJobDone] = useState(false);
+  const [sseProcessedCount, setSseProcessedCount] = useState(0);
+
+  // Stable refs — never trigger effect re-runs or cause stale closures
+  const seenIds = useRef(new Set<number>());
+  const stepCountRef = useRef(0);
+  // Always holds the latest fetchJobData so the SSE closure never calls a stale version
+  const fetchJobDataRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
   const checkJobActive = async (jobStatus: string) => {
     if (jobStatus === 'processing') {
       try {
@@ -91,6 +119,8 @@ export default function ProcessingPage({
       setLoading(false);
     }
   };
+  // Keep the ref pointing at the latest version so SSE closures are never stale
+  fetchJobDataRef.current = fetchJobData;
 
   const handlePause = async () => {
     setActionLoading(true);
@@ -289,6 +319,69 @@ export default function ProcessingPage({
     }
   };
 
+  // SSE effect: streams live research step events
+  useEffect(() => {
+    // Reset refs on mount (handles StrictMode double-mount)
+    seenIds.current = new Set();
+    stepCountRef.current = 0;
+
+    const es = new EventSource(`/api/jobs/${jobId}/stream`);
+
+    es.onmessage = (e) => {
+      let event: any;
+      try { event = JSON.parse(e.data); } catch { return; }
+
+      if (event.event_type === 'job_done') {
+        // Immediately reflect completion in the UI regardless of API round-trip timing
+        setSseJobDone(true);
+        es.close();
+        fetchJobDataRef.current();
+        return;
+      }
+
+      // Deduplicate ALL state updates — guards against StrictMode double-mount
+      // and EventSource reconnection replays
+      if (seenIds.current.has(event.id)) return;
+      seenIds.current.add(event.id);
+
+      setLiveEvents(prev => [...prev.slice(-49), event]);
+
+      if (event.event_type === 'account_start') {
+        setCurrentStep(event.message);
+        // Reset step counter for this new account
+        stepCountRef.current = 0;
+        setSubProgress(0);
+      } else if (event.event_type === 'research_step') {
+        // Count total steps across both Auth0 (7) and Okta (8) = 15 combined.
+        // Monotonically increasing so parallel interleaving never goes backwards.
+        stepCountRef.current++;
+        setCurrentStep(event.message);
+        setSubProgress(Math.min(0.9, stepCountRef.current / 15));
+      } else if (event.event_type === 'categorizing') {
+        setCurrentStep(event.message);
+        setSubProgress(0.93);
+      } else if (event.event_type === 'account_complete') {
+        setSubProgress(1);
+        setSseProcessedCount(prev => prev + 1);
+      } else if (event.event_type === 'job_complete') {
+        // job_complete is written to DB after updateJobProgress, so fetch here to
+        // guarantee the API returns updated counts (not just on job_done)
+        fetchJobDataRef.current();
+      }
+    };
+
+    es.onerror = () => {
+      // EventSource will auto-reconnect via Last-Event-ID
+    };
+
+    return () => es.close();
+  }, [jobId]);
+
+  // Scroll event feed to bottom on new events
+  useEffect(() => {
+    liveEventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [liveEvents]);
+
   useEffect(() => {
     const fetchAndCheck = async () => {
       await fetchJobData();
@@ -347,12 +440,16 @@ export default function ProcessingPage({
   }
 
   const { job, currentAccount, accounts } = data;
-  const isComplete = job.status === 'completed';
+  // sseJobDone is the source of truth the moment the stream closes — don't wait for
+  // the 3-second API poll or the fetchJobData round-trip to catch up.
+  const isComplete = job.status === 'completed' || sseJobDone;
   const isFailed = job.status === 'failed';
-  const isPending = job.status === 'pending';
-  const isActivelyProcessing = job.status === 'processing';
-  const isProcessing = isActivelyProcessing || isPending;
-  const isPaused = job.paused === 1;
+  const isPending = job.status === 'pending' && !sseJobDone;
+  const isActivelyProcessing = job.status === 'processing' && !sseJobDone;
+  const isProcessing = (isActivelyProcessing || isPending) && !sseJobDone;
+  const isPaused = job.paused === 1 && !sseJobDone;
+  // Use the higher of the API count and the SSE-derived count
+  const effectiveProcessedCount = Math.max(job.processedCount, sseProcessedCount);
 
   const completedAccounts = accounts.filter(a => a.status === 'completed');
   const failedAccounts = accounts.filter(a => a.status === 'failed');
@@ -405,14 +502,14 @@ export default function ProcessingPage({
                 : needsResume
                 ? (
                   <>
-                    {job.processedCount} of {job.totalAccounts} accounts processed
+                    {effectiveProcessedCount} of {job.totalAccounts} accounts processed
                     {job.failedCount > 0 && ` (${job.failedCount} failed)`}
                     {` — ${pendingAccounts.length} remaining`}
                   </>
                 )
                 : (
                   <>
-                    {job.processedCount} of {job.totalAccounts} accounts processed
+                    {effectiveProcessedCount} of {job.totalAccounts} accounts processed
                     {job.failedCount > 0 && ` (${job.failedCount} failed)`}
                   </>
                 )}
@@ -560,37 +657,94 @@ export default function ProcessingPage({
           </div>
         </div>
 
-        {/* Progress Bar */}
-        <div className="mt-4">
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full transition-all duration-500 ${
-                isComplete ? 'bg-green-500' : isFailed ? 'bg-red-500' : 'bg-blue-500'
-              }`}
-              style={{ width: `${job.progressPercent}%` }}
-            />
-          </div>
-          <div className="flex justify-between text-sm text-gray-600 mt-1">
-            <span>{job.progressPercent}% complete</span>
-            <span>
-              {job.processedCount} / {job.totalAccounts}
-            </span>
-          </div>
-        </div>
+        {/* Progress Bar — smooth sub-step interpolation */}
+        {(() => {
+          const basePercent = job.totalAccounts > 0 ? effectiveProcessedCount / job.totalAccounts : 0;
+          const oneAccountFraction = job.totalAccounts > 0 ? 1 / job.totalAccounts : 0;
+          const smoothPercent = isComplete ? 100 : isFailed ? job.progressPercent : Math.min(
+            99,
+            Math.round((basePercent + oneAccountFraction * subProgress) * 100)
+          );
+          return (
+            <div className="mt-4">
+              <div className="w-full bg-gray-200 rounded-full h-3">
+                <div
+                  className={`h-3 rounded-full transition-all duration-700 ${
+                    isComplete ? 'bg-green-500' : isFailed ? 'bg-red-500' : 'bg-blue-500'
+                  }`}
+                  style={{ width: `${smoothPercent}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-sm text-gray-600 mt-1">
+                <span>{smoothPercent}% complete</span>
+                <span>
+                  {effectiveProcessedCount} / {job.totalAccounts}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Current Account */}
         {isProcessing && currentAccount && (
           <div className="mt-4 p-3 bg-white rounded border border-gray-200">
-            <div className="flex items-center gap-2">
-              <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full flex-shrink-0" />
               <span className="font-medium">Currently researching:</span>
               <span className="text-gray-700">
                 {currentAccount.companyName} ({currentAccount.domain})
               </span>
             </div>
+            {currentStep && (
+              <p className="mt-1.5 text-sm text-blue-600 pl-6">{currentStep}</p>
+            )}
           </div>
         )}
       </div>
+
+      {/* Live Event Feed */}
+      {liveEvents.length > 0 && (
+        <div className="bg-white rounded-lg shadow-md mb-6">
+          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 className="font-semibold text-gray-700">Live Research Activity</h3>
+            <span className="text-xs text-gray-400">{liveEvents.length} events</span>
+          </div>
+          <div className="divide-y divide-gray-100 max-h-56 overflow-y-auto">
+            {liveEvents.slice(-10).map((evt, i) => {
+              const typeColors: Record<string, string> = {
+                account_start:    'bg-blue-100 text-blue-700',
+                research_step:    'bg-indigo-100 text-indigo-700',
+                categorizing:     'bg-purple-100 text-purple-700',
+                account_complete: 'bg-green-100 text-green-700',
+                account_failed:   'bg-red-100 text-red-700',
+              };
+              const typeLabels: Record<string, string> = {
+                account_start:    'Start',
+                research_step:    'Step',
+                categorizing:     'Categorize',
+                account_complete: 'Done',
+                account_failed:   'Failed',
+              };
+              const colorClass = typeColors[evt.event_type] ?? 'bg-gray-100 text-gray-700';
+              const label = typeLabels[evt.event_type] ?? evt.event_type;
+              return (
+                <div key={evt.id ?? i} className="px-4 py-2 flex items-start gap-3">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colorClass} flex-shrink-0 mt-0.5`}>
+                    {label}
+                  </span>
+                  <p className="text-sm text-gray-700 flex-1">{evt.message}</p>
+                  {evt.step_index != null && evt.total_steps != null && (
+                    <span className="text-xs text-gray-400 flex-shrink-0">
+                      {evt.step_index}/{evt.total_steps}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            <div ref={liveEventsEndRef} />
+          </div>
+        </div>
+      )}
 
       {/* Accounts List */}
       <div className="bg-white rounded-lg shadow-md">

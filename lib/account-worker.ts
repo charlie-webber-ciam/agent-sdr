@@ -22,6 +22,7 @@ import { analyzeAccountData } from './categorizer';
 import { analyzeOktaAccountData } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
 import { logDetailedError } from './error-logger';
+import { buildOpportunityContext } from './opportunity-context';
 
 export interface AccountProcessingResult {
   accountId: number;
@@ -56,6 +57,9 @@ export async function processAccountWithRetry(
         }/${maxRetries + 1})`
       );
 
+      // Fetch opportunity context for this account
+      const opportunityContext = buildOpportunityContext(account.id) || undefined;
+
       const dualResearch = await researchCompanyDual(
         {
           company_name: account.company_name,
@@ -63,7 +67,8 @@ export async function processAccountWithRetry(
           industry: account.industry,
         },
         researchType,
-        model
+        model,
+        opportunityContext
       );
 
       // Update Auth0 research if available
@@ -90,7 +95,7 @@ export async function processAccountWithRetry(
             ...dualResearch.auth0,
             research_status: 'completed' as const,
           };
-          const suggestions = await analyzeAccountData(updatedAccount);
+          const suggestions = await analyzeAccountData(updatedAccount, opportunityContext);
 
           // Store categorization data
           updateAccountMetadata(account.id, {
@@ -128,7 +133,7 @@ export async function processAccountWithRetry(
             okta_opportunity_type: dualResearch.okta.opportunity_type,
             okta_priority_score: dualResearch.okta.priority_score,
           };
-          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount);
+          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount, opportunityContext);
 
           // Store Okta categorization data
           updateOktaAccountMetadata(account.id, {

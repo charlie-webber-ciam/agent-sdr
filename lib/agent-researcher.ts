@@ -238,24 +238,35 @@ export async function researchSection(
   return result.finalOutput || 'No information found';
 }
 
-export async function researchCompany(company: CompanyInfo, model?: string): Promise<ResearchResult> {
+export async function researchCompany(company: CompanyInfo, model?: string, opportunityContext?: string, onStep?: (step: string, stepIndex: number, totalSteps: number) => void): Promise<ResearchResult> {
   const agentModel = model || 'gpt-5.2';
+  let instructions = AUTH0_AGENT_INSTRUCTIONS;
+  if (opportunityContext) {
+    instructions += `\n\n**HISTORICAL OPPORTUNITY CONTEXT:**\n${opportunityContext}\n\nUse this context to inform your research. Do not repeat this information verbatim — use it to guide your research focus and identify patterns.`;
+  }
   const agent = new Agent({
     model: agentModel,
     name: 'Auth0 SDR Researcher - ANZ',
-    instructions: AUTH0_AGENT_INSTRUCTIONS,
+    instructions,
     tools: [webSearchTool()],
   });
 
   try {
     const companyIdentifier = company.domain ? `${company.company_name} (${company.domain})` : company.company_name;
+    const TOTAL_STEPS = 7;
 
     // Research using section definitions
+    onStep?.('Current Auth Solution', 1, TOTAL_STEPS);
     const authResult = await run(agent, AUTH0_RESEARCH_SECTIONS.current_auth_solution.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    onStep?.('Customer Base', 2, TOTAL_STEPS);
     const customerResult = await run(agent, AUTH0_RESEARCH_SECTIONS.customer_base_info.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    onStep?.('Security & Compliance', 3, TOTAL_STEPS);
     const securityResult = await run(agent, AUTH0_RESEARCH_SECTIONS.security_incidents.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    onStep?.('News & Funding', 4, TOTAL_STEPS);
     const newsResult = await run(agent, AUTH0_RESEARCH_SECTIONS.news_and_funding.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    onStep?.('Tech Transformation', 5, TOTAL_STEPS);
     const techResult = await run(agent, AUTH0_RESEARCH_SECTIONS.tech_transformation.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    onStep?.('Prospects', 6, TOTAL_STEPS);
     const prospectsResult = await run(agent, AUTH0_RESEARCH_SECTIONS.prospects.buildPrompt(companyIdentifier, company.company_name, company.industry));
 
     // Generate summary
@@ -281,6 +292,7 @@ export async function researchCompany(company: CompanyInfo, model?: string): Pro
 
 Provide a compelling, well-formatted summary from an Auth0 ANZ SDR perspective.`;
 
+    onStep?.('Executive Summary', 7, TOTAL_STEPS);
     const summaryResult = await run(agent, summaryPrompt);
 
     // Parse and validate prospects to ensure minimum 5 entries

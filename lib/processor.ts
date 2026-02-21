@@ -9,6 +9,8 @@ import {
   updateAccountMetadata,
   updateOktaAccountMetadata,
   updateAccountResearchModel,
+  insertJobEvent,
+  updateJobCurrentStep,
 } from './db';
 import { researchCompanyDual, ResearchMode } from './dual-researcher';
 import { analyzeAccountData } from './categorizer';
@@ -16,6 +18,7 @@ import { analyzeOktaAccountData } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
 import { processJobParallel } from './parallel-processor';
 import { logDetailedError } from './error-logger';
+import { buildOpportunityContext } from './opportunity-context';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -126,7 +129,31 @@ export async function processJobSequential(
     // Mark account as processing
     updateAccountStatus(account.id, 'processing');
 
+    // Emit account_start event
+    insertJobEvent(jobId, 'processing', 'account_start', {
+      accountId: account.id,
+      companyName: account.company_name,
+      message: `Starting: ${account.company_name}`,
+    });
+    updateJobCurrentStep(jobId, 'Researching...');
+
     try {
+      // Fetch opportunity context for this account
+      const opportunityContext = buildOpportunityContext(account.id) || undefined;
+
+      // Build onStep callback that writes events to DB
+      const onStep = (source: 'auth0' | 'okta', step: string, i: number, total: number) => {
+        const label = source === 'auth0' ? '[Auth0]' : '[Okta]';
+        insertJobEvent(jobId, 'processing', 'research_step', {
+          accountId: account.id,
+          companyName: account.company_name,
+          message: `${label} ${step}`,
+          stepIndex: i,
+          totalSteps: total,
+        });
+        updateJobCurrentStep(jobId, `${label} ${step} (${i}/${total})`);
+      };
+
       // Perform dual research (Auth0 and/or Okta)
       const dualResearch = await researchCompanyDual(
         {
@@ -135,7 +162,9 @@ export async function processJobSequential(
           industry: account.industry,
         },
         researchType,
-        model
+        model,
+        opportunityContext,
+        onStep
       );
 
       // Update Auth0 research if available
@@ -152,6 +181,14 @@ export async function processJobSequential(
 
       console.log(`Completed research for ${account.company_name}, starting categorization...`);
 
+      // Emit categorizing event
+      insertJobEvent(jobId, 'processing', 'categorizing', {
+        accountId: account.id,
+        companyName: account.company_name,
+        message: `Categorizing: ${account.company_name}`,
+      });
+      updateJobCurrentStep(jobId, 'Categorizing...');
+
       // Perform Auth0 AI categorization
       if (dualResearch.auth0) {
         try {
@@ -160,7 +197,7 @@ export async function processJobSequential(
             ...dualResearch.auth0,
             research_status: 'completed' as const,
           };
-          const suggestions = await analyzeAccountData(updatedAccount);
+          const suggestions = await analyzeAccountData(updatedAccount, opportunityContext);
 
           // Store both the suggestions and apply the categorization
           updateAccountMetadata(account.id, {
@@ -198,7 +235,7 @@ export async function processJobSequential(
             okta_opportunity_type: dualResearch.okta.opportunity_type,
             okta_priority_score: dualResearch.okta.priority_score,
           };
-          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount);
+          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount, opportunityContext);
 
           // Store Okta categorization
           updateOktaAccountMetadata(account.id, {
@@ -228,6 +265,13 @@ export async function processJobSequential(
         updateAccountResearchModel(account.id, model);
       }
 
+      // Emit account_complete event
+      insertJobEvent(jobId, 'processing', 'account_complete', {
+        accountId: account.id,
+        companyName: account.company_name,
+        message: `Done: ${account.company_name}`,
+      });
+
       processedCount++;
 
       console.log(`Completed processing for ${account.company_name}`);
@@ -244,6 +288,14 @@ export async function processJobSequential(
       // Mark account as failed
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       updateAccountStatus(account.id, 'failed', errorMessage);
+
+      // Emit account_failed event
+      insertJobEvent(jobId, 'processing', 'account_failed', {
+        accountId: account.id,
+        companyName: account.company_name,
+        message: `Failed: ${account.company_name} — ${errorMessage}`,
+      });
+
       failedCount++;
 
       // Update job progress
@@ -255,5 +307,8 @@ export async function processJobSequential(
 
   // Mark job as completed
   updateJobStatus(jobId, 'completed');
+  insertJobEvent(jobId, 'processing', 'job_complete', {
+    message: `Job completed. Processed: ${processedCount}, Failed: ${failedCount}`,
+  });
   console.log(`Job ${jobId} completed. Processed: ${processedCount}, Failed: ${failedCount}`);
 }

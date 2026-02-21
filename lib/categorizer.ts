@@ -48,7 +48,11 @@ export interface AISuggestions {
   };
 }
 
-export async function analyzeAccountData(account: Account): Promise<AISuggestions> {
+export async function analyzeAccountData(account: Account, opportunityContext?: string): Promise<AISuggestions> {
+  const oppSection = opportunityContext
+    ? `\n### Salesforce Opportunity History:\n${opportunityContext}\n`
+    : '';
+
   const prompt = `You are an Auth0 CIAM sales intelligence analyst. Analyze the following company research data and provide structured categorization for sales prioritization.
 
 Company: ${account.company_name}
@@ -74,7 +78,7 @@ ${account.tech_transformation || 'Not available'}
 
 ### Research Summary:
 ${account.research_summary || 'Not available'}
-
+${oppSection}
 ---
 
 ## Your Task:

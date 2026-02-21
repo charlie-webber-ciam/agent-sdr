@@ -3,7 +3,9 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
+import { useSearchParams } from 'next/navigation';
 import MarkdownSection from '@/components/MarkdownSection';
+import ProspectTab from '@/components/prospects/ProspectTab';
 import AccountTags from '@/components/AccountTags';
 import AccountNotes from '@/components/AccountNotes';
 import TierSelector from '@/components/TierSelector';
@@ -15,6 +17,7 @@ import DeleteConfirmationModal from '@/components/DeleteConfirmationModal';
 import EmailWriter from '@/components/EmailWriter';
 import SequenceWriter from '@/components/SequenceWriter';
 import ReportSidebar, { SidebarSection } from '@/components/ReportSidebar';
+import OpportunitiesSection from '@/components/OpportunitiesSection';
 import { usePerspective } from '@/lib/perspective-context';
 
 // Utility to format domain display
@@ -101,6 +104,7 @@ interface AccountDetail {
   tags: Array<{ id: number; tag: string; tagType: string; createdAt: string }>;
   sectionComments: Record<string, string>;
   notes: Array<{ id: number; content: string; createdAt: string; updatedAt: string }>;
+  prospectCount: number;
 }
 
 // Icon components
@@ -190,10 +194,16 @@ export default function AccountDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { perspective } = usePerspective();
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Top-level tab: Research, Prospects, or Opportunities
+  const [activeTab, setActiveTab] = useState<'research' | 'prospects' | 'opportunities'>(
+    searchParams.get('tab') === 'prospects' ? 'prospects' : searchParams.get('tab') === 'opportunities' ? 'opportunities' : 'research'
+  );
 
   // Perspective state for research view (local to this page, initialized from global)
   const [activePerspective, setActivePerspective] = useState<'auth0' | 'okta'>(perspective === 'okta' ? 'okta' : 'auth0');
@@ -809,6 +819,54 @@ export default function AccountDetailPage({
         </div>
       </div>
 
+      {/* Research / Prospects Tab Bar */}
+      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab('research')}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+            activeTab === 'research'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          Research
+        </button>
+        <button
+          onClick={() => setActiveTab('prospects')}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px flex items-center gap-2 ${
+            activeTab === 'prospects'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          Prospects
+          {(account.prospectCount > 0) && (
+            <span className={`px-1.5 py-0.5 text-xs font-semibold rounded-full ${
+              activeTab === 'prospects' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+            }`}>
+              {account.prospectCount}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('opportunities')}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+            activeTab === 'opportunities'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          Opportunities
+        </button>
+      </div>
+
+      {/* Prospects Tab Content */}
+      {activeTab === 'prospects' ? (
+        <ProspectTab accountId={account.id} />
+      ) : activeTab === 'opportunities' ? (
+        <OpportunitiesSection accountId={account.id} />
+      ) : (
+      <>
       {/* Two-column layout: Sidebar + Main Content */}
       {account.status === 'completed' ? (
         <div className="flex gap-8">
@@ -1857,6 +1915,8 @@ export default function AccountDetailPage({
             Delete Account
           </button>
         </div>
+      )}
+      </>
       )}
 
       {/* Delete Confirmation Modal */}
