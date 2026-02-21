@@ -18,6 +18,7 @@ const toolLinks = [
   { href: '/upload', label: 'Upload CSV' },
   { href: '/import-opportunities', label: 'Import Opportunities' },
   { href: '/employee-counts/jobs', label: 'Employee Counts', activePath: '/employee-counts' },
+  { href: '/test', label: 'System Diagnostics' },
 ];
 
 export default function Navigation() {
