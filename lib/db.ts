@@ -2494,8 +2494,66 @@ export interface Prospect {
   description: string | null;
   parent_prospect_id: number | null;
   sort_order: number;
+  // AI enrichment fields
+  value_tier: string | null; // HVT|MVT|LVT|no_longer_with_company|recently_changed_roles|gatekeeper|technical_evaluator
+  seniority_level: string | null; // c_suite|vp|director|manager|individual_contributor|unknown
+  ai_summary: string | null; // markdown from prospect research agent
+  ai_processed_at: string | null;
+  department_tag: string | null; // normalized department
+  call_count: number;
+  connect_count: number;
+  last_called_at: string | null;
+  prospect_tags: string | null; // JSON array
+  contact_readiness: string | null; // dial_ready|email_ready|social_ready|incomplete
   created_at: string;
   updated_at: string;
+}
+
+export interface ProspectList {
+  id: number;
+  name: string;
+  description: string | null;
+  list_type: 'call' | 'email';
+  filters: string | null; // JSON
+  account_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProspectListItem {
+  id: number;
+  list_id: number;
+  prospect_id: number;
+  sort_order: number;
+  completed: number; // 0/1
+  created_at: string;
+}
+
+export interface ProspectCall {
+  id: number;
+  prospect_id: number;
+  account_id: number;
+  outcome: 'dialed' | 'connected' | 'voicemail' | 'no_answer' | 'busy';
+  notes: string | null;
+  duration_sec: number | null;
+  called_at: string;
+  created_at: string;
+}
+
+export interface ProspectProcessingJob {
+  id: number;
+  name: string;
+  total_prospects: number;
+  processed_count: number;
+  failed_count: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  current_prospect_id: number | null;
+  filters: string | null; // JSON
+  job_subtype: 'classify' | 'enrich_hvt' | 'enrich_mvt' | 'enrich_lvt' | 'contact_readiness';
+  error_log: string | null; // JSON array of error strings
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
 }
 
 export interface ProspectImportJob {
@@ -2635,6 +2693,19 @@ export function getProspectsWithFilters(filters: {
   industry?: string;
   source?: string;
   relationshipStatus?: string;
+  valueTier?: string;
+  seniorityLevel?: string;
+  departmentTag?: string;
+  tags?: string;
+  aiProcessed?: 'yes' | 'no';
+  has_email?: string;
+  has_phone?: string;
+  has_mobile?: string;
+  has_linkedin?: string;
+  do_not_call?: string;
+  phoneCountry?: string;
+  contactReadiness?: string;
+  exclude_dnc?: string;
   limit?: number;
   offset?: number;
 }): { prospects: (Prospect & { company_name: string; domain: string; account_tier: string | null; account_okta_tier: string | null; account_industry: string })[]; total: number } {
@@ -2683,7 +2754,60 @@ export function getProspectsWithFilters(filters: {
     params.push(filters.relationshipStatus);
   }
 
-  const countQuery = query.replace(/SELECT p\.\*, a\.company_name.*?FROM/, 'SELECT COUNT(*) as total FROM');
+  if (filters.valueTier) {
+    query += ' AND p.value_tier = ?';
+    params.push(filters.valueTier);
+  }
+
+  if (filters.seniorityLevel) {
+    query += ' AND p.seniority_level = ?';
+    params.push(filters.seniorityLevel);
+  }
+
+  if (filters.departmentTag) {
+    query += ' AND p.department_tag = ?';
+    params.push(filters.departmentTag);
+  }
+
+  if (filters.tags) {
+    query += ' AND p.prospect_tags LIKE ?';
+    params.push(`%${filters.tags}%`);
+  }
+
+  if (filters.aiProcessed === 'yes') {
+    query += ' AND p.ai_processed_at IS NOT NULL';
+  } else if (filters.aiProcessed === 'no') {
+    query += ' AND p.ai_processed_at IS NULL';
+  }
+
+  if (filters.has_email === 'true') {
+    query += " AND p.email IS NOT NULL AND p.email != ''";
+  }
+  if (filters.has_phone === 'true') {
+    query += " AND p.phone IS NOT NULL AND p.phone != ''";
+  }
+  if (filters.has_mobile === 'true') {
+    query += " AND p.mobile IS NOT NULL AND p.mobile != ''";
+  }
+  if (filters.has_linkedin === 'true') {
+    query += " AND p.linkedin_url IS NOT NULL AND p.linkedin_url != ''";
+  }
+  if (filters.do_not_call === 'true') {
+    query += ' AND p.do_not_call = 1';
+  }
+  if (filters.phoneCountry) {
+    query += " AND (p.phone LIKE ? OR p.mobile LIKE ?)";
+    params.push(`${filters.phoneCountry}%`, `${filters.phoneCountry}%`);
+  }
+  if (filters.contactReadiness) {
+    query += ' AND p.contact_readiness = ?';
+    params.push(filters.contactReadiness);
+  }
+  if (filters.exclude_dnc === 'true') {
+    query += ' AND (p.do_not_call IS NULL OR p.do_not_call != 1)';
+  }
+
+  const countQuery = query.replace(/SELECT p\.\*, a\.company_name[\s\S]*?FROM/, 'SELECT COUNT(*) as total FROM');
   const countResult = db.prepare(countQuery).get(...params) as { total: number };
 
   query += ' ORDER BY a.company_name, p.sort_order, p.id';
@@ -2695,6 +2819,38 @@ export function getProspectsWithFilters(filters: {
 
   const prospects = db.prepare(query).all(...params) as any[];
   return { prospects, total: countResult.total };
+}
+
+export function getProspectDataQualityStats(): {
+  total: number;
+  has_email: number;
+  has_phone: number;
+  has_mobile: number;
+  has_linkedin: number;
+  has_address: number;
+  do_not_call: number;
+  dial_ready: number;
+  email_ready: number;
+  social_ready: number;
+  incomplete: number;
+} {
+  const db = getDb();
+  const result = db.prepare(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN email IS NOT NULL AND email != '' THEN 1 ELSE 0 END) as has_email,
+      SUM(CASE WHEN phone IS NOT NULL AND phone != '' THEN 1 ELSE 0 END) as has_phone,
+      SUM(CASE WHEN mobile IS NOT NULL AND mobile != '' THEN 1 ELSE 0 END) as has_mobile,
+      SUM(CASE WHEN linkedin_url IS NOT NULL AND linkedin_url != '' THEN 1 ELSE 0 END) as has_linkedin,
+      SUM(CASE WHEN mailing_address IS NOT NULL AND mailing_address != '' THEN 1 ELSE 0 END) as has_address,
+      SUM(CASE WHEN do_not_call = 1 THEN 1 ELSE 0 END) as do_not_call,
+      SUM(CASE WHEN contact_readiness = 'dial_ready' THEN 1 ELSE 0 END) as dial_ready,
+      SUM(CASE WHEN contact_readiness = 'email_ready' THEN 1 ELSE 0 END) as email_ready,
+      SUM(CASE WHEN contact_readiness = 'social_ready' THEN 1 ELSE 0 END) as social_ready,
+      SUM(CASE WHEN contact_readiness = 'incomplete' OR contact_readiness IS NULL THEN 1 ELSE 0 END) as incomplete
+    FROM prospects
+  `).get() as any;
+  return result;
 }
 
 export function bulkCreateProspects(prospects: Array<{
@@ -3326,4 +3482,361 @@ export function updateJobCurrentStep(jobId: number, step: string): void {
   db.prepare(`
     UPDATE processing_jobs SET current_step = ?, updated_at = datetime('now') WHERE id = ?
   `).run(step, jobId);
+}
+
+// ─── Prospect AI Data ────────────────────────────────────────────────────────
+
+export function updateProspectAIData(
+  id: number,
+  data: {
+    value_tier?: string;
+    seniority_level?: string;
+    ai_summary?: string;
+    ai_processed_at?: string;
+    department_tag?: string;
+    prospect_tags?: string; // JSON array string
+    contact_readiness?: string;
+  }
+): Prospect | undefined {
+  const db = getDb();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  Object.entries(data).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) return getProspect(id);
+
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+
+  db.prepare(`UPDATE prospects SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return db.prepare('SELECT * FROM prospects WHERE id = ?').get(id) as Prospect | undefined;
+}
+
+// ─── Prospect Call Tracking ──────────────────────────────────────────────────
+
+export function createProspectCall(data: {
+  prospect_id: number;
+  account_id: number;
+  outcome?: string;
+  notes?: string;
+  duration_sec?: number;
+  called_at?: string;
+}): ProspectCall {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO prospect_calls (prospect_id, account_id, outcome, notes, duration_sec, called_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.prospect_id,
+    data.account_id,
+    data.outcome || 'dialed',
+    data.notes || null,
+    data.duration_sec || null,
+    data.called_at || new Date().toISOString()
+  );
+  return db.prepare('SELECT * FROM prospect_calls WHERE id = ?').get(result.lastInsertRowid) as ProspectCall;
+}
+
+export function getProspectCalls(prospectId: number): ProspectCall[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospect_calls WHERE prospect_id = ? ORDER BY called_at DESC').all(prospectId) as ProspectCall[];
+}
+
+export function updateProspectCallCounts(prospectId: number): void {
+  const db = getDb();
+  const counts = db.prepare(`
+    SELECT
+      COUNT(*) as call_count,
+      SUM(CASE WHEN outcome = 'connected' THEN 1 ELSE 0 END) as connect_count,
+      MAX(called_at) as last_called_at
+    FROM prospect_calls WHERE prospect_id = ?
+  `).get(prospectId) as { call_count: number; connect_count: number; last_called_at: string | null };
+
+  db.prepare(`
+    UPDATE prospects SET call_count = ?, connect_count = ?, last_called_at = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(counts.call_count, counts.connect_count, counts.last_called_at, prospectId);
+}
+
+// ─── Prospect Lists ─────────────────────────────────────────────────────────
+
+export function createProspectList(data: {
+  name: string;
+  description?: string;
+  list_type?: string;
+  filters?: string;
+  account_id?: number;
+}): ProspectList {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO prospect_lists (name, description, list_type, filters, account_id)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.name,
+    data.description || null,
+    data.list_type || 'call',
+    data.filters || null,
+    data.account_id || null
+  );
+  return db.prepare('SELECT * FROM prospect_lists WHERE id = ?').get(result.lastInsertRowid) as ProspectList;
+}
+
+export function getProspectList(id: number): ProspectList | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospect_lists WHERE id = ?').get(id) as ProspectList | undefined;
+}
+
+export function getAllProspectLists(accountId?: number): (ProspectList & { item_count: number; completed_count: number })[] {
+  const db = getDb();
+  let query = `
+    SELECT pl.*,
+      COALESCE((SELECT COUNT(*) FROM prospect_list_items WHERE list_id = pl.id), 0) as item_count,
+      COALESCE((SELECT COUNT(*) FROM prospect_list_items WHERE list_id = pl.id AND completed = 1), 0) as completed_count
+    FROM prospect_lists pl
+  `;
+  const params: any[] = [];
+  if (accountId) {
+    query += ' WHERE pl.account_id = ? OR pl.account_id IS NULL';
+    params.push(accountId);
+  }
+  query += ' ORDER BY pl.updated_at DESC';
+  return db.prepare(query).all(...params) as any[];
+}
+
+export function updateProspectList(id: number, data: { name?: string; description?: string; list_type?: string; filters?: string }): ProspectList | undefined {
+  const db = getDb();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  Object.entries(data).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) return getProspectList(id);
+
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+
+  db.prepare(`UPDATE prospect_lists SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return db.prepare('SELECT * FROM prospect_lists WHERE id = ?').get(id) as ProspectList | undefined;
+}
+
+export function deleteProspectList(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM prospect_lists WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+// ─── Prospect List Items ────────────────────────────────────────────────────
+
+export function addProspectsToList(listId: number, prospectIds: number[]): number {
+  const db = getDb();
+  const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), -1) as max_order FROM prospect_list_items WHERE list_id = ?').get(listId) as { max_order: number }).max_order;
+
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO prospect_list_items (list_id, prospect_id, sort_order)
+    VALUES (?, ?, ?)
+  `);
+
+  let added = 0;
+  const transaction = db.transaction(() => {
+    for (let i = 0; i < prospectIds.length; i++) {
+      const result = stmt.run(listId, prospectIds[i], maxOrder + 1 + i);
+      if (result.changes > 0) added++;
+    }
+    // Update list timestamp
+    db.prepare("UPDATE prospect_lists SET updated_at = datetime('now') WHERE id = ?").run(listId);
+  });
+  transaction();
+  return added;
+}
+
+export function removeProspectFromList(listId: number, prospectId: number): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM prospect_list_items WHERE list_id = ? AND prospect_id = ?').run(listId, prospectId);
+  if (result.changes > 0) {
+    db.prepare("UPDATE prospect_lists SET updated_at = datetime('now') WHERE id = ?").run(listId);
+  }
+  return result.changes > 0;
+}
+
+export function getProspectListItems(listId: number): (ProspectListItem & Prospect & { company_name: string; domain: string; account_industry: string })[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT pli.*, p.account_id, p.first_name, p.last_name, p.title, p.email, p.phone, p.mobile,
+           p.linkedin_url, p.department, p.notes, p.role_type, p.relationship_status, p.source,
+           p.mailing_address, p.lead_source, p.last_activity_date, p.do_not_call, p.description,
+           p.parent_prospect_id, p.value_tier, p.seniority_level, p.ai_summary, p.ai_processed_at,
+           p.department_tag, p.call_count, p.connect_count, p.last_called_at, p.prospect_tags,
+           p.contact_readiness, p.sort_order as prospect_sort_order,
+           a.company_name, a.domain, a.industry as account_industry
+    FROM prospect_list_items pli
+    JOIN prospects p ON pli.prospect_id = p.id
+    JOIN accounts a ON p.account_id = a.id
+    WHERE pli.list_id = ?
+    ORDER BY pli.sort_order, pli.id
+  `).all(listId) as any[];
+}
+
+export function markListItemCompleted(listId: number, prospectId: number, completed: boolean): void {
+  const db = getDb();
+  db.prepare('UPDATE prospect_list_items SET completed = ? WHERE list_id = ? AND prospect_id = ?').run(completed ? 1 : 0, listId, prospectId);
+}
+
+export function reorderListItems(listId: number, orderedProspectIds: number[]): void {
+  const db = getDb();
+  const transaction = db.transaction(() => {
+    orderedProspectIds.forEach((prospectId, index) => {
+      db.prepare('UPDATE prospect_list_items SET sort_order = ? WHERE list_id = ? AND prospect_id = ?').run(index, listId, prospectId);
+    });
+    db.prepare("UPDATE prospect_lists SET updated_at = datetime('now') WHERE id = ?").run(listId);
+  });
+  transaction();
+}
+
+// ─── Prospect Processing Jobs ───────────────────────────────────────────────
+
+export function createProspectProcessingJob(data: {
+  name: string;
+  total_prospects: number;
+  filters?: string;
+  job_subtype?: string;
+}): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO prospect_processing_jobs (name, total_prospects, filters, job_subtype)
+    VALUES (?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.name,
+    data.total_prospects,
+    data.filters || null,
+    data.job_subtype || 'classify'
+  );
+  return result.lastInsertRowid as number;
+}
+
+export function getProspectProcessingJob(id: number): ProspectProcessingJob | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospect_processing_jobs WHERE id = ?').get(id) as ProspectProcessingJob | undefined;
+}
+
+export function getAllProspectProcessingJobs(limit: number = 10): ProspectProcessingJob[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospect_processing_jobs ORDER BY created_at DESC LIMIT ?').all(limit) as ProspectProcessingJob[];
+}
+
+export function updateProspectProcessingJobStatus(
+  id: number,
+  status: 'pending' | 'processing' | 'completed' | 'failed',
+  currentProspectId?: number | null
+): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE prospect_processing_jobs
+    SET status = ?, current_prospect_id = ?,
+        updated_at = datetime('now'),
+        completed_at = CASE WHEN ? IN ('completed', 'failed') THEN datetime('now') ELSE completed_at END
+    WHERE id = ?
+  `).run(status, currentProspectId || null, status, id);
+}
+
+export function updateProspectProcessingJobProgress(
+  id: number,
+  processedCount: number,
+  failedCount: number
+): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE prospect_processing_jobs
+    SET processed_count = ?, failed_count = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(processedCount, failedCount, id);
+}
+
+export function appendProspectProcessingJobError(id: number, errorMsg: string): void {
+  const db = getDb();
+  const job = db.prepare('SELECT error_log FROM prospect_processing_jobs WHERE id = ?').get(id) as { error_log: string | null } | undefined;
+  let errors: string[] = [];
+  if (job?.error_log) {
+    try { errors = JSON.parse(job.error_log); } catch { errors = []; }
+  }
+  // Keep last 50 errors to avoid unbounded growth
+  errors.push(errorMsg);
+  if (errors.length > 50) errors = errors.slice(-50);
+  db.prepare('UPDATE prospect_processing_jobs SET error_log = ?, updated_at = datetime(\'now\') WHERE id = ?')
+    .run(JSON.stringify(errors), id);
+}
+
+export function getProspectsForProcessing(filters: {
+  valueTier?: string;
+  unprocessedOnly?: boolean;
+  accountTier?: string;
+  limit?: number;
+  prospectIds?: number[];
+}): (Prospect & { company_name: string; domain: string; account_tier: string | null; account_industry: string; research_summary: string | null })[] {
+  const db = getDb();
+  let query = `
+    SELECT p.*, a.company_name, a.domain, a.tier as account_tier, a.industry as account_industry, a.research_summary
+    FROM prospects p
+    JOIN accounts a ON p.account_id = a.id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+
+  if (filters.prospectIds && filters.prospectIds.length > 0) {
+    const placeholders = filters.prospectIds.map(() => '?').join(',');
+    query += ` AND p.id IN (${placeholders})`;
+    params.push(...filters.prospectIds);
+  } else {
+    if (filters.valueTier) {
+      query += ' AND p.value_tier = ?';
+      params.push(filters.valueTier);
+    }
+
+    if (filters.unprocessedOnly) {
+      query += ' AND p.ai_processed_at IS NULL';
+    }
+
+    if (filters.accountTier) {
+      query += ' AND a.tier = ?';
+      params.push(filters.accountTier);
+    }
+  }
+
+  query += ' ORDER BY p.id';
+
+  if (filters.limit) {
+    query += ' LIMIT ?';
+    params.push(filters.limit);
+  }
+
+  return db.prepare(query).all(...params) as any[];
+}
+
+// ─── Prospect Tag/Filter Metadata ───────────────────────────────────────────
+
+export function getProspectFilterMetadata(): {
+  valueTiers: string[];
+  seniorityLevels: string[];
+  departmentTags: string[];
+} {
+  const db = getDb();
+
+  const valueTiers = (db.prepare('SELECT DISTINCT value_tier FROM prospects WHERE value_tier IS NOT NULL ORDER BY value_tier').all() as { value_tier: string }[]).map(r => r.value_tier);
+  const seniorityLevels = (db.prepare('SELECT DISTINCT seniority_level FROM prospects WHERE seniority_level IS NOT NULL ORDER BY seniority_level').all() as { seniority_level: string }[]).map(r => r.seniority_level);
+  const departmentTags = (db.prepare('SELECT DISTINCT department_tag FROM prospects WHERE department_tag IS NOT NULL ORDER BY department_tag').all() as { department_tag: string }[]).map(r => r.department_tag);
+
+  return { valueTiers, seniorityLevels, departmentTags };
 }

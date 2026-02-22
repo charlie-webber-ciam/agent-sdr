@@ -2,6 +2,9 @@
 
 import { useState } from 'react';
 import type { Prospect } from './ProspectTab';
+import ProspectTierBadge from './ProspectTierBadge';
+import MarkdownBody from './MarkdownBody';
+import TagList from './TagList';
 
 interface Props {
   prospect: Prospect | null;
@@ -52,6 +55,8 @@ export default function ProspectDetailModal({ prospect, accountId, allProspects,
     lead_source: prospect?.lead_source || '',
     description: prospect?.description || '',
     parent_prospect_id: prospect?.parent_prospect_id || '',
+    value_tier: prospect?.value_tier || '',
+    seniority_level: prospect?.seniority_level || '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +145,61 @@ export default function ProspectDetailModal({ prospect, accountId, allProspects,
                 </button>
               )}
             </div>
+          )}
+
+          {/* AI Enrichment (edit mode only) */}
+          {!isCreate && prospect && (
+            <section className="bg-blue-50 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">AI Enrichment</h4>
+                <div className="flex items-center gap-2">
+                  <ProspectTierBadge tier={prospect.value_tier} size="md" />
+                  {prospect.call_count > 0 && (
+                    <span className="text-xs text-gray-500">
+                      {prospect.call_count} calls / {prospect.connect_count} connects
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Value Tier</label>
+                  <select value={form.value_tier || ''} onChange={e => update('value_tier', e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Unassigned</option>
+                    <option value="HVT">HVT</option>
+                    <option value="MVT">MVT</option>
+                    <option value="LVT">LVT</option>
+                    <option value="no_longer_with_company">Left Company</option>
+                    <option value="recently_changed_roles">Role Change</option>
+                    <option value="gatekeeper">Gatekeeper</option>
+                    <option value="technical_evaluator">Tech Evaluator</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Seniority</label>
+                  <select value={form.seniority_level || ''} onChange={e => update('seniority_level', e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Unknown</option>
+                    <option value="c_suite">C-Suite</option>
+                    <option value="vp">VP</option>
+                    <option value="director">Director</option>
+                    <option value="manager">Manager</option>
+                    <option value="individual_contributor">IC</option>
+                  </select>
+                </div>
+              </div>
+              {prospect.ai_summary && (
+                <div className="text-sm text-gray-700 bg-white rounded p-2 max-h-32 overflow-y-auto">
+                  <MarkdownBody>{prospect.ai_summary}</MarkdownBody>
+                </div>
+              )}
+              {prospect.prospect_tags && (
+                <div className="mt-2">
+                  <TagList tagsJson={prospect.prospect_tags} />
+                </div>
+              )}
+            </section>
           )}
 
           {/* Basic */}

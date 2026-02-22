@@ -2,6 +2,9 @@
 
 import { useState } from 'react';
 import type { Prospect } from './ProspectTab';
+import ProspectTierBadge from './ProspectTierBadge';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
+import Toast from './Toast';
 
 const ROLE_BADGES: Record<string, { bg: string; text: string; label: string }> = {
   decision_maker: { bg: 'bg-green-100', text: 'text-green-800', label: 'Decision Maker' },
@@ -32,6 +35,9 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
   const [editValue, setEditValue] = useState('');
   const [newRow, setNewRow] = useState({ first_name: '', last_name: '', title: '', email: '', phone: '' });
   const [addingRow, setAddingRow] = useState(false);
+  const [deleteModal, setDeleteModal] = useState<Prospect | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<{message: string; type: 'success'|'error'|'info'}|null>(null);
 
   const startEdit = (prospect: Prospect, field: string) => {
     setEditingCell({ id: prospect.id, field });
@@ -48,7 +54,7 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
       });
       onRefresh();
     } catch (err) {
-      console.error('Failed to save:', err);
+      setToast({ message: 'Failed to save changes', type: 'error' });
     }
     setEditingCell(null);
   };
@@ -58,13 +64,21 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
     if (e.key === 'Escape') setEditingCell(null);
   };
 
-  const handleDelete = async (prospect: Prospect) => {
-    if (!window.confirm(`Delete ${prospect.first_name} ${prospect.last_name}?`)) return;
+  const handleDelete = (prospect: Prospect) => {
+    setDeleteModal(prospect);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteModal) return;
+    setDeleting(true);
     try {
-      await fetch(`/api/accounts/${accountId}/prospects/${prospect.id}`, { method: 'DELETE' });
+      await fetch(`/api/accounts/${accountId}/prospects/${deleteModal.id}`, { method: 'DELETE' });
+      setDeleteModal(null);
       onRefresh();
     } catch (err) {
-      console.error('Failed to delete:', err);
+      setToast({ message: 'Failed to delete prospect', type: 'error' });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -79,8 +93,9 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
       });
       setNewRow({ first_name: '', last_name: '', title: '', email: '', phone: '' });
       onRefresh();
+      setToast({ message: 'Prospect added', type: 'success' });
     } catch (err) {
-      console.error('Failed to add:', err);
+      setToast({ message: 'Failed to add prospect', type: 'error' });
     } finally {
       setAddingRow(false);
     }
@@ -122,9 +137,11 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Name</th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Title</th>
+              <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Tier</th>
+              <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Seniority</th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Email</th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Phone</th>
-              <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Mobile</th>
+              <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Calls</th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Role</th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Status</th>
               <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Actions</th>
@@ -143,6 +160,12 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
                   <td className="px-4 py-2.5 text-sm text-gray-600 max-w-[200px]">
                     {renderCell(p, 'title', p.title)}
                   </td>
+                  <td className="px-4 py-2.5">
+                    <ProspectTierBadge tier={p.value_tier} />
+                  </td>
+                  <td className="px-4 py-2.5 text-xs text-gray-500 capitalize">
+                    {p.seniority_level ? p.seniority_level.replace(/_/g, ' ') : <span className="text-gray-300">-</span>}
+                  </td>
                   <td className="px-4 py-2.5 text-sm text-gray-600 max-w-[200px]">
                     {renderCell(p, 'email', p.email)}
                   </td>
@@ -150,7 +173,12 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
                     {renderCell(p, 'phone', p.phone)}
                   </td>
                   <td className="px-4 py-2.5 text-sm text-gray-600">
-                    {renderCell(p, 'mobile', p.mobile)}
+                    {p.call_count > 0 ? (
+                      <span className="text-xs">
+                        {p.call_count}
+                        {p.connect_count > 0 && <span className="text-green-600 ml-1">({p.connect_count}c)</span>}
+                      </span>
+                    ) : <span className="text-gray-300">-</span>}
                   </td>
                   <td className="px-4 py-2.5">
                     {roleBadge ? (
@@ -219,6 +247,8 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
                   className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </td>
+              <td className="px-4 py-2"></td>
+              <td className="px-4 py-2"></td>
               <td className="px-4 py-2">
                 <input
                   placeholder="Email"
@@ -237,7 +267,7 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
                   className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </td>
-              <td className="px-4 py-2" colSpan={2}></td>
+              <td className="px-4 py-2" colSpan={3}></td>
               <td className="px-4 py-2 text-right">
                 <button
                   onClick={handleAddRow}
@@ -251,6 +281,19 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
           </tbody>
         </table>
       </div>
+
+      {toast && <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />}
+
+      {deleteModal && (
+        <DeleteConfirmationModal
+          title="Delete Prospect"
+          message={`Are you sure you want to delete ${deleteModal.first_name} ${deleteModal.last_name}? This action cannot be undone.`}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteModal(null)}
+          confirmLabel="Delete"
+          isDeleting={deleting}
+        />
+      )}
     </div>
   );
 }

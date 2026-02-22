@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getAccount, getProspectsByAccount, createProspect, findExistingProspectByEmailOrName } from '@/lib/db';
+import { getAccount, getProspectsByAccount, createProspect, findExistingProspectByEmailOrName, updateProspect } from '@/lib/db';
+import { assessContactReadiness } from '@/lib/prospect-contact-readiness';
 
 function buildTree(prospects: any[]) {
   const map = new Map<number, any>();
@@ -105,7 +106,10 @@ export async function POST(
       sort_order: body.sort_order,
     });
 
-    return NextResponse.json(prospect, { status: 201 });
+    const readiness = assessContactReadiness(prospect);
+    const updated = updateProspect(prospect.id, { contact_readiness: readiness });
+
+    return NextResponse.json(updated || prospect, { status: 201 });
   } catch (error) {
     console.error('Error creating prospect:', error);
     return NextResponse.json({ error: 'Failed to create prospect' }, { status: 500 });

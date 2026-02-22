@@ -139,11 +139,11 @@ function persistDomain(accountId: number, newDomain: string): void {
  */
 export async function resolveAndUpdateDomain(account: {
   id: number;
-  domain: string;
+  domain: string | null;
   company_name: string;
   industry: string;
 }): Promise<string> {
-  const original = account.domain;
+  const original = account.domain || '';
 
   try {
     // ── Case 1: placeholder domain ──────────────────────────────────────────

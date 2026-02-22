@@ -6,6 +6,7 @@ import {
   createProspectImportJob,
   updateProspectImportJob,
   getProspectsByAccount,
+  getDb,
 } from '@/lib/db';
 
 const COLUMN_ALIASES: Record<string, string> = {
@@ -25,8 +26,8 @@ const COLUMN_ALIASES: Record<string, string> = {
   'email address': 'email',
   'phone': 'phone',
   'phone number': 'phone',
-  'mobile': 'phone',
-  'mobile phone': 'phone',
+  'mobile': 'mobile',
+  'mobile phone': 'mobile',
   'department': 'department',
   'mailing address': 'mailing_address',
   'address': 'mailing_address',
@@ -109,6 +110,7 @@ export async function POST(request: Request) {
       title?: string;
       email?: string;
       phone?: string;
+      mobile?: string;
       linkedin_url?: string;
       department?: string;
       mailing_address?: string;
@@ -133,6 +135,7 @@ export async function POST(request: Request) {
           title: record.title || undefined,
           email: record.email || undefined,
           phone: record.phone || undefined,
+          mobile: record.mobile || undefined,
           linkedin_url: record.linkedin_url || undefined,
           department: record.department || undefined,
           mailing_address: record.mailing_address || undefined,
@@ -184,6 +187,17 @@ export async function POST(request: Request) {
     let createdCount = 0;
     if (dedupedMatched.length > 0) {
       createdCount = bulkCreateProspects(dedupedMatched);
+
+      // Set contact_readiness for newly imported rows
+      const db = getDb();
+      db.prepare(`
+        UPDATE prospects SET contact_readiness = CASE
+          WHEN (phone IS NOT NULL OR mobile IS NOT NULL) AND (do_not_call IS NULL OR do_not_call = 0) THEN 'dial_ready'
+          WHEN email IS NOT NULL THEN 'email_ready'
+          WHEN linkedin_url IS NOT NULL THEN 'social_ready'
+          ELSE 'incomplete'
+        END WHERE contact_readiness IS NULL
+      `).run();
     }
 
     updateProspectImportJob(jobId, {

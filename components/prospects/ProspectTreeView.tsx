@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import type { Prospect } from './ProspectTab';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 
 const ROLE_COLORS: Record<string, string> = {
   decision_maker: 'bg-green-100 text-green-800',
@@ -57,6 +58,8 @@ interface Props {
 export default function ProspectTreeView({ prospects, accountId, onRefresh, onSelectProspect, onWriteEmail }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set(prospects.map(p => p.id)));
   const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const [deleteModal, setDeleteModal] = useState<Prospect | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const toggleExpand = (id: number) => {
     setExpanded(prev => {
@@ -126,13 +129,21 @@ export default function ProspectTreeView({ prospects, accountId, onRefresh, onSe
     }
   }, [accountId, prospects, onRefresh]);
 
-  const handleDelete = async (p: Prospect) => {
-    if (!window.confirm(`Delete ${p.first_name} ${p.last_name}?`)) return;
+  const handleDelete = (p: Prospect) => {
+    setDeleteModal(p);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteModal) return;
+    setDeleting(true);
     try {
-      await fetch(`/api/accounts/${accountId}/prospects/${p.id}`, { method: 'DELETE' });
+      await fetch(`/api/accounts/${accountId}/prospects/${deleteModal.id}`, { method: 'DELETE' });
+      setDeleteModal(null);
       onRefresh();
     } catch (err) {
       console.error('Failed to delete:', err);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -227,17 +238,30 @@ export default function ProspectTreeView({ prospects, accountId, onRefresh, onSe
   };
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-3">
-      {/* Drop zone for making root-level */}
-      <div
-        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-        onDrop={handleDropRoot}
-        className="min-h-[2px]"
-      />
-      {tree.map(root => renderNode(root, 0))}
-      {tree.length === 0 && (
-        <p className="text-center text-sm text-gray-500 py-4">No prospects to display</p>
+    <>
+      <div className="bg-white rounded-xl border border-gray-200 p-3">
+        {/* Drop zone for making root-level */}
+        <div
+          onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+          onDrop={handleDropRoot}
+          className="min-h-[2px]"
+        />
+        {tree.map(root => renderNode(root, 0))}
+        {tree.length === 0 && (
+          <p className="text-center text-sm text-gray-500 py-4">No prospects to display</p>
+        )}
+      </div>
+
+      {deleteModal && (
+        <DeleteConfirmationModal
+          title="Delete Prospect"
+          message={`Are you sure you want to delete ${deleteModal.first_name} ${deleteModal.last_name}? This action cannot be undone.`}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteModal(null)}
+          confirmLabel="Delete"
+          isDeleting={deleting}
+        />
       )}
-    </div>
+    </>
   );
 }

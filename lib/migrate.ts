@@ -382,6 +382,33 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Failed to create opportunity_prospects table:', error);
   }
 
+  // Add prospect_processing_jobs table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_processing_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        total_prospects INTEGER NOT NULL DEFAULT 0,
+        processed_count INTEGER NOT NULL DEFAULT 0,
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
+        current_prospect_id INTEGER,
+        filters TEXT,
+        job_subtype TEXT NOT NULL DEFAULT 'classify' CHECK(job_subtype IN ('classify', 'enrich_hvt', 'enrich_mvt', 'enrich_lvt', 'contact_readiness')),
+        error_log TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT,
+        FOREIGN KEY (current_prospect_id) REFERENCES prospects(id)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_processing_jobs_status ON prospect_processing_jobs(status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_processing_jobs_created ON prospect_processing_jobs(created_at)');
+    console.log('✓ Ensured prospect_processing_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create prospect_processing_jobs table:', error);
+  }
+
   // Add paused column to preprocessing_jobs if table exists
   try {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='preprocessing_jobs'").all() as any[];
@@ -445,6 +472,102 @@ export function migrateDatabase(db: Database.Database) {
     console.log('✓ Ensured job_events table exists');
   } catch (error) {
     console.error('Failed to create job_events table:', error);
+  }
+
+  // Add AI enrichment columns to prospects table if missing
+  try {
+    const prospectCols2 = db.prepare('PRAGMA table_info(prospects)').all() as any[];
+    const prospectColNames = new Set(prospectCols2.map((col: any) => col.name));
+
+    const prospectNewColumns = [
+      { name: 'value_tier', type: 'TEXT' },
+      { name: 'seniority_level', type: 'TEXT' },
+      { name: 'ai_summary', type: 'TEXT' },
+      { name: 'ai_processed_at', type: 'TEXT' },
+      { name: 'department_tag', type: 'TEXT' },
+      { name: 'call_count', type: 'INTEGER', default: '0' },
+      { name: 'connect_count', type: 'INTEGER', default: '0' },
+      { name: 'last_called_at', type: 'TEXT' },
+      { name: 'prospect_tags', type: 'TEXT' },
+      { name: 'contact_readiness', type: 'TEXT' },
+    ];
+
+    for (const col of prospectNewColumns) {
+      if (!prospectColNames.has(col.name)) {
+        let sql = `ALTER TABLE prospects ADD COLUMN ${col.name} ${col.type}`;
+        if (col.default) sql += ` DEFAULT ${col.default}`;
+        db.exec(sql);
+        console.log(`✓ Added column to prospects: ${col.name}`);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to add AI enrichment columns to prospects:', error);
+  }
+
+  // Add prospect_calls table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_calls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prospect_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        outcome TEXT NOT NULL CHECK(outcome IN ('dialed','connected','voicemail','no_answer','busy')),
+        notes TEXT,
+        duration_sec INTEGER,
+        called_at TEXT NOT NULL DEFAULT (datetime('now')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE,
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_calls_prospect_id ON prospect_calls(prospect_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_calls_account_id ON prospect_calls(account_id)');
+    console.log('✓ Ensured prospect_calls table exists');
+  } catch (error) {
+    console.error('Failed to create prospect_calls table:', error);
+  }
+
+  // Add prospect_lists table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_lists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        list_type TEXT NOT NULL DEFAULT 'call' CHECK(list_type IN ('call','email')),
+        filters TEXT,
+        account_id INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_lists_account_id ON prospect_lists(account_id)');
+    console.log('✓ Ensured prospect_lists table exists');
+  } catch (error) {
+    console.error('Failed to create prospect_lists table:', error);
+  }
+
+  // Add prospect_list_items table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_list_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        list_id INTEGER NOT NULL,
+        prospect_id INTEGER NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        completed INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (list_id) REFERENCES prospect_lists(id) ON DELETE CASCADE,
+        FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE,
+        UNIQUE(list_id, prospect_id)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_list_items_list_id ON prospect_list_items(list_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_list_items_prospect_id ON prospect_list_items(prospect_id)');
+    console.log('✓ Ensured prospect_list_items table exists');
+  } catch (error) {
+    console.error('Failed to create prospect_list_items table:', error);
   }
 
   // Add account_relationships table if it doesn't exist
