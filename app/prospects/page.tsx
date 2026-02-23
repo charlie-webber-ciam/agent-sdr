@@ -38,6 +38,7 @@ interface ProspectRow {
   ai_processed_at?: string | null;
   contact_readiness?: string | null;
   prospect_tags?: string | null;
+  sfdc_id?: string | null;
 }
 
 const ROLE_BADGES: Record<string, { bg: string; text: string; label: string }> = {
@@ -331,6 +332,7 @@ export default function ProspectsPage() {
                     <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Data</th>
                     <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Role</th>
                     <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Status</th>
+                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">SFDC</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -446,6 +448,24 @@ export default function ProspectsPage() {
                           <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full capitalize ${statusBadge.bg} ${statusBadge.text}`}>
                             {p.relationship_status}
                           </span>
+                        </td>
+                        <td
+                          className="px-4 py-3"
+                          onClick={() => setSelectedProspectId(p.id)}
+                        >
+                          {p.sfdc_id ? (
+                            <a
+                              href={`https://okta.lightning.force.com/lightning/r/${p.sfdc_id}/view`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="text-xs font-medium text-orange-600 hover:text-orange-700 hover:underline"
+                            >
+                              SF
+                            </a>
+                          ) : (
+                            <span className="text-gray-300 text-sm">-</span>
+                          )}
                         </td>
                       </tr>
                     );

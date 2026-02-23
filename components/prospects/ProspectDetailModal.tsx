@@ -1,10 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Prospect } from './ProspectTab';
 import ProspectTierBadge from './ProspectTierBadge';
 import MarkdownBody from './MarkdownBody';
 import TagList from './TagList';
+
+interface StoredEmail {
+  id: number;
+  subject: string;
+  body: string;
+  status: string;
+  email_type: string;
+  created_at: string;
+}
 
 interface Props {
   prospect: Prospect | null;
@@ -60,6 +69,33 @@ export default function ProspectDetailModal({ prospect, accountId, allProspects,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [storedEmails, setStoredEmails] = useState<StoredEmail[]>([]);
+  const [emailsCopied, setEmailsCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!prospect) return;
+    fetch(`/api/prospects/${prospect.id}/emails`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (data?.emails) setStoredEmails(data.emails); })
+      .catch(() => {});
+  }, [prospect]);
+
+  const handleEmailAction = async (emailId: number, status: string) => {
+    try {
+      await fetch(`/api/prospects/${prospect?.id || 0}/emails/${emailId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      setStoredEmails(prev => prev.map(e => e.id === emailId ? { ...e, status } : e));
+    } catch { /* ignore */ }
+  };
+
+  const copyEmail = async (text: string, id: string) => {
+    await navigator.clipboard.writeText(text);
+    setEmailsCopied(id);
+    setTimeout(() => setEmailsCopied(null), 2000);
+  };
 
   const update = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }));
 
@@ -202,6 +238,59 @@ export default function ProspectDetailModal({ prospect, accountId, allProspects,
             </section>
           )}
 
+          {/* Stored Emails */}
+          {!isCreate && prospect && storedEmails.length > 0 && (
+            <section className="bg-purple-50 rounded-lg p-4">
+              <h4 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">
+                Generated Emails ({storedEmails.length})
+              </h4>
+              <div className="space-y-2">
+                {storedEmails.map(email => (
+                  <div key={email.id} className="bg-white rounded-lg border border-gray-200 p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
+                          email.status === 'sent' ? 'bg-green-100 text-green-700' :
+                          email.status === 'archived' ? 'bg-gray-100 text-gray-500' :
+                          'bg-blue-100 text-blue-700'
+                        }`}>{email.status}</span>
+                        <span className="text-xs text-gray-400">{email.email_type}</span>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => copyEmail(`Subject: ${email.subject}\n\n${email.body}`, `modal-${email.id}`)}
+                          className="px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 rounded font-medium"
+                        >
+                          {emailsCopied === `modal-${email.id}` ? 'Copied!' : 'Copy'}
+                        </button>
+                        {email.status === 'draft' && (
+                          <>
+                            <button
+                              onClick={() => handleEmailAction(email.id, 'sent')}
+                              className="px-2 py-0.5 text-xs text-green-600 hover:bg-green-50 rounded"
+                            >
+                              Mark Sent
+                            </button>
+                            <button
+                              onClick={() => handleEmailAction(email.id, 'archived')}
+                              className="px-2 py-0.5 text-xs text-gray-500 hover:bg-gray-50 rounded"
+                            >
+                              Archive
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-sm font-medium text-gray-900 mb-1">Subject: {email.subject}</p>
+                    <div className="text-xs text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap max-h-24 overflow-y-auto">
+                      {email.body}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Basic */}
           <section>
             <h4 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Basic Information</h4>
@@ -240,6 +329,22 @@ export default function ProspectDetailModal({ prospect, accountId, allProspects,
           <section>
             <h4 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Contact</h4>
             <div className="grid grid-cols-2 gap-4">
+              {!isCreate && prospect?.sfdc_id && (
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Salesforce</label>
+                  <a
+                    href={`https://okta.lightning.force.com/lightning/r/${prospect.sfdc_id}/view`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm text-orange-600 hover:text-orange-700 font-medium"
+                  >
+                    <span>{prospect.sfdc_id}</span>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-600 mb-1">Email</label>
                 <input type="email" value={form.email} onChange={e => update('email', e.target.value)}
@@ -323,6 +428,22 @@ export default function ProspectDetailModal({ prospect, accountId, allProspects,
                 <textarea value={form.description} onChange={e => update('description', e.target.value)} rows={2}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
+              {!isCreate && prospect?.campaign_name && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Campaign Name</label>
+                  <span className="inline-block px-3 py-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg">
+                    {prospect.campaign_name}
+                  </span>
+                </div>
+              )}
+              {!isCreate && prospect?.member_status && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Member Status</label>
+                  <span className="inline-block px-3 py-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg">
+                    {prospect.member_status}
+                  </span>
+                </div>
+              )}
             </div>
           </section>
 

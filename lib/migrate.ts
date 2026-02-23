@@ -452,6 +452,63 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Failed to add current_step column to preprocessing_jobs:', error);
   }
 
+  // Add prospect_emails table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_emails (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prospect_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        reasoning TEXT,
+        key_insights TEXT,
+        email_type TEXT NOT NULL DEFAULT 'cold',
+        research_context TEXT NOT NULL DEFAULT 'auth0',
+        status TEXT NOT NULL DEFAULT 'draft',
+        sent_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE,
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_emails_prospect_id ON prospect_emails(prospect_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_emails_account_id ON prospect_emails(account_id)');
+    console.log('✓ Ensured prospect_emails table exists');
+  } catch (error) {
+    console.error('Failed to create prospect_emails table:', error);
+  }
+
+  // Add account_working_jobs table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_working_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        user_context TEXT,
+        research_context TEXT NOT NULL DEFAULT 'auth0',
+        prospects_found INTEGER NOT NULL DEFAULT 0,
+        prospects_created INTEGER NOT NULL DEFAULT 0,
+        prospects_skipped INTEGER NOT NULL DEFAULT 0,
+        emails_generated INTEGER NOT NULL DEFAULT 0,
+        emails_failed INTEGER NOT NULL DEFAULT 0,
+        current_step TEXT,
+        error_log TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT,
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_working_jobs_account_id ON account_working_jobs(account_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_working_jobs_status ON account_working_jobs(status)');
+    console.log('✓ Ensured account_working_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create account_working_jobs table:', error);
+  }
+
   // Create job_events table if it doesn't exist
   try {
     db.exec(`
@@ -490,6 +547,10 @@ export function migrateDatabase(db: Database.Database) {
       { name: 'last_called_at', type: 'TEXT' },
       { name: 'prospect_tags', type: 'TEXT' },
       { name: 'contact_readiness', type: 'TEXT' },
+      { name: 'sfdc_id', type: 'TEXT' },
+      { name: 'campaign_name', type: 'TEXT' },
+      { name: 'member_status', type: 'TEXT' },
+      { name: 'account_status_sfdc', type: 'TEXT' },
     ];
 
     for (const col of prospectNewColumns) {
@@ -542,6 +603,12 @@ export function migrateDatabase(db: Database.Database) {
         FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL
       )
     `);
+    // Add account_id column if table existed before it was introduced
+    const plCols = db.prepare('PRAGMA table_info(prospect_lists)').all() as any[];
+    if (!plCols.some((col: any) => col.name === 'account_id')) {
+      db.exec('ALTER TABLE prospect_lists ADD COLUMN account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL');
+      console.log('✓ Added account_id column to prospect_lists');
+    }
     db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_lists_account_id ON prospect_lists(account_id)');
     console.log('✓ Ensured prospect_lists table exists');
   } catch (error) {
@@ -589,5 +656,69 @@ export function migrateDatabase(db: Database.Database) {
     console.log('✓ Ensured account_relationships table exists');
   } catch (error) {
     console.error('Failed to create account_relationships table:', error);
+  }
+
+  // Add ql_import_jobs table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ql_import_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        total_leads INTEGER NOT NULL DEFAULT 0,
+        processed_count INTEGER NOT NULL DEFAULT 0,
+        accounts_matched INTEGER NOT NULL DEFAULT 0,
+        accounts_created INTEGER NOT NULL DEFAULT 0,
+        prospects_created INTEGER NOT NULL DEFAULT 0,
+        prospects_skipped INTEGER NOT NULL DEFAULT 0,
+        emails_generated INTEGER NOT NULL DEFAULT 0,
+        emails_skipped INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        current_step TEXT,
+        error_log TEXT,
+        raw_input TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_ql_import_jobs_status ON ql_import_jobs(status)');
+    console.log('✓ Ensured ql_import_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create ql_import_jobs table:', error);
+  }
+
+  // Add prospect_ids column to ql_import_jobs if missing
+  try {
+    const qlJobCols = db.prepare('PRAGMA table_info(ql_import_jobs)').all() as any[];
+    const hasProspectIds = qlJobCols.some((col: any) => col.name === 'prospect_ids');
+    if (!hasProspectIds) {
+      db.exec('ALTER TABLE ql_import_jobs ADD COLUMN prospect_ids TEXT');
+      console.log('✓ Added prospect_ids column to ql_import_jobs');
+    }
+  } catch (error) {
+    console.error('Failed to add prospect_ids column to ql_import_jobs:', error);
+  }
+
+  // Add emails_held_customer and emails_held_opp columns to ql_import_jobs
+  try {
+    const qlJobCols2 = db.prepare('PRAGMA table_info(ql_import_jobs)').all() as any[];
+    const qlJobColNames = new Set(qlJobCols2.map((col: any) => col.name));
+
+    if (!qlJobColNames.has('emails_held_customer')) {
+      db.exec('ALTER TABLE ql_import_jobs ADD COLUMN emails_held_customer INTEGER DEFAULT 0');
+      console.log('✓ Added emails_held_customer column to ql_import_jobs');
+    }
+    if (!qlJobColNames.has('emails_held_opp')) {
+      db.exec('ALTER TABLE ql_import_jobs ADD COLUMN emails_held_opp INTEGER DEFAULT 0');
+      console.log('✓ Added emails_held_opp column to ql_import_jobs');
+    }
+  } catch (error) {
+    console.error('Failed to add held email columns to ql_import_jobs:', error);
+  }
+
+  // Add SFDC index on prospects table
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_sfdc_id ON prospects(sfdc_id)');
+    console.log('✓ Ensured idx_prospects_sfdc_id index exists');
+  } catch (error) {
+    console.error('Failed to create sfdc_id index:', error);
   }
 }

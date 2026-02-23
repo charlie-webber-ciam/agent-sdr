@@ -144,6 +144,7 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
               <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Calls</th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Role</th>
               <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Status</th>
+              <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">SFDC</th>
               <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Actions</th>
             </tr>
           </thead>
@@ -193,6 +194,20 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
                     <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full capitalize ${statusBadge.bg} ${statusBadge.text}`}>
                       {p.relationship_status}
                     </span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {p.sfdc_id ? (
+                      <a
+                        href={`https://okta.lightning.force.com/lightning/r/${p.sfdc_id}/view`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-medium text-orange-600 hover:text-orange-700 hover:underline"
+                      >
+                        SF
+                      </a>
+                    ) : (
+                      <span className="text-gray-300 text-sm">-</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
                     <button
@@ -267,7 +282,7 @@ export default function ProspectListView({ prospects, accountId, onRefresh, onSe
                   className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </td>
-              <td className="px-4 py-2" colSpan={3}></td>
+              <td className="px-4 py-2" colSpan={4}></td>
               <td className="px-4 py-2 text-right">
                 <button
                   onClick={handleAddRow}

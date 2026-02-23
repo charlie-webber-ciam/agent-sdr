@@ -17,6 +17,7 @@ const toolLinks = [
   { href: '/quick-research', label: 'Quick Research' },
   { href: '/upload', label: 'Upload CSV' },
   { href: '/import-opportunities', label: 'Import Opportunities' },
+  { href: '/ql-import', label: 'QL Import' },
   { href: '/employee-counts/jobs', label: 'Employee Counts', activePath: '/employee-counts' },
   { href: '/test', label: 'System Diagnostics' },
 ];

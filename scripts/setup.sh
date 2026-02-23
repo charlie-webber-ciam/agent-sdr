@@ -118,11 +118,75 @@ detect_existing_install() {
   done < <(find "$HOME" -maxdepth 1 -type d -name "*agent*sdr*" -not -name "*.backup.*" 2>/dev/null)
 
   if [[ ${#found_dirs[@]} -eq 0 ]]; then
-    success "No previous installation found"
-    return
+    echo ""
+    info "No previous installation detected automatically."
+    read -rp "  Do you have an existing Agent SDR installation elsewhere? (y/N): " has_existing
+    if [[ "$has_existing" == "y" || "$has_existing" == "Y" ]]; then
+      echo ""
+      echo "  Enter the full path to your existing Agent SDR folder."
+      echo "  (e.g. /Users/yourname/Projects/agent-sdr)"
+      echo ""
+      read -rp "  Path: " custom_path
+
+      # Expand ~ if present
+      custom_path="${custom_path/#\~/$HOME}"
+      # Strip trailing slash
+      custom_path="${custom_path%/}"
+
+      if [[ -z "$custom_path" ]]; then
+        info "No path entered. Starting fresh."
+        return
+      fi
+
+      if [[ ! -d "$custom_path" ]]; then
+        warn "Directory not found: $custom_path"
+        info "Starting fresh."
+        return
+      fi
+
+      if [[ -f "$custom_path/data/accounts.db" ]]; then
+        found_dirs+=("$custom_path")
+      else
+        warn "No accounts database found at $custom_path/data/accounts.db"
+        read -rp "  Continue without migrating data? (Y/n): " skip_choice
+        if [[ "$skip_choice" == "n" || "$skip_choice" == "N" ]]; then
+          fail "Setup cancelled. Re-run with the correct path."
+          exit 1
+        fi
+        info "Starting fresh."
+        return
+      fi
+    else
+      success "No previous installation — starting fresh"
+      return
+    fi
   fi
 
-  local old_install="${found_dirs[0]}"
+  # If multiple installations found, let the user pick
+  local old_install=""
+  if [[ ${#found_dirs[@]} -eq 1 ]]; then
+    old_install="${found_dirs[0]}"
+  else
+    echo ""
+    info "Multiple existing installations found:"
+    echo ""
+    for i in "${!found_dirs[@]}"; do
+      local dir_db_size
+      dir_db_size=$(du -h "${found_dirs[$i]}/data/accounts.db" 2>/dev/null | cut -f1)
+      echo "    $((i + 1))) ${found_dirs[$i]}  (db: ${dir_db_size:-unknown})"
+    done
+    echo ""
+    local selection=""
+    while true; do
+      read -rp "  Select installation to migrate from (1-${#found_dirs[@]}): " selection
+      if [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -ge 1 ]] && [[ "$selection" -le "${#found_dirs[@]}" ]]; then
+        old_install="${found_dirs[$((selection - 1))]}"
+        break
+      fi
+      warn "Invalid selection. Please enter a number between 1 and ${#found_dirs[@]}."
+    done
+  fi
+
   local old_db="$old_install/data/accounts.db"
   local old_env="$old_install/.env.local"
 

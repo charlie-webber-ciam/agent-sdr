@@ -93,6 +93,71 @@ function formatOpportunityBlock(opp: SalesforceOpportunity, prospects: Prospect[
   return lines.join('\n');
 }
 
+/**
+ * Build a recency-weighted opportunity context for prospect mapping.
+ * Recent opportunities get full detail, older ones get progressively less.
+ * < 6 months: full MEDDPICC detail
+ * 6-18 months: medium detail (name, stage, use case, champion, competition)
+ * > 18 months: abbreviated with [Historical] prefix
+ */
+export function buildWeightedOpportunityContext(accountId: number): string {
+  const opportunities = getOpportunitiesByAccount(accountId);
+
+  if (opportunities.length === 0) {
+    return '';
+  }
+
+  const now = new Date();
+  const sixMonthsAgo = new Date(now);
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const eighteenMonthsAgo = new Date(now);
+  eighteenMonthsAgo.setMonth(eighteenMonthsAgo.getMonth() - 18);
+
+  const sections: string[] = [];
+  sections.push('SALESFORCE OPPORTUNITY HISTORY (Recency-Weighted):');
+  sections.push('');
+
+  let totalLength = 0;
+  const MAX_CHARS = 6000;
+
+  for (const opp of opportunities) {
+    if (totalLength > MAX_CHARS) {
+      sections.push(`[... ${opportunities.length} total opportunities, truncated]`);
+      break;
+    }
+
+    const stageDate = opp.last_stage_change_date ? new Date(opp.last_stage_change_date) : null;
+    const prospects = getOpportunityProspects(opp.id);
+    let block: string;
+
+    if (stageDate && stageDate > sixMonthsAgo) {
+      // Recent: full detail
+      block = formatOpportunityBlock(opp, prospects);
+    } else if (stageDate && stageDate > eighteenMonthsAgo) {
+      // Medium: key fields only
+      block = formatMediumOpportunityBlock(opp);
+    } else {
+      // Historical: abbreviated
+      block = `[Historical] "${opp.opportunity_name}" | Stage: ${opp.stage || 'Unknown'} | ${opp.last_stage_change_date || 'N/A'}\n`;
+    }
+
+    totalLength += block.length;
+    sections.push(block);
+  }
+
+  return sections.join('\n');
+}
+
+function formatMediumOpportunityBlock(opp: SalesforceOpportunity): string {
+  const lines: string[] = [];
+  lines.push(`Opportunity: "${opp.opportunity_name}" | Stage: ${opp.stage || 'Unknown'} | Last Change: ${opp.last_stage_change_date || 'N/A'}`);
+  if (opp.business_use_case) lines.push(`  Use Case: ${truncate(opp.business_use_case, 200)}`);
+  if (opp.champions) lines.push(`  Champion: ${opp.champions}${opp.champion_title ? ` (${opp.champion_title})` : ''}`);
+  if (opp.competition) lines.push(`  Competition: ${truncate(opp.competition, 150)}`);
+  lines.push('');
+  return lines.join('\n');
+}
+
 function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.substring(0, maxLength - 3) + '...';

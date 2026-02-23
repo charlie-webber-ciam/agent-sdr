@@ -7,6 +7,8 @@ import ProspectTreeView from './ProspectTreeView';
 import ProspectDetailModal from './ProspectDetailModal';
 import ProspectEmailModal from './ProspectEmailModal';
 import ProspectListManager from './ProspectListManager';
+import AccountWorkingModal from './AccountWorkingModal';
+import AccountWorkingView from './AccountWorkingView';
 import { usePerspective } from '@/lib/perspective-context';
 
 export interface Prospect {
@@ -41,11 +43,15 @@ export interface Prospect {
   connect_count: number;
   last_called_at: string | null;
   prospect_tags: string | null;
+  sfdc_id: string | null;
+  campaign_name: string | null;
+  member_status: string | null;
+  account_status_sfdc: string | null;
   created_at: string;
   updated_at: string;
 }
 
-type SubTab = 'list' | 'orgchart' | 'tree' | 'lists';
+type SubTab = 'list' | 'orgchart' | 'tree' | 'lists' | 'working';
 
 export default function ProspectTab({ accountId }: { accountId: number }) {
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -57,6 +63,8 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
   const [showModal, setShowModal] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [emailingProspect, setEmailingProspect] = useState<Prospect | null>(null);
+  const [showWorkingModal, setShowWorkingModal] = useState(false);
+  const [emailRefreshKey, setEmailRefreshKey] = useState(0);
   const { perspective } = usePerspective();
 
   const fetchProspects = useCallback(async () => {
@@ -142,12 +150,20 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
             {prospects.length}
           </span>
         </div>
-        <button
-          onClick={handleAddProspect}
-          className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          + Add Prospect
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowWorkingModal(true)}
+            className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            Map Prospects
+          </button>
+          <button
+            onClick={handleAddProspect}
+            className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            + Add Prospect
+          </button>
+        </div>
       </div>
 
       {/* Sub-tabs + Search */}
@@ -158,6 +174,7 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
             { key: 'orgchart', label: 'Org Chart' },
             { key: 'tree', label: 'Tree' },
             { key: 'lists', label: 'Lists' },
+            { key: 'working', label: 'Working' },
           ] as const).map(({ key, label }) => (
             <button
               key={key}
@@ -243,6 +260,18 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
           {activeSubTab === 'lists' && (
             <ProspectListManager accountId={accountId} />
           )}
+          {activeSubTab === 'working' && (
+            <AccountWorkingView
+              accountId={accountId}
+              prospects={filteredProspects}
+              researchContext={perspective}
+              onSelectProspect={handleSelectProspect}
+              onWriteEmail={handleWriteEmail}
+              onRerunMapping={() => setShowWorkingModal(true)}
+              onEmailSaved={() => setEmailRefreshKey(k => k + 1)}
+              emailRefreshKey={emailRefreshKey}
+            />
+          )}
         </>
       )}
 
@@ -266,6 +295,20 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
           accountId={accountId}
           researchContext={perspective}
           onClose={() => setEmailingProspect(null)}
+          onSave={() => setEmailRefreshKey(k => k + 1)}
+        />
+      )}
+
+      {/* Working Modal */}
+      {showWorkingModal && (
+        <AccountWorkingModal
+          accountId={accountId}
+          researchContext={perspective}
+          onClose={() => setShowWorkingModal(false)}
+          onComplete={() => {
+            setActiveSubTab('working');
+            fetchProspects();
+          }}
         />
       )}
     </div>

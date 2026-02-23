@@ -8,6 +8,7 @@ interface Props {
   accountId: number;
   researchContext: 'auth0' | 'okta';
   onClose: () => void;
+  onSave?: () => void;
 }
 
 interface EmailResult {
@@ -17,11 +18,13 @@ interface EmailResult {
   keyInsights: string[];
 }
 
-export default function ProspectEmailModal({ prospect, accountId, researchContext, onClose }: Props) {
+export default function ProspectEmailModal({ prospect, accountId, researchContext, onClose, onSave }: Props) {
   const [emailType, setEmailType] = useState<'cold' | 'warm'>('cold');
   const [customInstructions, setCustomInstructions] = useState('');
   const [customContext, setCustomContext] = useState('');
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<EmailResult | null>(null);
   const [showInsights, setShowInsights] = useState(false);
@@ -35,6 +38,7 @@ export default function ProspectEmailModal({ prospect, accountId, researchContex
     setLoading(true);
     setError(null);
     setResult(null);
+    setSaved(false);
 
     try {
       const response = await fetch(`/api/accounts/${accountId}/generate-email`, {
@@ -63,6 +67,39 @@ export default function ProspectEmailModal({ prospect, accountId, researchContex
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!result) return;
+    setSaving(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/prospects/${prospect.id}/emails`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: result.subject,
+          body: result.body,
+          reasoning: result.reasoning,
+          key_insights: JSON.stringify(result.keyInsights),
+          email_type: emailType,
+          research_context: researchContext,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to save email');
+      }
+
+      setSaved(true);
+      onSave?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save email');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -210,8 +247,8 @@ export default function ProspectEmailModal({ prospect, accountId, researchContex
           {/* Results */}
           {result && (
             <div className="space-y-4 border-t border-gray-200 pt-5">
-              {/* Copy All */}
-              <div className="flex justify-end">
+              {/* Actions */}
+              <div className="flex justify-end gap-2">
                 <button
                   onClick={() => copyToClipboard(`Subject: ${result.subject}\n\n${result.body}`, 'all')}
                   className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1.5 text-sm"
@@ -221,6 +258,39 @@ export default function ProspectEmailModal({ prospect, accountId, researchContex
                       d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                   </svg>
                   {copiedField === 'all' ? 'Copied!' : 'Copy All'}
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || saved}
+                  className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-sm ${
+                    saved
+                      ? 'bg-green-600 text-white'
+                      : 'bg-purple-600 text-white hover:bg-purple-700'
+                  } disabled:opacity-70 disabled:cursor-not-allowed`}
+                >
+                  {saved ? (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Saved
+                    </>
+                  ) : saving ? (
+                    <>
+                      <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                      </svg>
+                      Save to Prospect
+                    </>
+                  )}
                 </button>
               </div>
 

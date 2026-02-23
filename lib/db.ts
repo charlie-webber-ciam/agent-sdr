@@ -167,7 +167,7 @@ export function createAccount(
   companyName: string,
   domain: string | null,
   industry: string,
-  jobId: number,
+  jobId: number | null,
   auth0AccountOwner?: string,
   oktaAccountOwner?: string
 ): number {
@@ -2505,6 +2505,10 @@ export interface Prospect {
   last_called_at: string | null;
   prospect_tags: string | null; // JSON array
   contact_readiness: string | null; // dial_ready|email_ready|social_ready|incomplete
+  sfdc_id: string | null;
+  campaign_name: string | null;
+  member_status: string | null;
+  account_status_sfdc: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -2590,6 +2594,10 @@ export function createProspect(data: {
   description?: string;
   parent_prospect_id?: number;
   sort_order?: number;
+  sfdc_id?: string;
+  campaign_name?: string;
+  member_status?: string;
+  account_status_sfdc?: string;
 }): Prospect {
   const db = getDb();
   const stmt = db.prepare(`
@@ -2597,8 +2605,9 @@ export function createProspect(data: {
       account_id, first_name, last_name, title, email, phone, mobile, linkedin_url,
       department, notes, role_type, relationship_status, source,
       mailing_address, lead_source, last_activity_date, do_not_call,
-      description, parent_prospect_id, sort_order
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      description, parent_prospect_id, sort_order,
+      sfdc_id, campaign_name, member_status, account_status_sfdc
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.account_id,
@@ -2620,7 +2629,11 @@ export function createProspect(data: {
     data.do_not_call || 0,
     data.description || null,
     data.parent_prospect_id || null,
-    data.sort_order || 0
+    data.sort_order || 0,
+    data.sfdc_id || null,
+    data.campaign_name || null,
+    data.member_status || null,
+    data.account_status_sfdc || null
   );
   return db.prepare('SELECT * FROM prospects WHERE id = ?').get(result.lastInsertRowid) as Prospect;
 }
@@ -3825,6 +3838,148 @@ export function getProspectsForProcessing(filters: {
   return db.prepare(query).all(...params) as any[];
 }
 
+// ─── Prospect Emails ────────────────────────────────────────────────────────
+
+export interface ProspectEmail {
+  id: number;
+  prospect_id: number;
+  account_id: number;
+  subject: string;
+  body: string;
+  reasoning: string | null;
+  key_insights: string | null;
+  email_type: string;
+  research_context: string;
+  status: string;
+  sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function createProspectEmail(data: {
+  prospect_id: number;
+  account_id: number;
+  subject: string;
+  body: string;
+  reasoning?: string;
+  key_insights?: string;
+  email_type?: string;
+  research_context?: string;
+}): ProspectEmail {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO prospect_emails (prospect_id, account_id, subject, body, reasoning, key_insights, email_type, research_context)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.prospect_id,
+    data.account_id,
+    data.subject,
+    data.body,
+    data.reasoning || null,
+    data.key_insights || null,
+    data.email_type || 'cold',
+    data.research_context || 'auth0'
+  );
+  return db.prepare('SELECT * FROM prospect_emails WHERE id = ?').get(result.lastInsertRowid) as ProspectEmail;
+}
+
+export function getProspectEmails(prospectId: number): ProspectEmail[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospect_emails WHERE prospect_id = ? ORDER BY created_at DESC').all(prospectId) as ProspectEmail[];
+}
+
+export function getProspectEmailsByAccount(accountId: number): (ProspectEmail & { first_name: string; last_name: string; title: string | null })[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT pe.*, p.first_name, p.last_name, p.title
+    FROM prospect_emails pe
+    JOIN prospects p ON pe.prospect_id = p.id
+    WHERE pe.account_id = ?
+    ORDER BY p.last_name, p.first_name, pe.created_at DESC
+  `).all(accountId) as (ProspectEmail & { first_name: string; last_name: string; title: string | null })[];
+}
+
+export function updateProspectEmailStatus(id: number, status: string, sentAt?: string): void {
+  const db = getDb();
+  if (sentAt) {
+    db.prepare('UPDATE prospect_emails SET status = ?, sent_at = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, sentAt, id);
+  } else {
+    db.prepare('UPDATE prospect_emails SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, id);
+  }
+}
+
+// ─── Account Working Jobs ───────────────────────────────────────────────────
+
+export interface AccountWorkingJob {
+  id: number;
+  account_id: number;
+  status: string;
+  user_context: string | null;
+  research_context: string;
+  prospects_found: number;
+  prospects_created: number;
+  prospects_skipped: number;
+  emails_generated: number;
+  emails_failed: number;
+  current_step: string | null;
+  error_log: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export function createAccountWorkingJob(data: {
+  account_id: number;
+  user_context?: string;
+  research_context?: string;
+}): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO account_working_jobs (account_id, user_context, research_context)
+    VALUES (?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.account_id,
+    data.user_context || null,
+    data.research_context || 'auth0'
+  );
+  return Number(result.lastInsertRowid);
+}
+
+export function getAccountWorkingJob(id: number): AccountWorkingJob | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM account_working_jobs WHERE id = ?').get(id) as AccountWorkingJob | undefined;
+}
+
+export function getLatestAccountWorkingJob(accountId: number): AccountWorkingJob | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM account_working_jobs WHERE account_id = ? ORDER BY created_at DESC LIMIT 1').get(accountId) as AccountWorkingJob | undefined;
+}
+
+export function getAccountWorkingJobs(accountId: number): AccountWorkingJob[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM account_working_jobs WHERE account_id = ? ORDER BY created_at DESC LIMIT 20').all(accountId) as AccountWorkingJob[];
+}
+
+export function updateAccountWorkingJob(id: number, updates: Partial<Omit<AccountWorkingJob, 'id' | 'created_at'>>): void {
+  const db = getDb();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  for (const [key, value] of Object.entries(updates)) {
+    fields.push(`${key} = ?`);
+    values.push(value);
+  }
+
+  if (fields.length === 0) return;
+
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+
+  db.prepare(`UPDATE account_working_jobs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
 // ─── Prospect Tag/Filter Metadata ───────────────────────────────────────────
 
 export function getProspectFilterMetadata(): {
@@ -3839,4 +3994,78 @@ export function getProspectFilterMetadata(): {
   const departmentTags = (db.prepare('SELECT DISTINCT department_tag FROM prospects WHERE department_tag IS NOT NULL ORDER BY department_tag').all() as { department_tag: string }[]).map(r => r.department_tag);
 
   return { valueTiers, seniorityLevels, departmentTags };
+}
+
+// ─── QL Import Jobs ──────────────────────────────────────────────────────────
+
+export interface QlImportJob {
+  id: number;
+  total_leads: number;
+  processed_count: number;
+  accounts_matched: number;
+  accounts_created: number;
+  prospects_created: number;
+  prospects_skipped: number;
+  emails_generated: number;
+  emails_skipped: number;
+  emails_held_customer: number;
+  emails_held_opp: number;
+  status: string;
+  current_step: string | null;
+  error_log: string | null;
+  raw_input: string | null;
+  prospect_ids: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export function createQlImportJob(totalLeads: number, rawInput: string): number {
+  const db = getDb();
+  const stmt = db.prepare('INSERT INTO ql_import_jobs (total_leads, raw_input) VALUES (?, ?)');
+  return stmt.run(totalLeads, rawInput).lastInsertRowid as number;
+}
+
+export function getQlImportJob(id: number): QlImportJob | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM ql_import_jobs WHERE id = ?').get(id) as QlImportJob | undefined;
+}
+
+export function updateQlImportJob(id: number, updates: Partial<Omit<QlImportJob, 'id' | 'created_at'>>): void {
+  const db = getDb();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE ql_import_jobs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function listQlImportJobs(limit: number = 20): QlImportJob[] {
+  const db = getDb();
+  return db.prepare('SELECT id, total_leads, processed_count, accounts_matched, accounts_created, prospects_created, prospects_skipped, emails_generated, emails_skipped, emails_held_customer, emails_held_opp, status, current_step, error_log, prospect_ids, created_at, completed_at FROM ql_import_jobs ORDER BY id DESC LIMIT ?').all(limit) as QlImportJob[];
+}
+
+export function findProspectBySfdcId(sfdcId: string): Prospect | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospects WHERE sfdc_id = ?').get(sfdcId) as Prospect | undefined;
+}
+
+export function getProspectsByIds(ids: number[]): (Prospect & { company_name: string; domain: string | null; account_industry: string | null })[] {
+  if (ids.length === 0) return [];
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT p.*, a.company_name, a.domain, a.industry AS account_industry
+    FROM prospects p
+    JOIN accounts a ON p.account_id = a.id
+    WHERE p.id IN (${placeholders})
+    ORDER BY p.id ASC
+  `).all(...ids) as (Prospect & { company_name: string; domain: string | null; account_industry: string | null })[];
 }

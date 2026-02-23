@@ -2,6 +2,16 @@
 
 import { useState } from 'react';
 
+/** Parse date strings that may be DD/MM/YYYY, MM/DD/YYYY, or ISO format. */
+function parseDate(raw: string): Date {
+  const slashParts = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashParts) {
+    const [, day, month, year] = slashParts;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+  return new Date(raw);
+}
+
 interface LinkedProspect {
   id: number;
   firstName: string;
@@ -91,7 +101,7 @@ export default function OpportunityCard({ opportunity }: { opportunity: Opportun
             </h4>
             {opportunity.lastStageChangeDate && (
               <p className="text-xs text-gray-500 mt-0.5">
-                Last updated: {new Date(opportunity.lastStageChangeDate).toLocaleDateString()}
+                Last updated: {parseDate(opportunity.lastStageChangeDate).toLocaleDateString()}
               </p>
             )}
           </div>

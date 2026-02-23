@@ -4,6 +4,18 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
+/** Parse date strings that may be DD/MM/YYYY, MM/DD/YYYY, or ISO format. */
+function parseDate(raw: string): Date {
+  // DD/MM/YYYY or D/MM/YYYY — day > 12 is the giveaway, but we assume
+  // DD/MM/YYYY since that's the Salesforce export format in this project.
+  const slashParts = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashParts) {
+    const [, day, month, year] = slashParts;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+  return new Date(raw);
+}
+
 interface OpportunityWithAccount {
   id: number;
   account_id: number;
@@ -209,7 +221,7 @@ function OpportunitiesPageInner() {
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
                       {opp.last_stage_change_date
-                        ? new Date(opp.last_stage_change_date).toLocaleDateString()
+                        ? parseDate(opp.last_stage_change_date).toLocaleDateString()
                         : '—'}
                     </td>
                     <td className="px-4 py-3 text-gray-600 max-w-[150px]">
