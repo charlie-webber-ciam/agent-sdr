@@ -203,6 +203,11 @@ export default function AccountDetailPage({
   // Perspective state for research view (local to this page, initialized from global)
   const [activePerspective, setActivePerspective] = useState<'auth0' | 'okta'>(perspective === 'okta' ? 'okta' : 'auth0');
 
+  // Sync local perspective when global perspective changes (e.g. after hydration from localStorage)
+  useEffect(() => {
+    setActivePerspective(perspective === 'okta' ? 'okta' : 'auth0');
+  }, [perspective]);
+
   // Scroll-spy state
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
   const mainContentRef = useRef<HTMLDivElement>(null);
