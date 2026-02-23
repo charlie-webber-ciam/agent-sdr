@@ -13,6 +13,7 @@ import PrioritySlider from '@/components/PrioritySlider';
 import UseCaseMultiSelect from '@/components/UseCaseMultiSelect';
 import SKUMultiSelect from '@/components/SKUMultiSelect';
 import AIAutoCategorizePanel from '@/components/AIAutoCategorizePanel';
+import { capitalize } from '@/lib/utils';
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal';
 import EmailWriter from '@/components/EmailWriter';
 import SequenceWriter from '@/components/SequenceWriter';
@@ -721,25 +722,34 @@ export default function AccountDetailPage({
 
               {/* Tier, SKU, Priority Badges + Research Status Indicators */}
               <div className="flex flex-wrap gap-2 items-center">
-                {account.tier && (
-                  <span className={`px-3 py-1 rounded-full text-sm font-semibold border-2 ${
-                    account.tier === 'A' ? 'bg-green-100 text-green-800 border-green-300' :
-                    account.tier === 'B' ? 'bg-blue-100 text-blue-800 border-blue-300' :
-                    'bg-gray-100 text-gray-800 border-gray-300'
-                  }`}>
-                    Tier {account.tier}
-                  </span>
-                )}
-                {account.auth0Skus && account.auth0Skus.map(sku => (
-                  <span key={sku} className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold border-2 border-purple-300">
-                    {sku}
-                  </span>
-                ))}
-                {account.priorityScore !== null && account.priorityScore >= 7 && (
-                  <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-semibold border-2 border-red-300">
-                    Priority {account.priorityScore}/10
-                  </span>
-                )}
+                {(() => {
+                  const tier = activePerspective === 'okta' ? account.oktaTier : account.tier;
+                  const skus = activePerspective === 'okta' ? account.oktaSkus : account.auth0Skus;
+                  const priority = activePerspective === 'okta' ? account.oktaPriorityScore : account.priorityScore;
+                  return (
+                    <>
+                      {tier && (
+                        <span className={`px-3 py-1 rounded-full text-sm font-semibold border-2 ${
+                          tier === 'A' ? 'bg-green-100 text-green-800 border-green-300' :
+                          tier === 'B' ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                          'bg-gray-100 text-gray-800 border-gray-300'
+                        }`}>
+                          Tier {tier}
+                        </span>
+                      )}
+                      {skus && skus.map(sku => (
+                        <span key={sku} className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold border-2 border-purple-300">
+                          {sku}
+                        </span>
+                      ))}
+                      {priority !== null && priority >= 7 && (
+                        <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-semibold border-2 border-red-300">
+                          Priority {priority}/10
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
                 {/* Research status badges */}
                 {account.status === 'completed' && (
                   <>
@@ -767,7 +777,7 @@ export default function AccountDetailPage({
                   : 'bg-gray-100 text-gray-800 border border-gray-200'
               }`}
             >
-              {account.status.charAt(0).toUpperCase() + account.status.slice(1)}
+              {capitalize(account.status)}
             </span>
           </div>
 

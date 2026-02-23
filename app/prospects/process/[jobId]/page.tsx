@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import ProspectTierBadge from '@/components/prospects/ProspectTierBadge';
 import { Spinner } from '@/components/Spinner';
 import { useJobPolling } from '@/lib/hooks/useJobPolling';
+import { capitalize } from '@/lib/utils';
+import { ProgressBar } from '@/components/ProgressBar';
 
 interface JobData {
   job: {
@@ -35,13 +37,13 @@ export default function ProspectProcessProgressPage({
 }: {
   params: Promise<{ jobId: string }>;
 }) {
-  const unwrappedParams = use(params);
+  const { jobId } = use(params);
   const router = useRouter();
   const [jobData, setJobData] = useState<JobData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const { loading } = useJobPolling<JobData>({
-    url: `/api/prospect-processing/${unwrappedParams.jobId}`,
+    url: `/api/prospect-processing/${jobId}`,
     isActive: (data) => data.job.status === 'processing' || data.job.status === 'pending',
     onData: (data) => setJobData(data),
     onError: (err) => setError(err.message),
@@ -115,7 +117,7 @@ export default function ProspectProcessProgressPage({
               isFailed ? 'bg-red-100 text-red-800' :
               'bg-gray-100 text-gray-800'
             }`}>
-              {job.status.charAt(0).toUpperCase() + job.status.slice(1)}
+              {capitalize(job.status)}
             </span>
           </div>
           <div className="text-right">
@@ -133,14 +135,11 @@ export default function ProspectProcessProgressPage({
             <span>Processing prospects...</span>
             <span>{progressPercentage}%</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full transition-all duration-500 ${
-                isCompleted ? 'bg-green-600' : isFailed ? 'bg-red-600' : 'bg-purple-600'
-              }`}
-              style={{ width: `${progressPercentage}%` }}
-            />
-          </div>
+          <ProgressBar
+            percentage={progressPercentage}
+            status={isCompleted ? 'complete' : isFailed ? 'failed' : 'active'}
+            activeColor="bg-purple-600"
+          />
         </div>
 
         {/* Current Prospect */}

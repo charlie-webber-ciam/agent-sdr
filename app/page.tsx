@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { DashboardSkeleton } from '@/components/Skeleton';
 import { usePerspective } from '@/lib/perspective-context';
 import { useToast } from '@/lib/toast-context';
+import { capitalize } from '@/lib/utils';
 
 interface InterruptedJob {
   id: number;
@@ -788,7 +789,7 @@ export default function DashboardPage() {
                         ? 'bg-red-100 text-red-600 border border-red-300'
                         : 'bg-gray-100 text-gray-600 border border-gray-300'
                     }`}>
-                      {job.status.charAt(0).toUpperCase() + job.status.slice(1)}
+                      {capitalize(job.status)}
                     </span>
                     <button
                       disabled={deletingJobId === job.id}

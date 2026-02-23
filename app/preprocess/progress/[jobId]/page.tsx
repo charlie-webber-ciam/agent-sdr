@@ -1,9 +1,12 @@
 'use client';
 
-import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, use } from 'react';
+import { useRouter } from 'next/navigation';
 import Navigation from '@/components/Navigation';
+import { Spinner } from '@/components/Spinner';
 import { useJobPolling } from '@/lib/hooks/useJobPolling';
+import { downloadFile } from '@/lib/utils';
+import { ProgressBar } from '@/components/ProgressBar';
 
 interface JobStatus {
   id: number;
@@ -26,10 +29,13 @@ interface JobStatus {
   };
 }
 
-export default function PreprocessProgressPage() {
-  const params = useParams();
+export default function PreprocessProgressPage({
+  params,
+}: {
+  params: Promise<{ jobId: string }>;
+}) {
+  const { jobId } = use(params);
   const router = useRouter();
-  const jobId = params.jobId as string;
 
   const [job, setJob] = useState<JobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,14 +58,7 @@ export default function PreprocessProgressPage() {
       }
 
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = job?.output_filename || `cleaned_accounts_${jobId}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      downloadFile(blob, job?.output_filename || `cleaned_accounts_${jobId}.csv`);
     } catch (err) {
       console.error('Download error:', err);
       alert('Failed to download file');
@@ -151,7 +150,7 @@ export default function PreprocessProgressPage() {
         <Navigation />
         <div className="container mx-auto px-4 py-8">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <Spinner className="h-12 w-12 text-blue-600 mx-auto" />
             <p className="mt-4 text-gray-600">Loading...</p>
           </div>
         </div>
@@ -259,12 +258,13 @@ export default function PreprocessProgressPage() {
               <span>Progress</span>
               <span>{progressPercent}%</span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-4">
-              <div
-                className="bg-blue-600 h-4 rounded-full transition-all duration-300"
-                style={{ width: `${progressPercent}%` }}
-              ></div>
-            </div>
+            <ProgressBar
+              percentage={progressPercent}
+              status={job.status === 'completed' ? 'complete' : job.status === 'failed' ? 'failed' : 'active'}
+              height="h-4"
+              duration="duration-300"
+              activeColor="bg-blue-600"
+            />
           </div>
 
           <div className="text-center text-sm text-gray-600">

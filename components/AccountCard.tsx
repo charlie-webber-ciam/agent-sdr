@@ -3,7 +3,7 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import { usePerspective } from '@/lib/perspective-context';
-import { formatDomain } from '@/lib/utils';
+import { formatDomain, capitalize } from '@/lib/utils';
 
 interface AccountCardProps {
   account: {
@@ -171,7 +171,7 @@ function AccountCardInner({
             account.status
           )}`}
         >
-          {account.status.charAt(0).toUpperCase() + account.status.slice(1)}
+          {capitalize(account.status)}
         </span>
       </div>
 

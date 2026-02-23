@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
 import { useJobPolling } from '@/lib/hooks/useJobPolling';
+import { ProgressBar } from '@/components/ProgressBar';
+import { Spinner } from '@/components/Spinner';
 
 interface TierStats {
   auth0: { tierA: number; tierB: number; tierC: number };
@@ -177,14 +179,10 @@ export default function TriageProgressPage({
 
         {/* Progress Bar */}
         <div className="mt-4">
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full transition-all duration-500 ${
-                isComplete ? 'bg-green-500' : isFailed ? 'bg-red-500' : 'bg-blue-500'
-              }`}
-              style={{ width: `${job.progressPercent}%` }}
-            />
-          </div>
+          <ProgressBar
+            percentage={job.progressPercent}
+            status={isComplete ? 'complete' : isFailed ? 'failed' : 'active'}
+          />
           <div className="flex justify-between text-sm text-gray-600 mt-1">
             <span>{job.progressPercent}% complete</span>
             <span>
@@ -197,7 +195,7 @@ export default function TriageProgressPage({
         {isProcessing && job.currentAccount && (
           <div className="mt-4 p-3 bg-white rounded border border-gray-200">
             <div className="flex items-center gap-2">
-              <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+              <Spinner className="h-4 w-4 text-blue-500" />
               <span className="font-medium">Currently triaging:</span>
               <span className="text-gray-700">{job.currentAccount}</span>
             </div>

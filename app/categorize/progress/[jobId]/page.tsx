@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useToast } from '@/lib/toast-context';
 import { Spinner } from '@/components/Spinner';
 import { useJobPolling } from '@/lib/hooks/useJobPolling';
+import { capitalize } from '@/lib/utils';
+import { ProgressBar } from '@/components/ProgressBar';
 
 interface JobData {
   job: {
@@ -30,7 +32,7 @@ export default function CategorizationProgressPage({
 }: {
   params: Promise<{ jobId: string }>;
 }) {
-  const unwrappedParams = use(params);
+  const { jobId } = use(params);
   const router = useRouter();
   const toast = useToast();
   const [jobData, setJobData] = useState<JobData | null>(null);
@@ -41,7 +43,7 @@ export default function CategorizationProgressPage({
   const checkJobActive = async (jobStatus: string) => {
     if (jobStatus === 'processing') {
       try {
-        const res = await fetch(`/api/categorization/jobs/${unwrappedParams.jobId}/active`);
+        const res = await fetch(`/api/categorization/jobs/${jobId}/active`);
         if (res.ok) {
           const { active } = await res.json();
           setIsOrphaned(!active);
@@ -55,7 +57,7 @@ export default function CategorizationProgressPage({
   };
 
   const { loading, refetch } = useJobPolling<JobData>({
-    url: `/api/categorization/jobs/${unwrappedParams.jobId}`,
+    url: `/api/categorization/jobs/${jobId}`,
     isActive: (data) => data.job.status === 'processing' || data.job.status === 'pending',
     onData: (data) => {
       setJobData(data);
@@ -70,7 +72,7 @@ export default function CategorizationProgressPage({
       const res = await fetch('/api/categorization/restart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: Number(unwrappedParams.jobId) }),
+        body: JSON.stringify({ jobId: Number(jobId) }),
       });
       if (!res.ok) {
         toast.error('Failed to restart categorization job');
@@ -98,7 +100,7 @@ export default function CategorizationProgressPage({
       const res = await fetch('/api/categorization/restart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: Number(unwrappedParams.jobId), cancelOnly: true }),
+        body: JSON.stringify({ jobId: Number(jobId), cancelOnly: true }),
       });
       if (res.ok) {
         toast.info('Categorization job cancelled');
@@ -233,7 +235,7 @@ export default function CategorizationProgressPage({
                   : 'bg-gray-100 text-gray-800'
               }`}
             >
-              {isInterrupted ? 'Interrupted' : job.status.charAt(0).toUpperCase() + job.status.slice(1)}
+              {isInterrupted ? 'Interrupted' : capitalize(job.status)}
             </span>
           </div>
           <div className="text-right">
@@ -253,14 +255,11 @@ export default function CategorizationProgressPage({
             <span>Processing accounts...</span>
             <span>{progressPercentage}%</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className={`h-3 rounded-full transition-all duration-500 ${
-                isCompleted ? 'bg-green-600' : isFailed ? 'bg-red-600' : isInterrupted ? 'bg-amber-500' : 'bg-purple-600'
-              }`}
-              style={{ width: `${progressPercentage}%` }}
-            />
-          </div>
+          <ProgressBar
+            percentage={progressPercentage}
+            status={isCompleted ? 'complete' : isFailed ? 'failed' : isInterrupted ? 'interrupted' : 'active'}
+            activeColor="bg-purple-600"
+          />
         </div>
 
         {/* Current Account */}

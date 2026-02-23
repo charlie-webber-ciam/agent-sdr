@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { capitalize, downloadFile } from '@/lib/utils';
 
 interface EmployeeCountJob {
   id: number;
@@ -48,14 +49,7 @@ export default function EmployeeCountJobsPage() {
       }
 
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `employee-counts-job-${jobId}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      downloadFile(blob, `employee-counts-job-${jobId}.csv`);
     } catch (err) {
       console.error('Download error:', err);
       alert(err instanceof Error ? err.message : 'Failed to download CSV');
@@ -253,7 +247,7 @@ export default function EmployeeCountJobsPage() {
                         <div className="flex items-center gap-2">
                           {getStatusIcon(job.status)}
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(job.status)}`}>
-                            {job.status.charAt(0).toUpperCase() + job.status.slice(1)}
+                            {capitalize(job.status)}
                           </span>
                         </div>
                       </td>

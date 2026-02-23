@@ -2,6 +2,8 @@
 
 import { use, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ProgressBar } from '@/components/ProgressBar';
+import { Spinner } from '@/components/Spinner';
 
 interface JobEvent {
   id: number;
@@ -144,7 +146,7 @@ export default function QuickResearchProgressPage({
       }`}>
         <div className="flex items-center gap-3 mb-4">
           {!isDone && (
-            <div className="animate-spin h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full flex-shrink-0" />
+            <Spinner className="h-5 w-5 text-blue-500 flex-shrink-0" />
           )}
           {isComplete && (
             <div className="h-5 w-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
@@ -160,14 +162,11 @@ export default function QuickResearchProgressPage({
         </div>
 
         {/* Progress bar */}
-        <div className="w-full bg-gray-200 rounded-full h-3 mb-2">
-          <div
-            className={`h-3 rounded-full transition-all duration-700 ${
-              isComplete ? 'bg-green-500' : isFailed ? 'bg-red-500' : 'bg-blue-500'
-            }`}
-            style={{ width: `${progressPct}%` }}
-          />
-        </div>
+        <ProgressBar
+          percentage={progressPct}
+          status={isComplete ? 'complete' : isFailed ? 'failed' : 'active'}
+          duration="duration-700"
+        />
         <div className="text-sm text-gray-500">{progressPct}% complete</div>
 
         {isComplete && accountId && (

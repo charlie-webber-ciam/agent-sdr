@@ -6,6 +6,7 @@ import { CopyButton } from '@/components/CopyButton';
 import { ResearchContextToggle } from '@/components/ResearchContextToggle';
 import { GenerateButton } from '@/components/GenerateButton';
 import { useWriterState } from '@/lib/hooks/useWriterState';
+import { downloadFile } from '@/lib/utils';
 
 interface PovWriterProps {
   accountId: number;
@@ -82,12 +83,7 @@ export default function PovWriter({ accountId, account }: PovWriterProps) {
     const companyName = account?.companyName ?? 'company';
     const filename = `pov-${companyName.toLowerCase().replace(/\s+/g, '-')}.md`;
     const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadFile(blob, filename);
   };
 
   return (

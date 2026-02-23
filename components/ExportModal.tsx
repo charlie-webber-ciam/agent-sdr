@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { FilterState } from './SearchBar';
+import { downloadFile } from '@/lib/utils';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -74,20 +75,13 @@ export default function ExportModal({
 
       // Trigger download
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
 
       // Get filename from Content-Disposition header or use default
       const contentDisposition = response.headers.get('Content-Disposition');
       const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
       const filename = filenameMatch ? filenameMatch[1] : `accounts-export.${exportFormat}`;
 
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      downloadFile(blob, filename);
 
       // If JS format, also download the HTML viewer and CSS
       if (exportFormat === 'js') {
@@ -96,14 +90,7 @@ export default function ExportModal({
           try {
             const viewerResponse = await fetch('/viewer.html');
             const viewerBlob = await viewerResponse.blob();
-            const viewerUrl = window.URL.createObjectURL(viewerBlob);
-            const viewerLink = document.createElement('a');
-            viewerLink.href = viewerUrl;
-            viewerLink.download = 'accounts-viewer.html';
-            document.body.appendChild(viewerLink);
-            viewerLink.click();
-            window.URL.revokeObjectURL(viewerUrl);
-            document.body.removeChild(viewerLink);
+            downloadFile(viewerBlob, 'accounts-viewer.html');
           } catch (e) {
             console.error('Failed to download viewer:', e);
           }
@@ -114,14 +101,7 @@ export default function ExportModal({
           try {
             const cssResponse = await fetch('/styles.css');
             const cssBlob = await cssResponse.blob();
-            const cssUrl = window.URL.createObjectURL(cssBlob);
-            const cssLink = document.createElement('a');
-            cssLink.href = cssUrl;
-            cssLink.download = 'styles.css';
-            document.body.appendChild(cssLink);
-            cssLink.click();
-            window.URL.revokeObjectURL(cssUrl);
-            document.body.removeChild(cssLink);
+            downloadFile(cssBlob, 'styles.css');
           } catch (e) {
             console.error('Failed to download CSS:', e);
           }

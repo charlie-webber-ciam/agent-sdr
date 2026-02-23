@@ -6,6 +6,7 @@ import { use } from 'react';
 import { useToast } from '@/lib/toast-context';
 import { humanizeError } from '@/lib/error-messages';
 import { Spinner } from '@/components/Spinner';
+import { ProgressBar } from '@/components/ProgressBar';
 import { formatDomain } from '@/lib/utils';
 import { useJobPolling } from '@/lib/hooks/useJobPolling';
 
@@ -640,14 +641,11 @@ export default function ProcessingPage({
           );
           return (
             <div className="mt-4">
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div
-                  className={`h-3 rounded-full transition-all duration-700 ${
-                    isComplete ? 'bg-green-500' : isFailed ? 'bg-red-500' : 'bg-blue-500'
-                  }`}
-                  style={{ width: `${smoothPercent}%` }}
-                />
-              </div>
+              <ProgressBar
+                percentage={smoothPercent}
+                status={isComplete ? 'complete' : isFailed ? 'failed' : 'active'}
+                duration="duration-700"
+              />
               <div className="flex justify-between text-sm text-gray-600 mt-1">
                 <span>{smoothPercent}% complete</span>
                 <span>
@@ -662,7 +660,7 @@ export default function ProcessingPage({
         {isProcessing && currentAccount && (
           <div className="mt-4 p-3 bg-white rounded border border-gray-200">
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full flex-shrink-0" />
+              <Spinner className="h-4 w-4 text-blue-500 flex-shrink-0" />
               <span className="font-medium">Currently researching:</span>
               <span className="text-gray-700">
                 {currentAccount.companyName} ({currentAccount.domain})

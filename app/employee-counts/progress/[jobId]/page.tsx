@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
 import { useJobPolling } from '@/lib/hooks/useJobPolling';
+import { downloadFile } from '@/lib/utils';
+import { ProgressBar } from '@/components/ProgressBar';
+import { Spinner } from '@/components/Spinner';
 
 interface JobData {
   job: {
@@ -60,14 +63,7 @@ export default function EmployeeCountProgressPage({
       }
 
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `employee-counts-job-${jobId}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      downloadFile(blob, `employee-counts-job-${jobId}.csv`);
     } catch (err) {
       console.error('Download error:', err);
       alert(err instanceof Error ? err.message : 'Failed to download CSV');
@@ -80,7 +76,7 @@ export default function EmployeeCountProgressPage({
     return (
       <main className="min-h-screen p-8 max-w-6xl mx-auto">
         <div className="text-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <Spinner className="h-12 w-12 text-blue-600 mx-auto" />
           <p className="mt-4 text-gray-600">Loading job data...</p>
         </div>
       </main>
@@ -157,7 +153,7 @@ export default function EmployeeCountProgressPage({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {isProcessing && (
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+              <Spinner className="h-5 w-5 text-blue-600" />
             )}
             {isCompleted && (
               <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -222,12 +218,11 @@ export default function EmployeeCountProgressPage({
           </span>
           <span className="text-gray-600">{progress.percentage}%</span>
         </div>
-        <div className="w-full bg-gray-200 rounded-full h-3">
-          <div
-            className="bg-blue-600 h-3 rounded-full transition-all duration-300"
-            style={{ width: `${progress.percentage}%` }}
-          ></div>
-        </div>
+        <ProgressBar
+          percentage={progress.percentage}
+          duration="duration-300"
+          activeColor="bg-blue-600"
+        />
       </div>
 
       {/* Results Table */}

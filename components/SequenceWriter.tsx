@@ -6,6 +6,7 @@ import { CopyButton } from '@/components/CopyButton';
 import { ResearchContextToggle } from '@/components/ResearchContextToggle';
 import { GenerateButton } from '@/components/GenerateButton';
 import { useWriterState } from '@/lib/hooks/useWriterState';
+import { downloadFile } from '@/lib/utils';
 
 interface SequenceWriterProps {
   accountId: number;
@@ -119,12 +120,7 @@ export default function SequenceWriter({ accountId, account }: SequenceWriterPro
         .join('\n\n---\n\n');
 
     const blob = new Blob([formatted], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sequence-${account?.companyName?.replace(/\s+/g, '-').toLowerCase() || accountId}-${recipientName.replace(/\s+/g, '-').toLowerCase()}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadFile(blob, `sequence-${account?.companyName?.replace(/\s+/g, '-').toLowerCase() || accountId}-${recipientName.replace(/\s+/g, '-').toLowerCase()}.md`);
   };
 
   const getChannelIcon = (channel: 'email' | 'linkedin') => {

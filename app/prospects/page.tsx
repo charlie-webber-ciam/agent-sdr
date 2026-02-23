@@ -9,6 +9,7 @@ import ProspectSlideOver from '@/components/prospects/ProspectSlideOver';
 import ProspectDataQualityBar from '@/components/prospects/ProspectDataQualityBar';
 import ProspectSmartListBuilder from '@/components/prospects/ProspectSmartListBuilder';
 import BulkActionBar from '@/components/prospects/BulkActionBar';
+import { downloadFile } from '@/lib/utils';
 
 interface ProspectRow {
   id: number;
@@ -163,12 +164,7 @@ export default function ProspectsPage() {
 
       const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${(v || '').replace(/"/g, '""')}"`).join(','))].join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `prospects-export-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadFile(blob, `prospects-export-${new Date().toISOString().slice(0, 10)}.csv`);
     } catch (err) {
       console.error('Export failed:', err);
     }
