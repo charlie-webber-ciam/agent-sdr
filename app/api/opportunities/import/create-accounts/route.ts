@@ -12,8 +12,8 @@ export async function POST(request: Request) {
     if (!Array.isArray(accountNames) || accountNames.length === 0) {
       return NextResponse.json({ error: 'accountNames must be a non-empty array' }, { status: 400 });
     }
-    if (accountNames.length > 50) {
-      return NextResponse.json({ error: 'Maximum 50 account names per request' }, { status: 400 });
+    if (accountNames.length > 500) {
+      return NextResponse.json({ error: 'Maximum 500 account names per request' }, { status: 400 });
     }
     if (!csvContent || typeof csvContent !== 'string') {
       return NextResponse.json({ error: 'csvContent is required' }, { status: 400 });
