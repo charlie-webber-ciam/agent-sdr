@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
+import { useJobPolling } from '@/lib/hooks/useJobPolling';
 
 interface TierStats {
   auth0: { tierA: number; tierB: number; tierC: number };
@@ -37,7 +38,6 @@ export default function TriageProgressPage({
   const router = useRouter();
   const [data, setData] = useState<TriageJobData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [processingJobId, setProcessingJobId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -47,46 +47,13 @@ export default function TriageProgressPage({
     setProcessingJobId(urlParams.get('processingJobId'));
   }, []);
 
-  const fetchJobData = async () => {
-    if (!processingJobId) return;
-    try {
-      const res = await fetch(`/api/triage/jobs/${jobId}?processingJobId=${processingJobId}`);
-      if (!res.ok) {
-        throw new Error('Failed to fetch triage job data');
-      }
-      const jobData = await res.json();
-      setData(jobData);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!processingJobId) return;
-
-    fetchJobData();
-
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/triage/jobs/${jobId}?processingJobId=${processingJobId}`);
-        if (!res.ok) return;
-        const jobData = await res.json();
-        setData(jobData);
-
-        // Stop polling if job is complete
-        if (jobData.job.status !== 'processing' && jobData.job.status !== 'pending') {
-          clearInterval(interval);
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [jobId, processingJobId]);
+  const { loading, refetch: fetchJobData } = useJobPolling<TriageJobData>({
+    url: `/api/triage/jobs/${jobId}?processingJobId=${processingJobId}`,
+    isActive: (d) => d.job.status === 'processing' || d.job.status === 'pending',
+    onData: (d) => { setData(d); setError(null); },
+    onError: (err) => setError(err.message),
+    enabled: !!processingJobId,
+  });
 
   if (loading || !processingJobId) {
     return (

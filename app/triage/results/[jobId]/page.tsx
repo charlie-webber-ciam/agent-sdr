@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
+import { formatDomain } from '@/lib/utils';
 
 interface TierStats {
   auth0: { tierA: number; tierB: number; tierC: number };
@@ -51,12 +52,7 @@ const MODELS = [
   { value: 'o3', label: 'o3' },
 ];
 
-const formatDomain = (domain: string | null) => {
-  if (!domain || domain.includes('.placeholder')) {
-    return 'No domain';
-  }
-  return domain;
-};
+
 
 const tierColors = {
   A: { bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-200' },

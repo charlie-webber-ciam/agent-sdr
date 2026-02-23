@@ -20,14 +20,7 @@ import PovWriter from '@/components/PovWriter';
 import ReportSidebar, { SidebarSection } from '@/components/ReportSidebar';
 import OpportunitiesSection from '@/components/OpportunitiesSection';
 import { usePerspective } from '@/lib/perspective-context';
-
-// Utility to format domain display
-const formatDomain = (domain: string | null) => {
-  if (!domain || domain.includes('.placeholder')) {
-    return 'No domain';
-  }
-  return domain;
-};
+import { formatDomain } from '@/lib/utils';
 
 interface AccountDetail {
   id: number;

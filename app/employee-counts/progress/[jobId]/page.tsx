@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { use } from 'react';
+import { useJobPolling } from '@/lib/hooks/useJobPolling';
 
 interface JobData {
   job: {
@@ -40,24 +41,14 @@ export default function EmployeeCountProgressPage({
   const router = useRouter();
   const [data, setData] = useState<JobData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
 
-  const fetchJobData = async () => {
-    try {
-      const res = await fetch(`/api/employee-counts/jobs/${jobId}`);
-      if (!res.ok) {
-        throw new Error('Failed to fetch job data');
-      }
-      const jobData = await res.json();
-      setData(jobData);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { loading } = useJobPolling<JobData>({
+    url: `/api/employee-counts/jobs/${jobId}`,
+    isActive: (d) => d.job.status !== 'completed' && d.job.status !== 'failed',
+    onData: (d) => { setData(d); setError(null); },
+    onError: (err) => setError(err.message),
+  });
 
   const handleDownloadCSV = async () => {
     setDownloading(true);
@@ -84,29 +75,6 @@ export default function EmployeeCountProgressPage({
       setDownloading(false);
     }
   };
-
-  useEffect(() => {
-    fetchJobData();
-
-    // Auto-refresh every 3 seconds while processing
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/employee-counts/jobs/${jobId}`);
-        if (!res.ok) return;
-        const jobData = await res.json();
-        setData(jobData);
-
-        // Stop polling if job is completed or failed
-        if (jobData.job.status === 'completed' || jobData.job.status === 'failed') {
-          clearInterval(interval);
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [jobId]);
 
   if (loading) {
     return (

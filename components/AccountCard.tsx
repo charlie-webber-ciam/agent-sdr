@@ -3,6 +3,7 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import { usePerspective } from '@/lib/perspective-context';
+import { formatDomain } from '@/lib/utils';
 
 interface AccountCardProps {
   account: {
@@ -86,13 +87,6 @@ function AccountCardInner({
   };
 
   const stalenessInfo = getStalenessInfo(account.processedAt);
-
-  const formatDomain = (domain: string | null) => {
-    if (!domain || domain.includes('.placeholder')) {
-      return 'No domain';
-    }
-    return domain;
-  };
 
   const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation();

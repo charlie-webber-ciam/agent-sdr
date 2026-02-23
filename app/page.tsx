@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { DashboardSkeleton } from '@/components/Skeleton';
@@ -119,55 +119,48 @@ export default function DashboardPage() {
   const [refreshingStale, setRefreshingStale] = useState(false);
   const [interruptedActionLoading, setInterruptedActionLoading] = useState<number | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
-  const pollIntervalRef = useRef<number>(5000);
+  const [pollInterval, setPollInterval] = useState(5000);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const statsRes = await fetch('/api/stats');
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setStats(statsData);
+        setInterruptedJobs(statsData.interruptedJobs || []);
+      }
+
+      const jobsRes = await fetch('/api/jobs');
+      if (jobsRes.ok) {
+        const jobsData = await jobsRes.json();
+        setRecentJobs(jobsData.jobs);
+      }
+
+      const preprocessRes = await fetch('/api/preprocess/jobs');
+      if (preprocessRes.ok) {
+        const preprocessData = await preprocessRes.json();
+        const jobs = preprocessData.jobs;
+        setPreprocessingJobs(jobs);
+
+        const hasActive = jobs.some((job: PreprocessingJob) => job.status === 'processing' || job.status === 'pending');
+        setPollInterval(hasActive ? 5000 : 15000);
+      }
+    } catch (error) {
+      console.error('Failed to fetch dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const statsRes = await fetch('/api/stats');
-        if (statsRes.ok) {
-          const statsData = await statsRes.json();
-          setStats(statsData);
-          setInterruptedJobs(statsData.interruptedJobs || []);
-        }
-
-        const jobsRes = await fetch('/api/jobs');
-        if (jobsRes.ok) {
-          const jobsData = await jobsRes.json();
-          setRecentJobs(jobsData.jobs);
-        }
-
-        const preprocessRes = await fetch('/api/preprocess/jobs');
-        if (preprocessRes.ok) {
-          const preprocessData = await preprocessRes.json();
-          const jobs = preprocessData.jobs;
-          setPreprocessingJobs(jobs);
-
-          const hasActive = jobs.some((job: PreprocessingJob) => job.status === 'processing' || job.status === 'pending');
-          pollIntervalRef.current = hasActive ? 5000 : 15000;
-          return hasActive;
-        }
-        return false;
-      } catch (error) {
-        console.error('Failed to fetch dashboard data:', error);
-        return false;
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
 
-    let interval: NodeJS.Timeout;
-    const startPolling = () => {
-      interval = setInterval(async () => {
-        await fetchData();
-      }, pollIntervalRef.current);
-    };
-    startPolling();
+    const interval = setInterval(() => {
+      fetchData();
+    }, pollInterval);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [pollInterval, fetchData]);
 
   if (loading) {
     return <DashboardSkeleton />;

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Navigation from '@/components/Navigation';
+import { useJobPolling } from '@/lib/hooks/useJobPolling';
 
 interface JobStatus {
   id: number;
@@ -35,37 +36,12 @@ export default function PreprocessProgressPage() {
   const [downloading, setDownloading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
-  useEffect(() => {
-    const fetchJobStatus = async () => {
-      try {
-        const res = await fetch(`/api/preprocess/jobs/${jobId}`);
-        if (!res.ok) {
-          throw new Error('Failed to fetch job status');
-        }
-        const data = await res.json();
-        setJob(data);
-        // Return whether job is still active
-        return data.status === 'processing' || data.status === 'pending';
-      } catch (err) {
-        console.error('Error fetching job status:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load job');
-        return false;
-      }
-    };
-
-    fetchJobStatus();
-
-    // Poll every 3 seconds, checking job status on each poll
-    const interval = setInterval(async () => {
-      const isActive = await fetchJobStatus();
-      // Interval will keep running but only fetch when active
-      if (!isActive) {
-        clearInterval(interval);
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [jobId]); // Only depend on jobId, not job status
+  const { loading: _polling, refetch } = useJobPolling<JobStatus>({
+    url: `/api/preprocess/jobs/${jobId}`,
+    isActive: (data) => data.status === 'processing' || data.status === 'pending',
+    onData: (data) => setJob(data),
+    onError: (err) => setError(err.message),
+  });
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -97,12 +73,7 @@ export default function PreprocessProgressPage() {
     try {
       const res = await fetch(`/api/preprocess/jobs/${jobId}/pause`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to pause job');
-      // Refresh job status
-      const statusRes = await fetch(`/api/preprocess/jobs/${jobId}`);
-      if (statusRes.ok) {
-        const data = await statusRes.json();
-        setJob(data);
-      }
+      await refetch();
     } catch (err) {
       console.error('Pause error:', err);
       alert('Failed to pause job');
@@ -116,12 +87,7 @@ export default function PreprocessProgressPage() {
     try {
       const res = await fetch(`/api/preprocess/jobs/${jobId}/resume`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to resume job');
-      // Refresh job status
-      const statusRes = await fetch(`/api/preprocess/jobs/${jobId}`);
-      if (statusRes.ok) {
-        const data = await statusRes.json();
-        setJob(data);
-      }
+      await refetch();
     } catch (err) {
       console.error('Resume error:', err);
       alert('Failed to resume job');
@@ -139,12 +105,7 @@ export default function PreprocessProgressPage() {
     try {
       const res = await fetch(`/api/preprocess/jobs/${jobId}/cancel`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to cancel job');
-      // Refresh job status
-      const statusRes = await fetch(`/api/preprocess/jobs/${jobId}`);
-      if (statusRes.ok) {
-        const data = await statusRes.json();
-        setJob(data);
-      }
+      await refetch();
     } catch (err) {
       console.error('Cancel error:', err);
       alert('Failed to cancel job');

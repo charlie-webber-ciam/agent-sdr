@@ -1,6 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { PERSONA_OPTIONS } from '@/lib/writer-options';
+import { CopyButton } from '@/components/CopyButton';
+import { ResearchContextToggle } from '@/components/ResearchContextToggle';
+import { GenerateButton } from '@/components/GenerateButton';
+import { useWriterState } from '@/lib/hooks/useWriterState';
 
 interface SequenceWriterProps {
   accountId: number;
@@ -21,85 +26,38 @@ interface SequenceResult {
   strategy: string;
 }
 
-const PERSONA_OPTIONS = [
-  'CTO',
-  'VP Engineering',
-  'CISO',
-  'VP Product',
-  'VP Security',
-  'Head of Engineering',
-  'Director of Security',
-  'CEO',
-  'Founder',
-];
-
 export default function SequenceWriter({ accountId, account }: SequenceWriterProps) {
   const [recipientName, setRecipientName] = useState('');
   const [recipientPersona, setRecipientPersona] = useState('CTO');
   const [researchContext, setResearchContext] = useState<'auth0' | 'okta'>('auth0');
   const [sequenceLength, setSequenceLength] = useState(5);
   const [customInstructions, setCustomInstructions] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<SequenceResult | null>(null);
   const [expandedTouch, setExpandedTouch] = useState<number | null>(null);
   const [regeneratingTouch, setRegeneratingTouch] = useState<number | null>(null);
 
-  const handleGenerate = async () => {
-    if (!recipientName.trim()) {
-      setError('Please enter a recipient name');
-      return;
-    }
-
-    if (account) {
-      if (researchContext === 'auth0' && !account.processedAt) {
-        setError('Auth0 research not available. Please run Auth0 research first.');
-        return;
-      }
-      if (researchContext === 'okta' && !account.oktaProcessedAt) {
-        setError('Okta research not available. Please run Okta research first.');
-        return;
-      }
-    }
-
-    setLoading(true);
-    setError(null);
-    setResult(null);
-
-    try {
-      const response = await fetch(`/api/accounts/${accountId}/generate-sequence`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipientName: recipientName.trim(),
-          recipientPersona,
-          researchContext,
-          sequenceLength,
-          customInstructions: customInstructions.trim() || undefined,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to generate sequence');
-      }
-
-      setResult(data.sequence);
-      setExpandedTouch(0); // Expand first touch
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { loading, error, result, setResult, generate } = useWriterState<SequenceResult>({
+    accountId,
+    account,
+    endpoint: 'generate-sequence',
+    researchContext,
+    primaryFieldValid: recipientName.trim() !== '',
+    primaryFieldError: 'Please enter a recipient name',
+    buildPayload: () => ({
+      recipientName: recipientName.trim(),
+      recipientPersona,
+      researchContext,
+      sequenceLength,
+      customInstructions: customInstructions.trim() || undefined,
+    }),
+    getResult: (data) => data.sequence,
+    onSuccess: () => { setExpandedTouch(0); },
+  });
 
   const handleRegenerateTouch = async (touchIndex: number) => {
     if (!result || !recipientName.trim()) return;
 
     setRegeneratingTouch(touchIndex);
     try {
-      // Regenerate the entire sequence but we could add per-touch regen later
       const response = await fetch(`/api/accounts/${accountId}/generate-sequence`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -133,21 +91,20 @@ export default function SequenceWriter({ accountId, account }: SequenceWriterPro
     }
   };
 
-  const handleCopyAll = () => {
-    if (!result) return;
-    const formatted = result.touches
+  const formatAllTouches = () => {
+    if (!result) return '';
+    return result.touches
       .map((t) => {
         const header = `--- Touch ${t.touchNumber} | Day ${t.dayDelay} | ${t.channel.toUpperCase()} | ${t.angle} ---`;
         const subject = t.subject ? `Subject: ${t.subject}\n` : '';
         return `${header}\n${subject}${t.body}`;
       })
       .join('\n\n');
-    navigator.clipboard.writeText(formatted);
   };
 
-  const handleCopyTouch = (touch: SequenceTouch) => {
+  const formatTouch = (touch: SequenceTouch) => {
     const subject = touch.subject ? `Subject: ${touch.subject}\n\n` : '';
-    navigator.clipboard.writeText(`${subject}${touch.body}`);
+    return `${subject}${touch.body}`;
   };
 
   const handleExport = () => {
@@ -239,29 +196,11 @@ export default function SequenceWriter({ accountId, account }: SequenceWriterPro
           </div>
 
           {/* Research Context */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Research Context *</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setResearchContext('auth0')}
-                disabled={account && !account.processedAt}
-                className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  researchContext === 'auth0' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Auth0 CIAM
-              </button>
-              <button
-                onClick={() => setResearchContext('okta')}
-                disabled={account && !account.oktaProcessedAt}
-                className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  researchContext === 'okta' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Okta Workforce
-              </button>
-            </div>
-          </div>
+          <ResearchContextToggle
+            value={researchContext}
+            onChange={setResearchContext}
+            account={account}
+          />
 
           {/* Sequence Length */}
           <div>
@@ -296,28 +235,14 @@ export default function SequenceWriter({ accountId, account }: SequenceWriterPro
         </div>
 
         {/* Generate Button */}
-        <button
-          onClick={handleGenerate}
-          disabled={loading || !recipientName.trim()}
-          className="w-full bg-gradient-to-r from-green-600 to-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:from-green-700 hover:to-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
-          {loading ? (
-            <>
-              <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Generating Sequence...
-            </>
-          ) : (
-            <>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Generate {sequenceLength}-Touch Sequence
-            </>
-          )}
-        </button>
+        <GenerateButton
+          onClick={generate}
+          loading={loading}
+          disabled={!recipientName.trim()}
+          loadingLabel="Generating Sequence..."
+          label={`Generate ${sequenceLength}-Touch Sequence`}
+          gradient="from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
+        />
 
         {/* Error */}
         {error && (
@@ -340,15 +265,11 @@ export default function SequenceWriter({ accountId, account }: SequenceWriterPro
 
             {/* Action Buttons */}
             <div className="flex gap-2 justify-end">
-              <button
-                onClick={handleCopyAll}
+              <CopyButton
+                text={formatAllTouches()}
+                label="Copy All"
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                Copy All
-              </button>
+              />
               <button
                 onClick={handleExport}
                 className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2 text-sm"
@@ -359,7 +280,7 @@ export default function SequenceWriter({ accountId, account }: SequenceWriterPro
                 Export
               </button>
               <button
-                onClick={handleGenerate}
+                onClick={generate}
                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 text-sm"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -426,12 +347,11 @@ export default function SequenceWriter({ accountId, account }: SequenceWriterPro
                         </div>
                       </div>
                       <div className="flex gap-2 pt-2">
-                        <button
-                          onClick={() => handleCopyTouch(touch)}
-                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded text-xs font-medium hover:bg-blue-200 transition-colors"
-                        >
-                          Copy
-                        </button>
+                        <CopyButton
+                          text={formatTouch(touch)}
+                          label="Copy"
+                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded text-xs font-medium hover:bg-blue-200 transition-colors flex items-center gap-1"
+                        />
                         <button
                           onClick={() => handleRegenerateTouch(i)}
                           disabled={regeneratingTouch === i}
