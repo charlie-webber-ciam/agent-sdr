@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getActivitiesByAccount } from '@/lib/db';
+import { getActivitiesByAccount, getActivitySummary } from '@/lib/db';
 
 export async function GET(
   request: Request,
@@ -14,8 +14,13 @@ export async function GET(
     }
 
     const activities = getActivitiesByAccount(accountId);
+    const { summary, updatedAt } = getActivitySummary(accountId);
 
-    return NextResponse.json({ activities });
+    return NextResponse.json({
+      activities,
+      summary,
+      summaryUpdatedAt: updatedAt,
+    });
   } catch (error) {
     console.error('Error fetching activities:', error);
     return NextResponse.json(

@@ -759,6 +759,23 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Failed to create activity_import_jobs table:', error);
   }
 
+  // Add activity_summary and activity_summary_updated_at columns to accounts if missing
+  try {
+    const accountCols = db.prepare('PRAGMA table_info(accounts)').all() as any[];
+    const accountColNames = new Set(accountCols.map((col: any) => col.name));
+
+    if (!accountColNames.has('activity_summary')) {
+      db.exec('ALTER TABLE accounts ADD COLUMN activity_summary TEXT');
+      console.log('✓ Added activity_summary column to accounts');
+    }
+    if (!accountColNames.has('activity_summary_updated_at')) {
+      db.exec('ALTER TABLE accounts ADD COLUMN activity_summary_updated_at TEXT');
+      console.log('✓ Added activity_summary_updated_at column to accounts');
+    }
+  } catch (error) {
+    console.error('Failed to add activity_summary columns to accounts:', error);
+  }
+
   // Add SFDC index on prospects table
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_sfdc_id ON prospects(sfdc_id)');

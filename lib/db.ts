@@ -119,6 +119,9 @@ export interface Account {
   triage_summary: string | null;
   triage_data: string | null; // JSON string of TriageResult
   triaged_at: string | null;
+  // Activity summary
+  activity_summary: string | null;
+  activity_summary_updated_at: string | null;
 }
 
 export interface ProcessingJob {
@@ -3992,4 +3995,30 @@ export function findExistingActivity(accountId: number, createdDate: string | nu
   return db.prepare(
     'SELECT * FROM account_activities WHERE account_id = ? AND created_date IS NULL AND subject = ?'
   ).get(accountId, subject) as AccountActivity | undefined;
+}
+
+export function getActivitySummary(accountId: number): { summary: string | null; updatedAt: string | null } {
+  const db = getDb();
+  const row = db.prepare(
+    'SELECT activity_summary, activity_summary_updated_at FROM accounts WHERE id = ?'
+  ).get(accountId) as { activity_summary: string | null; activity_summary_updated_at: string | null } | undefined;
+  return {
+    summary: row?.activity_summary || null,
+    updatedAt: row?.activity_summary_updated_at || null,
+  };
+}
+
+export function updateActivitySummary(accountId: number, summary: string): void {
+  const db = getDb();
+  db.prepare(
+    'UPDATE accounts SET activity_summary = ?, activity_summary_updated_at = datetime(\'now\') WHERE id = ?'
+  ).run(summary, accountId);
+}
+
+export function getActivityCountByAccount(accountId: number): number {
+  const db = getDb();
+  const row = db.prepare(
+    'SELECT COUNT(*) as count FROM account_activities WHERE account_id = ?'
+  ).get(accountId) as { count: number };
+  return row.count;
 }

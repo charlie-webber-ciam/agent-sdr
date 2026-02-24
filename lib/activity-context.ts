@@ -1,15 +1,27 @@
-import { getActivitiesByAccount } from './db';
+import { getActivitySummary, getActivitiesByAccount } from './db';
 
 /**
- * Build a text block summarizing recent account activities (emails/calls)
- * for injection into agent prompts.
+ * Build the activity context for injection into agent prompts.
  *
- * - Only includes activities from the last 12 months
- * - Truncates individual comments to 300 chars
- * - Caps total output at ~4000 chars (~1300 tokens)
- * - Sorted newest first
+ * Uses the AI-generated summary if available (preferred — comprehensive, 1-2 pages).
+ * Falls back to a basic chronological list of recent activities if no summary exists.
  */
 export function buildActivityContext(accountId: number): string {
+  // Prefer the AI-generated summary
+  const { summary } = getActivitySummary(accountId);
+  if (summary) {
+    return `ACCOUNT ENGAGEMENT HISTORY (AI-summarised from CRM activities):\n\n${summary}`;
+  }
+
+  // Fallback: basic activity list (for accounts that haven't been summarised yet)
+  return buildRawActivityContext(accountId);
+}
+
+/**
+ * Fallback: build a raw chronological list of activities.
+ * Capped at 4000 chars with truncated comments.
+ */
+function buildRawActivityContext(accountId: number): string {
   const activities = getActivitiesByAccount(accountId);
 
   if (activities.length === 0) {
@@ -22,7 +34,7 @@ export function buildActivityContext(accountId: number): string {
   const cutoffISO = twelveMonthsAgo.toISOString().substring(0, 10);
 
   const recentActivities = activities.filter(a => {
-    if (!a.created_date) return true; // Include undated activities
+    if (!a.created_date) return true;
     return a.created_date >= cutoffISO;
   });
 
@@ -31,7 +43,7 @@ export function buildActivityContext(accountId: number): string {
   }
 
   const sections: string[] = [];
-  sections.push('RECENT ACCOUNT ACTIVITIES (emails/calls):');
+  sections.push('RECENT ACCOUNT ACTIVITIES (emails/calls — raw, no summary available):');
   sections.push('');
 
   let totalLength = 0;
@@ -39,7 +51,7 @@ export function buildActivityContext(accountId: number): string {
 
   for (const activity of recentActivities) {
     if (totalLength > MAX_CHARS) {
-      sections.push(`[... ${recentActivities.length - sections.length + 2} more activities truncated]`);
+      sections.push(`[... ${recentActivities.length - sections.length + 2} more activities truncated — generate a summary for full context]`);
       break;
     }
 
