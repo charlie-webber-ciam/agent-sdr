@@ -384,6 +384,7 @@ export default function ProcessingPage({
     onData: (d) => {
       setData(d);
       setError(null);
+      setLoading(false);
       checkJobActive(d.job.status);
     },
     onError: (err) => {
