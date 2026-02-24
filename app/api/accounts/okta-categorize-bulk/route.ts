@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import type { OktaPatch } from '@/lib/okta-categorizer';
+
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg'];
 
 /**
  * POST /api/accounts/okta-categorize-bulk
@@ -12,6 +15,7 @@ import { getDb } from '@/lib/db';
  * - industry: string (optional) - filter by industry
  * - accountIds: number[] (optional) - specific account IDs to categorize
  * - limit: number (optional) - maximum number of accounts to categorize
+ * - patch: OktaPatch (optional) - okta patch to use for categorization
  */
 export async function POST(request: Request) {
   try {
@@ -21,7 +25,9 @@ export async function POST(request: Request) {
       industry,
       accountIds,
       limit = 10000,
+      patch: rawPatch,
     } = body;
+    const patch: OktaPatch | undefined = rawPatch && VALID_PATCHES.includes(rawPatch) ? rawPatch : undefined;
 
     const db = getDb();
 
@@ -64,6 +70,7 @@ export async function POST(request: Request) {
       success: true,
       totalAccounts: accountsToProcess.length,
       accountIds: accountsToProcess.map((acc: any) => acc.id),
+      patch: patch || null,
       message: `Found ${accountsToProcess.length} accounts ready for Okta categorization.`,
     });
 

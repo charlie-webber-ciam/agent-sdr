@@ -19,7 +19,7 @@ import {
 } from './db';
 import { researchCompanyDual, ResearchMode } from './dual-researcher';
 import { analyzeAccountData } from './categorizer';
-import { analyzeOktaAccountData } from './okta-categorizer';
+import { analyzeOktaAccountData, OktaPatch } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
 import { logDetailedError } from './error-logger';
 import { buildOpportunityContext } from './opportunity-context';
@@ -39,7 +39,8 @@ export async function processAccountWithRetry(
   account: Account,
   jobId: number,
   researchType: ResearchMode = 'both',
-  model?: string
+  model?: string,
+  oktaPatch?: OktaPatch
 ): Promise<AccountProcessingResult> {
   const { maxRetries, retryDelay } = PROCESSING_CONFIG;
   let lastError: Error | null = null;
@@ -133,7 +134,7 @@ export async function processAccountWithRetry(
             okta_opportunity_type: dualResearch.okta.opportunity_type,
             okta_priority_score: dualResearch.okta.priority_score,
           };
-          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount, opportunityContext);
+          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount, opportunityContext, oktaPatch);
 
           // Store Okta categorization data
           updateOktaAccountMetadata(account.id, {
@@ -144,6 +145,7 @@ export async function processAccountWithRetry(
             okta_skus: JSON.stringify(oktaSuggestions.oktaSkus),
             okta_ai_suggestions: JSON.stringify(oktaSuggestions),
             okta_last_edited_at: new Date().toISOString(),
+            okta_patch: oktaPatch || null,
           });
 
           console.log(

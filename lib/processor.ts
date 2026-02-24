@@ -14,7 +14,7 @@ import {
 } from './db';
 import { researchCompanyDual, ResearchMode } from './dual-researcher';
 import { analyzeAccountData } from './categorizer';
-import { analyzeOktaAccountData } from './okta-categorizer';
+import { analyzeOktaAccountData, OktaPatch } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
 import { processJobParallel } from './parallel-processor';
 import { logDetailedError } from './error-logger';
@@ -41,6 +41,7 @@ export async function processJob(
     concurrency?: number;
     researchType?: ResearchMode;
     model?: string;
+    oktaPatch?: OktaPatch;
   }
 ): Promise<void> {
   // Check if job is already being processed
@@ -57,13 +58,14 @@ export async function processJob(
     const concurrency = options?.concurrency || PROCESSING_CONFIG.concurrency;
     const researchType = options?.researchType || 'both';
     const model = options?.model;
+    const oktaPatch = options?.oktaPatch;
 
     if (mode === 'parallel') {
       console.log(`Using PARALLEL processing mode (concurrency: ${concurrency}, research: ${researchType})`);
       await processJobParallel(jobId, concurrency, researchType, model);
     } else {
       console.log(`Using SEQUENTIAL processing mode (research: ${researchType})`);
-      await processJobSequential(jobId, researchType, model);
+      await processJobSequential(jobId, researchType, model, oktaPatch);
     }
   } finally {
     activeJobs.delete(jobId);
@@ -77,7 +79,8 @@ export async function processJob(
 export async function processJobSequential(
   jobId: number,
   researchType: ResearchMode = 'both',
-  model?: string
+  model?: string,
+  oktaPatch?: OktaPatch
 ): Promise<void> {
   const job = getJob(jobId);
   if (!job) {
@@ -235,7 +238,7 @@ export async function processJobSequential(
             okta_opportunity_type: dualResearch.okta.opportunity_type,
             okta_priority_score: dualResearch.okta.priority_score,
           };
-          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount, opportunityContext);
+          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount, opportunityContext, oktaPatch);
 
           // Store Okta categorization
           updateOktaAccountMetadata(account.id, {
@@ -246,6 +249,7 @@ export async function processJobSequential(
             okta_skus: JSON.stringify(oktaSuggestions.oktaSkus),
             okta_ai_suggestions: JSON.stringify(oktaSuggestions),
             okta_last_edited_at: new Date().toISOString(),
+            okta_patch: oktaPatch || null,
           });
 
           console.log(

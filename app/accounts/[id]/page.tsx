@@ -83,6 +83,7 @@ interface AccountDetail {
   oktaSdrNotes: string | null;
   oktaLastEditedAt: string | null;
   oktaAiSuggestions: any | null;
+  oktaPatch: string | null;
   // Triage fields
   triageAuth0Tier: 'A' | 'B' | 'C' | null;
   triageOktaTier: 'A' | 'B' | 'C' | null;
@@ -190,7 +191,7 @@ export default function AccountDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { perspective } = usePerspective();
+  const { perspective, oktaPatch } = usePerspective();
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1026,6 +1027,11 @@ export default function AccountDetailPage({
                           Okta: Tier {account.oktaTier}
                         </span>
                       )}
+                      {account.oktaPatch && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+                          {account.oktaPatch === 'emerging' ? 'Emerging' : account.oktaPatch === 'crp' ? 'Corporate' : account.oktaPatch === 'ent' ? 'Enterprise' : 'Strategic'}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1235,6 +1241,11 @@ export default function AccountDetailPage({
                                 Tier {account.oktaTier}
                               </span>
                             )}
+                            {account.oktaPatch && (
+                              <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold border-2 border-purple-300">
+                                {account.oktaPatch === 'emerging' ? 'Emerging' : account.oktaPatch === 'crp' ? 'Corporate' : account.oktaPatch === 'ent' ? 'Enterprise' : 'Strategic'}
+                              </span>
+                            )}
                             {account.oktaPriorityScore !== null && (
                               <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold border-2 border-purple-300">
                                 Priority: {account.oktaPriorityScore}/10
@@ -1407,7 +1418,11 @@ export default function AccountDetailPage({
                       <button
                         onClick={async () => {
                           try {
-                            const res = await fetch(`/api/accounts/${id}/okta-auto-categorize`, { method: 'POST' });
+                            const res = await fetch(`/api/accounts/${id}/okta-auto-categorize`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ patch: oktaPatch }),
+                            });
                             if (!res.ok) throw new Error('Failed to generate Okta suggestions');
                             const data = await res.json();
                             handleAcceptOktaAISuggestions(data.suggestions);

@@ -14,12 +14,15 @@ import {
 } from '@/lib/db';
 import { researchCompanyDual } from '@/lib/dual-researcher';
 import { analyzeAccountData } from '@/lib/categorizer';
-import { analyzeOktaAccountData } from '@/lib/okta-categorizer';
+import { analyzeOktaAccountData, OktaPatch } from '@/lib/okta-categorizer';
+
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg'];
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { companyName, domain, industry, model } = body;
+    const { companyName, domain, industry, model, patch: rawPatch } = body;
+    const oktaPatch: OktaPatch | undefined = rawPatch && VALID_PATCHES.includes(rawPatch) ? rawPatch : undefined;
 
     // Validate input
     if (!companyName || !industry) {
@@ -41,7 +44,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Start research in the background (don't await - return immediately)
-    performResearch(accountId, jobId, companyName, domain, industry, model).catch(error => {
+    performResearch(accountId, jobId, companyName, domain, industry, model, oktaPatch).catch(error => {
       console.error('Research error for account', accountId, ':', error);
       updateAccountStatus(accountId, 'failed', error instanceof Error ? error.message : 'Research failed');
     });
@@ -67,7 +70,8 @@ async function performResearch(
   companyName: string,
   domain: string | null,
   industry: string,
-  model?: string
+  model?: string,
+  oktaPatch?: OktaPatch
 ) {
   try {
     // Update status to processing
@@ -166,7 +170,7 @@ async function performResearch(
       try {
         const account = getAccount(accountId);
         if (account) {
-          const oktaSuggestions = await analyzeOktaAccountData(account);
+          const oktaSuggestions = await analyzeOktaAccountData(account, undefined, oktaPatch);
 
           updateOktaAccountMetadata(accountId, {
             okta_tier: oktaSuggestions.tier,
@@ -176,6 +180,7 @@ async function performResearch(
             okta_skus: JSON.stringify(oktaSuggestions.oktaSkus),
             okta_ai_suggestions: JSON.stringify(oktaSuggestions),
             okta_last_edited_at: new Date().toISOString(),
+            okta_patch: oktaPatch || null,
           });
 
           console.log(`✓ Okta categorization: ${companyName} → Tier ${oktaSuggestions.tier}`);

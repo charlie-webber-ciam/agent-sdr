@@ -25,6 +25,7 @@ interface Account {
   oktaPriorityScore?: number | null;
   oktaSkus?: string[];
   oktaAccountOwner?: string | null;
+  oktaPatch?: string | null;
 }
 
 const DEFAULT_FILTERS: FilterState = {

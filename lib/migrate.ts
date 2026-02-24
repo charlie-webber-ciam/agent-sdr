@@ -39,6 +39,8 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'okta_last_edited_at', type: 'TEXT' },
     { name: 'okta_ai_suggestions', type: 'TEXT' }, // JSON: stores AI-generated suggestions for Okta
     { name: 'okta_account_owner', type: 'TEXT' },
+    // Okta Patch segmentation
+    { name: 'okta_patch', type: 'TEXT', constraint: "CHECK(okta_patch IN ('emerging','crp','ent','stg', NULL))" },
     // Research model tracking
     { name: 'research_model', type: 'TEXT' },
     // Triage fields
@@ -81,7 +83,8 @@ export function migrateDatabase(db: Database.Database) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_tier ON accounts(okta_tier)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_triage_auth0_tier ON accounts(triage_auth0_tier)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_triage_okta_tier ON accounts(triage_okta_tier)');
-    console.log('✓ Added indexes for tier, priority_score, okta_processed_at, okta_tier, and triage tiers');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_patch ON accounts(okta_patch)');
+    console.log('✓ Added indexes for tier, priority_score, okta_processed_at, okta_tier, okta_patch, and triage tiers');
   } catch (error) {
     console.error('Failed to add indexes:', error);
   }

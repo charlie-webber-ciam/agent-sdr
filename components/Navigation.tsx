@@ -4,13 +4,20 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
-import { usePerspective } from '@/lib/perspective-context';
+import { usePerspective, OktaPatch } from '@/lib/perspective-context';
 
 const primaryLinks = [
   { href: '/', label: 'Dashboard' },
   { href: '/accounts', label: 'Accounts' },
   { href: '/prospects', label: 'Prospects' },
   { href: '/opportunities', label: 'Opportunities' },
+];
+
+const PATCH_OPTIONS: { value: OktaPatch; label: string }[] = [
+  { value: 'emerging', label: 'Emerging' },
+  { value: 'crp', label: 'Corporate' },
+  { value: 'ent', label: 'Enterprise' },
+  { value: 'stg', label: 'Strategic' },
 ];
 
 const toolLinks = [
@@ -24,7 +31,7 @@ const toolLinks = [
 
 export default function Navigation() {
   const pathname = usePathname();
-  const { perspective, setPerspective } = usePerspective();
+  const { perspective, setPerspective, oktaPatch, setOktaPatch } = usePerspective();
   const [menuOpen, setMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
@@ -129,27 +136,46 @@ export default function Navigation() {
 
           {/* Desktop right: perspective toggle + hamburger on mobile */}
           <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center bg-gray-100 rounded-lg p-0.5">
-              <button
-                onClick={() => setPerspective('auth0')}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                  perspective === 'auth0'
-                    ? 'bg-white text-blue-700 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Auth0
-              </button>
-              <button
-                onClick={() => setPerspective('okta')}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                  perspective === 'okta'
-                    ? 'bg-white text-purple-700 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Okta
-              </button>
+            <div className="hidden md:flex items-center gap-2">
+              <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+                <button
+                  onClick={() => setPerspective('auth0')}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                    perspective === 'auth0'
+                      ? 'bg-white text-blue-700 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Auth0
+                </button>
+                <button
+                  onClick={() => setPerspective('okta')}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                    perspective === 'okta'
+                      ? 'bg-white text-purple-700 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Okta
+                </button>
+              </div>
+              {perspective === 'okta' && (
+                <div className="flex items-center bg-purple-50 rounded-lg p-0.5 border border-purple-200">
+                  {PATCH_OPTIONS.map(({ value, label }) => (
+                    <button
+                      key={value}
+                      onClick={() => setOktaPatch(value)}
+                      className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
+                        oktaPatch === value
+                          ? 'bg-white text-purple-700 shadow-sm'
+                          : 'text-purple-400 hover:text-purple-600'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Mobile hamburger */}
@@ -211,7 +237,7 @@ export default function Navigation() {
                 </Link>
               ))}
 
-              <div className="border-t border-gray-200 pt-3 mt-2">
+              <div className="border-t border-gray-200 pt-3 mt-2 space-y-2">
                 <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
                   <button
                     onClick={() => setPerspective('auth0')}
@@ -234,6 +260,23 @@ export default function Navigation() {
                     Okta Workforce
                   </button>
                 </div>
+                {perspective === 'okta' && (
+                  <div className="flex items-center bg-purple-50 rounded-lg p-0.5 border border-purple-200">
+                    {PATCH_OPTIONS.map(({ value, label }) => (
+                      <button
+                        key={value}
+                        onClick={() => setOktaPatch(value)}
+                        className={`flex-1 px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                          oktaPatch === value
+                            ? 'bg-white text-purple-700 shadow-sm'
+                            : 'text-purple-400 hover:text-purple-600'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>

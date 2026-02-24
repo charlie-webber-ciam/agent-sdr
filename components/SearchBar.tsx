@@ -69,6 +69,7 @@ export interface FilterState {
   oktaUseCase?: string;
   oktaMinPriority?: number | null;
   oktaAccountOwner?: string;
+  oktaPatch?: string;
   // Triage tier filters
   triageAuth0Tier?: string;
   triageOktaTier?: string;
@@ -277,6 +278,26 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
                     ))}
                   </select>
                 </div>
+
+                {isOkta && (
+                  <div>
+                    <label htmlFor="oktaPatch" className="block text-sm font-medium text-gray-600 mb-2">
+                      Okta Patch
+                    </label>
+                    <select
+                      id="oktaPatch"
+                      value={filters.oktaPatch || ''}
+                      onChange={(e) => onFiltersChange({ ...filters, oktaPatch: e.target.value || undefined })}
+                      className={selectClass}
+                    >
+                      <option value="">All Patches</option>
+                      <option value="emerging">Emerging</option>
+                      <option value="crp">Corporate</option>
+                      <option value="ent">Enterprise</option>
+                      <option value="stg">Strategic</option>
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label htmlFor="tag" className="block text-sm font-medium text-gray-600 mb-2">

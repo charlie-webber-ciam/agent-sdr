@@ -2,9 +2,41 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { usePerspective, OktaPatch } from '@/lib/perspective-context';
+
+const PATCH_OPTIONS: { value: OktaPatch; label: string; desc: string }[] = [
+  { value: 'emerging', label: 'Emerging', desc: '<300 employees' },
+  { value: 'crp', label: 'Corporate', desc: '1,250-5K employees' },
+  { value: 'ent', label: 'Enterprise', desc: 'Up to 20K employees' },
+  { value: 'stg', label: 'Strategic', desc: '20K+ employees' },
+];
+
+const PATCH_TIER_DEFS: Record<OktaPatch, { a: string; b: string; c: string }> = {
+  emerging: {
+    a: '$30K+ ARR, 150+ employees, SOC 2 / funding / rapid hiring triggers (~5-10%)',
+    b: '$10K-$30K ARR, 50-150 employees, moderate growth (majority)',
+    c: '<$10K ARR, <50 employees, very early stage (~20-30%)',
+  },
+  crp: {
+    a: '$150K+ ARR, 2,000+ employees, M&A / new CISO / HRIS gap triggers (~5-10%)',
+    b: '$75K-$150K ARR, 1,250-2,000 employees, no urgent catalyst (majority)',
+    c: '<$75K ARR, <1,250 employees, limited IAM complexity (~20-30%)',
+  },
+  ent: {
+    a: '$500K+ ARR, 5,000+ employees, breach / Zero Trust / AD EOL triggers (~5-10%)',
+    b: '$300K-$500K ARR, 2,000-5,000 employees, longer eval cycle (majority)',
+    c: '<$300K ARR, <2,000 employees, single-product scope (~20-30%)',
+  },
+  stg: {
+    a: '$2M+ ARR, 30,000+ employees, board mandate / regulatory triggers (~5-10%)',
+    b: '$1.5M-$2M ARR, 20K-30K employees, no board urgency (majority)',
+    c: '<$1.5M ARR, <20K employees, better in Enterprise patch (~20-30%)',
+  },
+};
 
 export default function CategorizePage() {
   const router = useRouter();
+  const { perspective, oktaPatch } = usePerspective();
   const [loading, setLoading] = useState(false);
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
   const [recentJobs, setRecentJobs] = useState<any[]>([]);
@@ -14,6 +46,13 @@ export default function CategorizePage() {
   const [industry, setIndustry] = useState('');
   const [limit, setLimit] = useState(10000);
   const [industries, setIndustries] = useState<string[]>([]);
+  // Patch override for this run (defaults to context value)
+  const [selectedPatch, setSelectedPatch] = useState<OktaPatch>(oktaPatch);
+
+  // Sync with context when it changes
+  useEffect(() => {
+    setSelectedPatch(oktaPatch);
+  }, [oktaPatch]);
 
   useEffect(() => {
     fetchData();
@@ -47,7 +86,14 @@ export default function CategorizePage() {
     }
   };
 
+  const [oktaProgress, setOktaProgress] = useState<{ total: number; done: number; running: boolean }>({ total: 0, done: 0, running: false });
+
   const handleStartCategorization = async () => {
+    if (perspective === 'okta') {
+      await handleStartOktaCategorization();
+      return;
+    }
+
     setLoading(true);
     try {
       // Create categorization job
@@ -92,6 +138,64 @@ export default function CategorizePage() {
       alert('An error occurred while starting categorization');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleStartOktaCategorization = async () => {
+    setLoading(true);
+    try {
+      // Get accounts to categorize
+      const bulkRes = await fetch('/api/accounts/okta-categorize-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uncategorizedOnly,
+          industry: industry || undefined,
+          limit,
+          patch: selectedPatch,
+        }),
+      });
+
+      if (!bulkRes.ok) {
+        const error = await bulkRes.json();
+        alert(error.details || 'Failed to prepare Okta categorization');
+        return;
+      }
+
+      const bulkData = await bulkRes.json();
+      if (!bulkData.success || bulkData.totalAccounts === 0) {
+        alert(bulkData.message || 'No accounts found matching the specified filters');
+        return;
+      }
+
+      const ids: number[] = bulkData.accountIds;
+      setOktaProgress({ total: ids.length, done: 0, running: true });
+
+      // Process accounts sequentially
+      let done = 0;
+      for (const id of ids) {
+        try {
+          await fetch(`/api/accounts/${id}/okta-auto-categorize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ patch: selectedPatch }),
+          });
+        } catch {
+          // Continue on individual failures
+        }
+        done++;
+        setOktaProgress({ total: ids.length, done, running: true });
+      }
+
+      setOktaProgress({ total: ids.length, done, running: false });
+      alert(`Okta categorization complete! Processed ${done} of ${ids.length} accounts.`);
+      fetchData(); // Refresh stats
+    } catch (error) {
+      console.error('Failed to start Okta categorization:', error);
+      alert('An error occurred while starting Okta categorization');
+    } finally {
+      setLoading(false);
+      setOktaProgress(prev => ({ ...prev, running: false }));
     }
   };
 
@@ -198,6 +302,37 @@ export default function CategorizePage() {
                 </select>
               </div>
 
+              {/* Okta Patch Selector */}
+              {perspective === 'okta' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Okta Patch (Segment)
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PATCH_OPTIONS.map(({ value, label, desc }) => (
+                      <label
+                        key={value}
+                        className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-purple-50 transition-colors ${
+                          selectedPatch === value ? 'border-purple-500 bg-purple-50' : ''
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="patch"
+                          checked={selectedPatch === value}
+                          onChange={() => setSelectedPatch(value)}
+                          className="w-4 h-4 text-purple-600"
+                        />
+                        <div>
+                          <div className="font-medium">{label}</div>
+                          <div className="text-xs text-gray-500">{desc}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Limit */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -216,10 +351,30 @@ export default function CategorizePage() {
                 </p>
               </div>
 
+              {/* Okta Progress Bar */}
+              {oktaProgress.running && (
+                <div className="p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-purple-700">
+                      Categorizing accounts ({PATCH_OPTIONS.find(p => p.value === selectedPatch)?.label} patch)...
+                    </span>
+                    <span className="text-sm text-purple-600">
+                      {oktaProgress.done} / {oktaProgress.total}
+                    </span>
+                  </div>
+                  <div className="w-full bg-purple-200 rounded-full h-2">
+                    <div
+                      className="bg-purple-600 h-2 rounded-full transition-all"
+                      style={{ width: `${oktaProgress.total > 0 ? (oktaProgress.done / oktaProgress.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Start Button */}
               <button
                 onClick={handleStartCategorization}
-                disabled={loading}
+                disabled={loading || oktaProgress.running}
                 className="w-full py-4 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg font-semibold text-lg hover:shadow-lg transition-shadow disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
@@ -299,21 +454,40 @@ export default function CategorizePage() {
             </div>
 
             <div className="mt-6 pt-4 border-t border-gray-200">
-              <h4 className="text-sm font-semibold text-gray-700 mb-2">Tier Definitions:</h4>
-              <div className="space-y-2 text-xs text-gray-600">
-                <div className="flex items-start gap-2">
-                  <span className="font-bold text-green-600">A:</span>
-                  <span>$250K+ ARR potential with near-term buying triggers (rare, ~5-10%)</span>
+              <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                Tier Definitions{perspective === 'okta' ? ` (${PATCH_OPTIONS.find(p => p.value === selectedPatch)?.label})` : ''}:
+              </h4>
+              {perspective === 'okta' ? (
+                <div className="space-y-2 text-xs text-gray-600">
+                  <div className="flex items-start gap-2">
+                    <span className="font-bold text-green-600">A:</span>
+                    <span>{PATCH_TIER_DEFS[selectedPatch].a}</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="font-bold text-blue-600">B:</span>
+                    <span>{PATCH_TIER_DEFS[selectedPatch].b}</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="font-bold text-gray-600">C:</span>
+                    <span>{PATCH_TIER_DEFS[selectedPatch].c}</span>
+                  </div>
                 </div>
-                <div className="flex items-start gap-2">
-                  <span className="font-bold text-blue-600">B:</span>
-                  <span>Mid-market with moderate CIAM needs (majority, ~60-70%)</span>
+              ) : (
+                <div className="space-y-2 text-xs text-gray-600">
+                  <div className="flex items-start gap-2">
+                    <span className="font-bold text-green-600">A:</span>
+                    <span>$250K+ ARR potential with near-term buying triggers (rare, ~5-10%)</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="font-bold text-blue-600">B:</span>
+                    <span>Mid-market with moderate CIAM needs (majority, ~60-70%)</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="font-bold text-gray-600">C:</span>
+                    <span>Smaller companies or longer sales cycles (~20-30%)</span>
+                  </div>
                 </div>
-                <div className="flex items-start gap-2">
-                  <span className="font-bold text-gray-600">C:</span>
-                  <span>Smaller companies or longer sales cycles (~20-30%)</span>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getAccount, updateOktaAccountMetadata } from '@/lib/db';
-import { analyzeOktaAccountData } from '@/lib/okta-categorizer';
+import { analyzeOktaAccountData, OktaPatch } from '@/lib/okta-categorizer';
+
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg'];
 
 export async function POST(
   request: Request,
@@ -33,8 +35,19 @@ export async function POST(
       );
     }
 
+    // Read optional patch from request body
+    let patch: OktaPatch | undefined;
+    try {
+      const body = await request.json();
+      if (body.patch && VALID_PATCHES.includes(body.patch)) {
+        patch = body.patch;
+      }
+    } catch {
+      // No body or invalid JSON — that's fine, use default
+    }
+
     // Analyze the Okta account data
-    const suggestions = await analyzeOktaAccountData(account);
+    const suggestions = await analyzeOktaAccountData(account, undefined, patch);
 
     // Store both the suggestions and apply the categorization
     updateOktaAccountMetadata(accountId, {
@@ -45,6 +58,7 @@ export async function POST(
       okta_skus: JSON.stringify(suggestions.oktaSkus),
       okta_ai_suggestions: JSON.stringify(suggestions),
       okta_last_edited_at: new Date().toISOString(),
+      okta_patch: patch || null,
     });
 
     return NextResponse.json({

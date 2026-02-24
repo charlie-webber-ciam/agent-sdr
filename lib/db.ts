@@ -110,6 +110,7 @@ export interface Account {
   okta_last_edited_at: string | null;
   okta_ai_suggestions: string | null; // JSON
   okta_account_owner: string | null;
+  okta_patch: string | null;
   // Research model tracking
   research_model: string | null;
   // Triage fields
@@ -444,6 +445,7 @@ export function updateOktaAccountMetadata(
     okta_sdr_notes?: string;
     okta_last_edited_at?: string;
     okta_ai_suggestions?: string; // JSON string
+    okta_patch?: string | null;
   }
 ) {
   const db = getDb();
@@ -692,6 +694,7 @@ export function getAccountsWithFilters(filters: {
   oktaUseCase?: string;
   oktaMinPriority?: number;
   oktaAccountOwner?: string;
+  oktaPatch?: string;
   // Triage filters
   triageAuth0Tier?: string;
   triageOktaTier?: string;
@@ -791,6 +794,11 @@ export function getAccountsWithFilters(filters: {
       query += ' AND okta_account_owner LIKE ?';
       params.push(`%${filters.oktaAccountOwner}%`);
     }
+  }
+
+  if (filters.oktaPatch) {
+    query += ' AND okta_patch = ?';
+    params.push(filters.oktaPatch);
   }
 
   // Triage tier filters
@@ -1517,6 +1525,7 @@ export function updateOktaAccountMetadataSafe(
     okta_sdr_notes?: string;
     okta_last_edited_at?: string;
     okta_ai_suggestions?: string;
+    okta_patch?: string | null;
   },
   maxRetries: number = 3
 ): void {
