@@ -20,7 +20,11 @@ export async function GET(request: Request) {
       oktaUseCase: searchParams.get('oktaUseCase') || undefined,
       oktaMinPriority: searchParams.get('oktaMinPriority') ? parseInt(searchParams.get('oktaMinPriority')!) : undefined,
       oktaAccountOwner: searchParams.get('oktaAccountOwner') || undefined,
+      oktaPatch: searchParams.get('oktaPatch') || undefined,
+      triageAuth0Tier: searchParams.get('triageAuth0Tier') || undefined,
+      triageOktaTier: searchParams.get('triageOktaTier') || undefined,
       freshness: searchParams.get('freshness') || undefined,
+      tag: searchParams.get('tag') || undefined,
       sortBy: searchParams.get('sortBy') || undefined,
       // No limit/offset — return all matching IDs
     };

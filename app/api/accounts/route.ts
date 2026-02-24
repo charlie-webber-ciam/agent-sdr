@@ -27,6 +27,7 @@ export async function GET(request: Request) {
       triageAuth0Tier: searchParams.get('triageAuth0Tier') || undefined,
       triageOktaTier: searchParams.get('triageOktaTier') || undefined,
       freshness: searchParams.get('freshness') || undefined,
+      tag: searchParams.get('tag') || undefined,
       sortBy: searchParams.get('sortBy') || undefined,
       limit: parseInt(searchParams.get('limit') || '100'),
       offset: parseInt(searchParams.get('offset') || '0'),

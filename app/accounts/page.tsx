@@ -38,7 +38,7 @@ const DEFAULT_FILTERS: FilterState = {
   minPriority: null,
   revenue: '',
   accountOwner: '',
-  sortBy: 'priority_score',
+  sortBy: '',
   freshness: '',
   tag: '',
 };
@@ -78,6 +78,12 @@ function AccountsPageContent() {
   // Export modal state
   const [showExportModal, setShowExportModal] = useState(false);
 
+  // Available tags for filter dropdown
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+
+  // Track selectable count from IDs endpoint for accurate "Select All" toggle
+  const [selectableCount, setSelectableCount] = useState(0);
+
   // Initialize filters and page from URL params (URL is source of truth)
   useEffect(() => {
     const initFilters = { ...DEFAULT_FILTERS };
@@ -100,6 +106,21 @@ function AccountsPageContent() {
     setCurrentPage(page);
   }, [searchParams]);
 
+  // Perspective-aware effective default sort
+  const isOkta = perspective === 'okta';
+  const effectiveDefaultSortBy = isOkta ? 'okta_priority_score' : 'priority_score';
+
+  // Fetch available tags once on mount
+  useEffect(() => {
+    fetch('/api/tags')
+      .then(res => res.json())
+      .then(data => {
+        const combined = [...(data.presetTags || []), ...(data.customTags || [])];
+        setAvailableTags(Array.from(new Set(combined)));
+      })
+      .catch(() => {});
+  }, []);
+
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -113,6 +134,11 @@ function AccountsPageContent() {
           params.set(key, String(value));
         }
       });
+
+      // Always send the effective sort (use explicit or perspective-aware default)
+      if (!params.has('sortBy')) {
+        params.set('sortBy', effectiveDefaultSortBy);
+      }
 
       // Add pagination
       params.set('limit', String(ITEMS_PER_PAGE));
@@ -128,11 +154,10 @@ function AccountsPageContent() {
       setTotalAccounts(data.total);
       setTotalPages(data.pagination.totalPages);
 
-      // Extract unique industries for filter dropdown
-      const uniqueIndustries = Array.from(
-        new Set(data.accounts.map((a: Account) => a.industry))
-      ) as string[];
-      setIndustries(uniqueIndustries);
+      // Use industry metadata from all accounts (not just current page)
+      if (data.filters?.availableIndustries) {
+        setIndustries(data.filters.availableIndustries);
+      }
 
       // Set available account owners from API
       if (data.filters?.availableAccountOwners) {
@@ -146,21 +171,18 @@ function AccountsPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [filters, currentPage]);
+  }, [filters, currentPage, effectiveDefaultSortBy]);
 
   // Fetch accounts when filters change (with debouncing handled by SearchBar)
   useEffect(() => {
-    if (filters === DEFAULT_FILTERS && !searchParams.toString()) {
-      // Skip initial render before filters are loaded
-      return;
-    }
     fetchAccounts();
-  }, [filters, fetchAccounts, searchParams]);
+  }, [fetchAccounts]);
 
   const handleFiltersChange = useCallback((newFilters: FilterState) => {
     setFilters(newFilters);
     setCurrentStatusFilter(newFilters.status);
     setSelectedAccountIds(new Set()); // Clear selection when filters change
+    setSelectableCount(0);
 
     // Update URL params (reset to page 1 when filters change)
     const params = new URLSearchParams();
@@ -214,6 +236,7 @@ function AccountsPageContent() {
 
   const handleClearSelection = () => {
     setSelectedAccountIds(new Set());
+    setSelectableCount(0);
   };
 
   const handleBulkRetry = async () => {
@@ -324,27 +347,58 @@ function AccountsPageContent() {
     }
   };
 
-  // Get active filter chips
+  // Get active filter chips (perspective-aware)
   const getActiveFilters = () => {
     const active: Array<{ key: keyof FilterState; label: string; value: string }> = [];
 
     if (filters.search) active.push({ key: 'search', label: 'Search', value: filters.search });
     if (filters.industry) active.push({ key: 'industry', label: 'Industry', value: filters.industry });
     if (filters.status) active.push({ key: 'status', label: 'Status', value: filters.status });
-    if (filters.tier) {
-      const tierLabel = filters.tier === 'unassigned' ? 'Unassigned' : `Tier ${filters.tier}`;
-      active.push({ key: 'tier', label: 'Tier', value: tierLabel });
+    if (filters.tag) active.push({ key: 'tag', label: 'Tag', value: filters.tag });
+
+    // Perspective-aware tier/sku/useCase/priority/owner chips
+    if (isOkta) {
+      if (filters.oktaTier) {
+        const tierLabel = filters.oktaTier === 'unassigned' ? 'Unassigned' : `Tier ${filters.oktaTier}`;
+        active.push({ key: 'oktaTier', label: 'Okta Tier', value: tierLabel });
+      }
+      if (filters.oktaSku) active.push({ key: 'oktaSku', label: 'Okta SKU', value: filters.oktaSku });
+      if (filters.oktaUseCase) active.push({ key: 'oktaUseCase', label: 'Use Case', value: filters.oktaUseCase });
+      if (filters.oktaMinPriority !== undefined && filters.oktaMinPriority !== null) {
+        active.push({ key: 'oktaMinPriority', label: 'Min Priority', value: `≥ ${filters.oktaMinPriority}` });
+      }
+      if (filters.oktaAccountOwner) {
+        const ownerVal = filters.oktaAccountOwner === 'unassigned' ? 'No Owner' : filters.oktaAccountOwner;
+        active.push({ key: 'oktaAccountOwner', label: 'Okta Owner', value: ownerVal });
+      }
+      if (filters.oktaPatch) active.push({ key: 'oktaPatch', label: 'Okta Patch', value: filters.oktaPatch });
+    } else {
+      if (filters.tier) {
+        const tierLabel = filters.tier === 'unassigned' ? 'Unassigned' : `Tier ${filters.tier}`;
+        active.push({ key: 'tier', label: 'Tier', value: tierLabel });
+      }
+      if (filters.sku) active.push({ key: 'sku', label: 'SKU', value: filters.sku });
+      if (filters.useCase) active.push({ key: 'useCase', label: 'Use Case', value: filters.useCase });
+      if (filters.minPriority !== null) {
+        active.push({ key: 'minPriority', label: 'Min Priority', value: `≥ ${filters.minPriority}` });
+      }
+      if (filters.accountOwner) {
+        const ownerVal = filters.accountOwner === 'unassigned' ? 'No Owner' : filters.accountOwner;
+        active.push({ key: 'accountOwner', label: 'Account Owner', value: ownerVal });
+      }
     }
-    if (filters.sku) active.push({ key: 'sku', label: 'SKU', value: filters.sku });
-    if (filters.useCase) active.push({ key: 'useCase', label: 'Use Case', value: filters.useCase });
-    if (filters.minPriority !== null) {
-      active.push({ key: 'minPriority', label: 'Min Priority', value: `≥ ${filters.minPriority}` });
-    }
+
     if (filters.revenue) active.push({ key: 'revenue', label: 'Revenue', value: filters.revenue });
-    if (filters.accountOwner) {
-      const ownerValue = filters.accountOwner === 'unassigned' ? 'No Owner' : filters.accountOwner;
-      active.push({ key: 'accountOwner', label: 'Account Owner', value: ownerValue });
+
+    if (filters.triageAuth0Tier) {
+      const label = filters.triageAuth0Tier === 'unassigned' ? 'Not Triaged' : `Tier ${filters.triageAuth0Tier}`;
+      active.push({ key: 'triageAuth0Tier', label: 'Triage Auth0', value: label });
     }
+    if (filters.triageOktaTier) {
+      const label = filters.triageOktaTier === 'unassigned' ? 'Not Triaged' : `Tier ${filters.triageOktaTier}`;
+      active.push({ key: 'triageOktaTier', label: 'Triage Okta', value: label });
+    }
+
     if (filters.freshness) {
       const freshnessLabels: Record<string, string> = {
         fresh: 'Fresh (<30d)',
@@ -353,12 +407,15 @@ function AccountsPageContent() {
       };
       active.push({ key: 'freshness', label: 'Freshness', value: freshnessLabels[filters.freshness] || filters.freshness });
     }
-    if (filters.sortBy && filters.sortBy !== 'priority_score') {
+    if (filters.sortBy && filters.sortBy !== effectiveDefaultSortBy) {
       const sortLabels: Record<string, string> = {
         processed_at: 'Recently Processed',
         created_at: 'Recently Added',
         tier: 'By Tier',
+        okta_tier: 'By Okta Tier',
         company_name: 'By Name',
+        priority_score: 'Priority Score',
+        okta_priority_score: 'Okta Priority Score',
       };
       active.push({ key: 'sortBy', label: 'Sort', value: sortLabels[filters.sortBy] || filters.sortBy });
     }
@@ -369,7 +426,6 @@ function AccountsPageContent() {
   const activeFilters = getActiveFilters();
   const failedAccounts = accounts.filter((a) => a.status === 'failed');
   const pendingAccounts = accounts.filter((a) => a.status === 'pending');
-  const isOkta = perspective === 'okta';
   const noOwnerAccounts = accounts.filter((a) => isOkta ? !a.oktaAccountOwner : !a.auth0AccountOwner);
   const retryableAccounts = (currentStatusFilter === 'failed') ? failedAccounts :
                             (currentStatusFilter === 'pending') ? pendingAccounts : [];
@@ -392,7 +448,9 @@ function AccountsPageContent() {
       if (!res.ok) throw new Error('Failed to fetch all IDs');
       const data = await res.json();
 
-      setSelectedAccountIds(new Set(data.ids as number[]));
+      const ids = data.ids as number[];
+      setSelectedAccountIds(new Set(ids));
+      setSelectableCount(ids.length);
     } catch {
       // Fallback to current page selection
       let idsToSelect: number[] = [];
@@ -402,11 +460,13 @@ function AccountsPageContent() {
         idsToSelect = noOwnerAccounts.map(a => a.id);
       }
       setSelectedAccountIds(new Set(idsToSelect));
+      setSelectableCount(idsToSelect.length);
     }
   };
 
   const isAllSelected = selectedAccountIds.size > 0 &&
-                       selectedAccountIds.size >= totalAccounts;
+                       selectableCount > 0 &&
+                       selectedAccountIds.size >= selectableCount;
 
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto pb-32">
@@ -468,6 +528,7 @@ function AccountsPageContent() {
         industries={industries}
         accountOwners={accountOwners}
         oktaAccountOwners={oktaAccountOwners}
+        availableTags={availableTags}
       />
 
       {/* Active Filter Chips */}

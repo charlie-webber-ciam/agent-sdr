@@ -91,6 +91,19 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
   const { perspective } = usePerspective();
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
 
+  // Local state for debounced inputs (synced from filters so "Clear All" visually clears)
+  const [localSearch, setLocalSearch] = useState(filters.search);
+  const [localRevenue, setLocalRevenue] = useState(filters.revenue);
+
+  // Sync local state when filters change externally (e.g. "Clear All")
+  useEffect(() => {
+    setLocalSearch(filters.search);
+  }, [filters.search]);
+
+  useEffect(() => {
+    setLocalRevenue(filters.revenue);
+  }, [filters.revenue]);
+
   // Perspective-aware filter keys and values
   const isOkta = perspective === 'okta';
   const tierValue = isOkta ? (filters.oktaTier || '') : filters.tier;
@@ -106,6 +119,7 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
   const revenueTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const handleSearchChange = (value: string) => {
+    setLocalSearch(value);
     if (searchTimerRef.current) {
       clearTimeout(searchTimerRef.current);
     }
@@ -116,6 +130,7 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
   };
 
   const handleRevenueChange = (value: string) => {
+    setLocalRevenue(value);
     if (revenueTimerRef.current) {
       clearTimeout(revenueTimerRef.current);
     }
@@ -178,7 +193,7 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
           <input
             id="search"
             type="text"
-            defaultValue={filters.search}
+            value={localSearch}
             onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Company name or domain..."
             className={inputClass}
@@ -398,7 +413,7 @@ export default function SearchBar({ filters, onFiltersChange, industries = [], a
                   <input
                     id="revenue"
                     type="text"
-                    defaultValue={filters.revenue}
+                    value={localRevenue}
                     onChange={(e) => handleRevenueChange(e.target.value)}
                     placeholder="e.g., $10M-$50M"
                     className={inputClass}

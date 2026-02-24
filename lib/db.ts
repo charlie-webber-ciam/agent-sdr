@@ -699,6 +699,7 @@ export function getAccountsWithFilters(filters: {
   triageAuth0Tier?: string;
   triageOktaTier?: string;
   freshness?: string;
+  tag?: string;
   sortBy?: string;
   limit?: number;
   offset?: number;
@@ -820,6 +821,11 @@ export function getAccountsWithFilters(filters: {
     }
   }
 
+  if (filters.tag) {
+    query += ' AND id IN (SELECT account_id FROM account_tags WHERE tag = ?)';
+    params.push(filters.tag);
+  }
+
   if (filters.freshness) {
     if (filters.freshness === 'fresh') {
       query += " AND processed_at >= datetime('now', '-30 days')";
@@ -840,7 +846,16 @@ export function getAccountsWithFilters(filters: {
   const sortBy = filters.sortBy || 'priority_score';
   const validSortFields = ['processed_at', 'priority_score', 'tier', 'company_name', 'created_at', 'okta_priority_score', 'okta_tier'];
   const sortField = validSortFields.includes(sortBy) ? sortBy : 'priority_score';
-  query += ` ORDER BY ${sortField} DESC, created_at DESC`;
+
+  if (sortField === 'tier' || sortField === 'okta_tier') {
+    // Sort tiers A→B→C with nulls last
+    query += ` ORDER BY CASE ${sortField} WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 ELSE 4 END ASC, created_at DESC`;
+  } else if (sortField === 'company_name') {
+    query += ` ORDER BY company_name ASC, created_at DESC`;
+  } else {
+    // priority_score, okta_priority_score, processed_at, created_at → highest/newest first
+    query += ` ORDER BY ${sortField} DESC, created_at DESC`;
+  }
 
   // Pagination (only apply if limit is specified)
   if (filters.limit !== undefined) {
