@@ -18,6 +18,7 @@ import {
 } from './db';
 import { processAccountWithRetry, AccountProcessingResult } from './account-worker';
 import { ResearchMode } from './dual-researcher';
+import { OktaPatch } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
 import { logDetailedError } from './error-logger';
 
@@ -25,7 +26,8 @@ export async function processJobParallel(
   jobId: number,
   concurrency: number = PROCESSING_CONFIG.concurrency,
   researchType: ResearchMode = 'both',
-  model?: string
+  model?: string,
+  oktaPatch?: OktaPatch
 ): Promise<void> {
   console.log(`\n${'='.repeat(60)}`);
   console.log(`🚀 Starting PARALLEL processing for job ${jobId}`);
@@ -81,7 +83,7 @@ export async function processJobParallel(
 
       // Create array of promises with concurrency limit
       const promises = accounts.map(account =>
-        limit(() => processAccountWithRetry(account, jobId, researchType, model))
+        limit(() => processAccountWithRetry(account, jobId, researchType, model, oktaPatch))
       );
 
       // Wait for all accounts in batch to complete

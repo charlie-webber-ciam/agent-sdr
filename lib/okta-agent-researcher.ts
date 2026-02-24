@@ -2,6 +2,7 @@ import { Agent, run, webSearchTool, setDefaultOpenAIClient, setTracingDisabled }
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { logDetailedError } from './error-logger';
+import { OktaPatch, PATCH_CONFIGS } from './okta-categorizer';
 
 // Disable tracing — it tries to hit api.openai.com directly, which fails with a custom base URL
 setTracingDisabled(true);
@@ -75,6 +76,24 @@ function validateCompanyInput(company: CompanyInfo): void {
   if (company.domain && !/^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.[a-zA-Z]{2,}$/.test(company.domain)) {
     console.warn(`Domain "${company.domain}" may be invalid, proceeding anyway`);
   }
+}
+
+// ─── Segment Context Builder ──────────────────────────────────────────────────
+
+function buildSegmentContext(patch: OktaPatch): string {
+  const cfg = PATCH_CONFIGS[patch];
+  return `
+**SEGMENT CONTEXT — ${cfg.label} Patch (${cfg.headcountRange}):**
+- Entry products: ${cfg.entryProducts.join(', ')}
+- ACV range: ${cfg.acvRange}
+- Key decision makers to prioritize: ${cfg.decisionMakers.join(', ')}
+- Top competitors to check for: ${cfg.topCompetitors.join(', ')}
+- Tier A buying triggers to look for:
+${cfg.tierA.triggers.map(t => `  • ${t}`).join('\n')}
+- Tier A thresholds: ${cfg.tierA.arrMin}+ ARR, ${cfg.tierA.employeeMin}+ employees
+- ${cfg.priorityNotes}
+
+Calibrate your research depth and focus to this segment. For example, for Emerging companies focus on startup-specific signals (funding rounds, SOC 2 timelines, first enterprise deals). For Strategic companies focus on board-level mandates, global platform consolidation, and legacy IAM migration.`;
 }
 
 // ─── Shared Agent Instructions ─────────────────────────────────────────────────
@@ -467,7 +486,7 @@ export async function researchOktaSection(
 
 // ─── Main Research Function ────────────────────────────────────────────────────
 
-export async function researchCompany(company: CompanyInfo, model?: string, opportunityContext?: string, onStep?: (step: string, stepIndex: number, totalSteps: number) => void): Promise<ResearchResult> {
+export async function researchCompany(company: CompanyInfo, model?: string, opportunityContext?: string, onStep?: (step: string, stepIndex: number, totalSteps: number) => void, oktaPatch?: OktaPatch): Promise<ResearchResult> {
   // Validate input
   validateCompanyInput(company);
 
@@ -475,22 +494,64 @@ export async function researchCompany(company: CompanyInfo, model?: string, oppo
     ? `${company.company_name} (${company.domain})`
     : company.company_name;
 
-  // Create specialist agents (inject opportunity context into IAM agent as it's the primary discovery agent)
-  const iamAgent = opportunityContext
-    ? new Agent({
-        model: model || 'gpt-5.2',
-        name: 'Okta IAM Discovery Agent',
-        instructions: `${OKTA_BASE_INSTRUCTIONS}\n\n**Your Specialisation:** You are the IAM Discovery specialist. Your sole focus is identifying the target company's current identity and access management infrastructure, tools, vendors, and maturity.\n\n**HISTORICAL OPPORTUNITY CONTEXT:**\n${opportunityContext}\n\nUse this context to inform your research. Do not repeat this information verbatim — use it to guide your research focus and identify patterns.`,
-        tools: [webSearchTool()],
-      })
-    : createIAMDiscoveryAgent(model);
-  const workforceAgent = createWorkforceIntelAgent(model);
-  const securityAgent = createSecurityComplianceAgent(model);
-  const newsAgent = createNewsAgent(model);
-  const techAgent = createTechTransformAgent(model);
-  const ecosystemAgent = createEcosystemCheckAgent(model);
-  const prospectsAgent = createProspectsAgent(model);
-  const summaryAgent = createSummaryAgent(model);
+  // Build effective base instructions — append segment context when a patch is specified
+  const effectiveBaseInstructions = oktaPatch
+    ? `${OKTA_BASE_INSTRUCTIONS}\n\n${buildSegmentContext(oktaPatch)}`
+    : OKTA_BASE_INSTRUCTIONS;
+
+  // Create specialist agents with segment-aware instructions
+  const agentModel = model || 'gpt-5.2';
+
+  const iamInstructions = `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the IAM Discovery specialist. Your sole focus is identifying the target company's current identity and access management infrastructure, tools, vendors, and maturity.${opportunityContext ? `\n\n**HISTORICAL OPPORTUNITY CONTEXT:**\n${opportunityContext}\n\nUse this context to inform your research. Do not repeat this information verbatim — use it to guide your research focus and identify patterns.` : ''}`;
+
+  const iamAgent = new Agent({
+    model: agentModel,
+    name: 'Okta IAM Discovery Agent',
+    instructions: iamInstructions,
+    tools: [webSearchTool()],
+  });
+  const workforceAgent = new Agent({
+    model: agentModel,
+    name: 'Okta Workforce Intelligence Agent',
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Workforce Intelligence specialist. Your sole focus is understanding the company's workforce size, IT complexity, organisational structure, and operational footprint — all of which indicate IAM needs and scale.`,
+    tools: [webSearchTool()],
+  });
+  const securityAgent = new Agent({
+    model: agentModel,
+    name: 'Okta Security & Compliance Agent',
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Security & Compliance specialist. Your sole focus is identifying security incidents, compliance posture, Zero Trust maturity, and regulatory requirements that create urgency for Okta adoption.`,
+    tools: [webSearchTool()],
+  });
+  const newsAgent = new Agent({
+    model: agentModel,
+    name: 'Okta News & Funding Agent',
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the News & Funding specialist. Your sole focus is identifying recent company news, funding events, M&A activity, leadership changes, and strategic initiatives that create identity-related opportunities.`,
+    tools: [webSearchTool()],
+  });
+  const techAgent = new Agent({
+    model: agentModel,
+    name: 'Okta Tech Transformation Agent',
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Technology Transformation specialist. Your sole focus is identifying cloud migration, IT modernisation, Zero Trust implementation, and digital transformation initiatives that indicate readiness for modern identity infrastructure.`,
+    tools: [webSearchTool()],
+  });
+  const ecosystemAgent = new Agent({
+    model: agentModel,
+    name: 'Okta Ecosystem Check Agent',
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Okta Ecosystem specialist. Your sole focus is determining whether the target company has any existing relationship with Okta, Auth0, or the Okta partner/integration ecosystem — to classify the opportunity as net-new, competitive displacement, or expansion.`,
+    tools: [webSearchTool()],
+  });
+  const prospectsAgent = new Agent({
+    model: agentModel,
+    name: 'Okta Prospects Discovery Agent',
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Decision-Maker Discovery specialist. Your sole focus is identifying key individuals at the target company who would be involved in an Okta purchasing decision, prioritizing ANZ-based contacts.`,
+    tools: [webSearchTool()],
+  });
+  const summaryAgent = new Agent({
+    model: agentModel,
+    name: 'Okta SDR Summary Agent',
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Executive Summary specialist. You synthesize research findings into actionable sales intelligence. You classify opportunities, score priority, and provide clear next steps for the SDR.`,
+    tools: [webSearchTool()],
+  });
 
   // ─── Research Prompts ──────────────────────────────────────────────────────
 

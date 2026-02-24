@@ -62,7 +62,7 @@ export async function processJob(
 
     if (mode === 'parallel') {
       console.log(`Using PARALLEL processing mode (concurrency: ${concurrency}, research: ${researchType})`);
-      await processJobParallel(jobId, concurrency, researchType, model);
+      await processJobParallel(jobId, concurrency, researchType, model, oktaPatch);
     } else {
       console.log(`Using SEQUENTIAL processing mode (research: ${researchType})`);
       await processJobSequential(jobId, researchType, model, oktaPatch);
@@ -167,7 +167,8 @@ export async function processJobSequential(
         researchType,
         model,
         opportunityContext,
-        onStep
+        onStep,
+        oktaPatch
       );
 
       // Update Auth0 research if available

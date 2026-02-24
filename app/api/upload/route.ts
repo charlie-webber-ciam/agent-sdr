@@ -59,6 +59,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const mode = (formData.get('mode') as string) || 'research';
+    const oktaPatch = formData.get('oktaPatch') as string | null;
 
     if (!file) {
       return NextResponse.json(
@@ -238,7 +239,7 @@ export async function POST(request: Request) {
       fetch(`${request.headers.get('origin')}/api/process/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId }),
+        body: JSON.stringify({ jobId, ...(oktaPatch ? { oktaPatch } : {}) }),
       }).catch(err => {
         console.error('Failed to trigger processing:', err);
       });

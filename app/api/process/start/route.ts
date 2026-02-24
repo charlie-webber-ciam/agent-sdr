@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { processJob } from '@/lib/processor';
 import { PROCESSING_CONFIG } from '@/lib/config';
+import type { OktaPatch } from '@/lib/okta-categorizer';
+
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg'];
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { jobId, mode, concurrency } = body;
+    const { jobId, mode, concurrency, oktaPatch } = body;
 
     if (!jobId) {
       return NextResponse.json(
@@ -34,6 +37,14 @@ export async function POST(request: Request) {
       }
     }
 
+    // Validate oktaPatch if provided
+    if (oktaPatch && !VALID_PATCHES.includes(oktaPatch)) {
+      return NextResponse.json(
+        { error: `Invalid oktaPatch. Must be one of: ${VALID_PATCHES.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
     // Determine processing mode
     const selectedMode = mode || (PROCESSING_CONFIG.enableParallel ? 'parallel' : 'sequential');
     const selectedConcurrency = concurrency || PROCESSING_CONFIG.concurrency;
@@ -41,11 +52,13 @@ export async function POST(request: Request) {
     console.log(`Starting processing for job ${jobId}:`);
     console.log(`  Mode: ${selectedMode}`);
     console.log(`  Concurrency: ${selectedConcurrency}`);
+    if (oktaPatch) console.log(`  Okta Patch: ${oktaPatch}`);
 
     // Start processing in background (don't await)
     processJob(jobId, {
       mode: selectedMode,
       concurrency: selectedConcurrency,
+      oktaPatch: oktaPatch as OktaPatch | undefined,
     }).catch(error => {
       console.error(`Background processing failed for job ${jobId}:`, error);
     });

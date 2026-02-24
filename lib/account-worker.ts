@@ -69,7 +69,9 @@ export async function processAccountWithRetry(
         },
         researchType,
         model,
-        opportunityContext
+        opportunityContext,
+        undefined, // onStep — not used in parallel worker
+        oktaPatch
       );
 
       // Update Auth0 research if available

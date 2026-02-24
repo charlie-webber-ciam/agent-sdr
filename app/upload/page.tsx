@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 const MODELS = [
@@ -11,6 +11,13 @@ const MODELS = [
   { value: 'o4-mini', label: 'o4-mini' },
   { value: 'o3', label: 'o3' },
 ];
+
+const OKTA_PATCHES = [
+  { value: 'emerging', label: 'Emerging', subtitle: '<300 employees' },
+  { value: 'crp', label: 'Corporate', subtitle: '1,250-5,000' },
+  { value: 'ent', label: 'Enterprise', subtitle: 'up to 20,000' },
+  { value: 'stg', label: 'Strategic', subtitle: '20,000+' },
+] as const;
 
 interface UploadResult {
   jobId: number;
@@ -33,6 +40,19 @@ export default function UploadPage() {
   const [mode, setMode] = useState<'triage' | 'research'>('triage');
   const [triageModel, setTriageModel] = useState('gpt-5.2');
   const [startingTriage, setStartingTriage] = useState(false);
+  const [oktaPatch, setOktaPatch] = useState<string>('ent');
+
+  // Initialize patch from localStorage (syncs with Navigation bar selection)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('sdr-okta-patch');
+      if (stored && ['emerging', 'crp', 'ent', 'stg'].includes(stored)) {
+        setOktaPatch(stored);
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -84,6 +104,7 @@ export default function UploadPage() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('mode', mode);
+      formData.append('oktaPatch', oktaPatch);
 
       const res = await fetch('/api/upload', {
         method: 'POST',
@@ -106,6 +127,7 @@ export default function UploadPage() {
             body: JSON.stringify({
               jobId: data.jobId,
               model: triageModel,
+              oktaPatch,
             }),
           });
           const triageData = await triageRes.json();
@@ -401,6 +423,31 @@ export default function UploadPage() {
                 </select>
               </div>
             )}
+          </div>
+
+          {/* Okta Segment (Patch) Selector */}
+          <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+            <label className="text-sm font-medium text-gray-700 mb-3 block">Okta Segment</label>
+            <div className="grid grid-cols-4 gap-2">
+              {OKTA_PATCHES.map(p => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => setOktaPatch(p.value)}
+                  className={`px-3 py-2 rounded-lg border-2 transition-colors text-center ${
+                    oktaPatch === p.value
+                      ? 'border-indigo-500 bg-indigo-50'
+                      : 'border-gray-200 bg-white hover:border-gray-300'
+                  }`}
+                >
+                  <div className="font-medium text-sm">
+                    {oktaPatch === p.value && <span className="text-indigo-600 mr-1">&#10003;</span>}
+                    {p.label}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">{p.subtitle}</p>
+                </button>
+              ))}
+            </div>
           </div>
 
           {error && (
