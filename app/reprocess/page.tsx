@@ -10,6 +10,11 @@ interface ReprocessStats {
   hasBoth: number;
 }
 
+interface FailedPendingStats {
+  failedCount: number;
+  pendingCount: number;
+}
+
 export default function ReprocessPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -21,6 +26,14 @@ export default function ReprocessPage() {
   const [scope, setScope] = useState<'missing_okta' | 'missing_auth0' | 'all_completed'>('missing_okta');
   const [industry, setIndustry] = useState('');
   const [limit, setLimit] = useState(10000);
+
+  // Failed/Pending state
+  const [failedPendingStats, setFailedPendingStats] = useState<FailedPendingStats | null>(null);
+  const [fpAction, setFpAction] = useState<'research' | 'categorize'>('research');
+  const [fpStatuses, setFpStatuses] = useState<{ failed: boolean; pending: boolean }>({ failed: true, pending: false });
+  const [fpIndustry, setFpIndustry] = useState('');
+  const [fpLimit, setFpLimit] = useState(10000);
+  const [fpLoading, setFpLoading] = useState(false);
 
   useEffect(() => {
     fetchConfig();
@@ -43,6 +56,7 @@ export default function ReprocessPage() {
       if (res.ok) {
         const data = await res.json();
         setStats(data.stats);
+        setFailedPendingStats(data.failedPendingStats || null);
         setIndustries(data.industries || []);
       }
     } catch (error) {
@@ -85,6 +99,49 @@ export default function ReprocessPage() {
       alert('An error occurred while starting reprocessing');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fpSelectedStatuses = [
+    ...(fpStatuses.failed ? ['failed'] : []),
+    ...(fpStatuses.pending ? ['pending'] : []),
+  ];
+
+  const fpMatchingCount = failedPendingStats
+    ? (fpStatuses.failed ? failedPendingStats.failedCount : 0) + (fpStatuses.pending ? failedPendingStats.pendingCount : 0)
+    : 0;
+
+  const handleStartFailedPending = async () => {
+    if (fpSelectedStatuses.length === 0) {
+      alert('Select at least one status (Failed or Pending)');
+      return;
+    }
+    setFpLoading(true);
+    try {
+      const res = await fetch('/api/reprocess/failed-pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: fpAction,
+          statuses: fpSelectedStatuses,
+          industry: fpIndustry || undefined,
+          limit: fpLimit,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Failed to start retry');
+        return;
+      }
+
+      const data = await res.json();
+      router.push(data.redirectUrl);
+    } catch (error) {
+      console.error('Failed to start retry:', error);
+      alert('An error occurred while starting retry');
+    } finally {
+      setFpLoading(false);
     }
   };
 
@@ -454,6 +511,203 @@ export default function ReprocessPage() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Failed/Pending Retry Section */}
+      <div className="mt-12">
+        <h2 className="text-2xl font-bold mb-6">Retry Failed / Pending Accounts</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg shadow-md p-6">
+              {/* Stats Banner */}
+              {failedPendingStats && (
+                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+                  <div className="grid grid-cols-2 gap-4 text-center">
+                    <div>
+                      <div className="text-2xl font-bold text-red-600">{failedPendingStats.failedCount}</div>
+                      <div className="text-xs text-gray-600">Failed</div>
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-amber-600">{failedPendingStats.pendingCount}</div>
+                      <div className="text-xs text-gray-600">Pending</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-6">
+                {/* Status Checkboxes */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Account Status
+                  </label>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="checkbox"
+                        checked={fpStatuses.failed}
+                        onChange={(e) => setFpStatuses(prev => ({ ...prev, failed: e.target.checked }))}
+                        className="w-4 h-4 text-red-600 rounded"
+                      />
+                      <div>
+                        <div className="font-medium">Failed</div>
+                        <div className="text-sm text-gray-600">
+                          Accounts that encountered errors during research
+                          {failedPendingStats && <span className="text-red-600 font-medium"> ({failedPendingStats.failedCount})</span>}
+                        </div>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="checkbox"
+                        checked={fpStatuses.pending}
+                        onChange={(e) => setFpStatuses(prev => ({ ...prev, pending: e.target.checked }))}
+                        className="w-4 h-4 text-amber-600 rounded"
+                      />
+                      <div>
+                        <div className="font-medium">Pending</div>
+                        <div className="text-sm text-gray-600">
+                          Accounts that haven't been processed yet
+                          {failedPendingStats && <span className="text-amber-600 font-medium"> ({failedPendingStats.pendingCount})</span>}
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Action */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Action
+                  </label>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="radio"
+                        name="fpAction"
+                        checked={fpAction === 'research'}
+                        onChange={() => setFpAction('research')}
+                        className="w-4 h-4 text-blue-600"
+                      />
+                      <div>
+                        <div className="font-medium">Re-run Full Research</div>
+                        <div className="text-sm text-gray-600">
+                          Reset accounts to pending and run the full research pipeline
+                        </div>
+                      </div>
+                    </label>
+                    <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="radio"
+                        name="fpAction"
+                        checked={fpAction === 'categorize'}
+                        onChange={() => setFpAction('categorize')}
+                        className="w-4 h-4 text-blue-600"
+                      />
+                      <div>
+                        <div className="font-medium">Re-categorize Only</div>
+                        <div className="text-sm text-gray-600">
+                          Run AI categorization on these accounts without re-researching
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Industry Filter */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Filter by Industry (Optional)
+                  </label>
+                  <select
+                    value={fpIndustry}
+                    onChange={(e) => setFpIndustry(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All Industries</option>
+                    {industries.map((ind) => (
+                      <option key={ind} value={ind}>{ind}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Limit */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Maximum Accounts
+                  </label>
+                  <input
+                    type="number"
+                    value={fpLimit}
+                    onChange={(e) => setFpLimit(parseInt(e.target.value) || 10000)}
+                    min="1"
+                    max="10000"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                {/* Matching Count */}
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-700">Accounts matching filters:</span>
+                    <span className="text-2xl font-bold text-gray-900">
+                      {Math.min(fpMatchingCount, fpLimit)}
+                      {fpMatchingCount > fpLimit && (
+                        <span className="text-sm font-normal text-gray-500 ml-1">of {fpMatchingCount}</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Start Button */}
+                <button
+                  onClick={handleStartFailedPending}
+                  disabled={fpLoading || fpMatchingCount === 0 || fpSelectedStatuses.length === 0}
+                  className="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg font-semibold text-lg hover:shadow-lg transition-shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {fpLoading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Starting...
+                    </span>
+                  ) : fpMatchingCount === 0 || fpSelectedStatuses.length === 0 ? (
+                    'No Accounts to Retry'
+                  ) : (
+                    `Retry ${Math.min(fpMatchingCount, fpLimit)} Accounts (${fpAction === 'research' ? 'Research' : 'Categorize'})`
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Info Panel */}
+          <div>
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-bold mb-4">How It Works</h3>
+              <div className="space-y-3 text-sm text-gray-600">
+                <div className="flex items-start gap-2">
+                  <div className="w-6 h-6 bg-red-100 text-red-600 rounded-full flex items-center justify-center flex-shrink-0 font-semibold">1</div>
+                  <div>Select which statuses to retry (failed, pending, or both)</div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="w-6 h-6 bg-red-100 text-red-600 rounded-full flex items-center justify-center flex-shrink-0 font-semibold">2</div>
+                  <div>Choose to re-run full research or just re-categorize</div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="w-6 h-6 bg-red-100 text-red-600 rounded-full flex items-center justify-center flex-shrink-0 font-semibold">3</div>
+                  <div>Matching accounts are queued for processing</div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <div className="w-6 h-6 bg-red-100 text-red-600 rounded-full flex items-center justify-center flex-shrink-0 font-semibold">4</div>
+                  <div>Track progress on the processing or categorization page</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </main>

@@ -27,6 +27,7 @@ const toolLinks = [
   { href: '/import-activities', label: 'Import Activities' },
   { href: '/ql-import', label: 'QL Import' },
   { href: '/employee-counts/jobs', label: 'Employee Counts', activePath: '/employee-counts' },
+  { href: '/summarize-activities', label: 'Summarize Activities' },
   { href: '/test', label: 'System Diagnostics' },
 ];
 

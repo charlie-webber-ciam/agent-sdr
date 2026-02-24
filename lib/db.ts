@@ -4022,3 +4022,98 @@ export function getActivityCountByAccount(accountId: number): number {
   ).get(accountId) as { count: number };
   return row.count;
 }
+
+// Activity Summarization
+
+export function getAccountsForActivitySummarization(filters: {
+  unsummarizedOnly?: boolean;
+  limit?: number;
+}): Account[] {
+  const db = getDb();
+  let query = `
+    SELECT DISTINCT a.* FROM accounts a
+    INNER JOIN account_activities aa ON aa.account_id = a.id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+
+  if (filters.unsummarizedOnly) {
+    query += ' AND a.activity_summary IS NULL';
+  }
+
+  query += ' ORDER BY a.id';
+
+  if (filters.limit) {
+    query += ' LIMIT ?';
+    params.push(filters.limit);
+  }
+
+  return db.prepare(query).all(...params) as Account[];
+}
+
+export function getActivitySummarizationStats(): {
+  accountsWithActivities: number;
+  alreadySummarized: number;
+  needsSummary: number;
+} {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT
+      COUNT(DISTINCT aa.account_id) as accountsWithActivities,
+      COUNT(DISTINCT CASE WHEN a.activity_summary IS NOT NULL THEN aa.account_id END) as alreadySummarized,
+      COUNT(DISTINCT CASE WHEN a.activity_summary IS NULL THEN aa.account_id END) as needsSummary
+    FROM account_activities aa
+    INNER JOIN accounts a ON a.id = aa.account_id
+  `).get() as any;
+  return {
+    accountsWithActivities: row.accountsWithActivities || 0,
+    alreadySummarized: row.alreadySummarized || 0,
+    needsSummary: row.needsSummary || 0,
+  };
+}
+
+// Failed/Pending retry
+
+export function getFailedPendingStats(): { failedCount: number; pendingCount: number } {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT
+      SUM(CASE WHEN research_status = 'failed' THEN 1 ELSE 0 END) as failedCount,
+      SUM(CASE WHEN research_status = 'pending' THEN 1 ELSE 0 END) as pendingCount
+    FROM accounts
+  `).get() as any;
+  return {
+    failedCount: row.failedCount || 0,
+    pendingCount: row.pendingCount || 0,
+  };
+}
+
+export function getAccountsByStatus(filters: {
+  statuses: ('failed' | 'pending')[];
+  industry?: string;
+  limit?: number;
+}): { accounts: Account[]; total: number } {
+  const db = getDb();
+  const placeholders = filters.statuses.map(() => '?').join(',');
+  let query = `SELECT * FROM accounts WHERE research_status IN (${placeholders})`;
+  const params: any[] = [...filters.statuses];
+
+  if (filters.industry) {
+    query += ' AND industry = ?';
+    params.push(filters.industry);
+  }
+
+  // Get total count
+  const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
+  const totalRow = db.prepare(countQuery).get(...params) as { total: number };
+
+  query += ' ORDER BY id';
+
+  if (filters.limit) {
+    query += ' LIMIT ?';
+    params.push(filters.limit);
+  }
+
+  const accounts = db.prepare(query).all(...params) as Account[];
+  return { accounts, total: totalRow.total };
+}
