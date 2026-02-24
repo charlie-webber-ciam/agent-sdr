@@ -508,7 +508,7 @@ run_npm_install() {
 # ---------------------------------------------------------------------------
 kill_port_3000() {
   local pids
-  pids=$(lsof -ti :3000 2>/dev/null || true)
+  pids=$(lsof -ti :3000 -sTCP:LISTEN 2>/dev/null || true)
   if [[ -n "$pids" ]]; then
     echo "$pids" | xargs kill 2>/dev/null || true
     sleep 1
@@ -620,7 +620,7 @@ fi
 echo ""
 
 # Kill any existing process on port 3000, safely.
-EXISTING_PIDS=$(lsof -ti :3000 2>/dev/null || true)
+EXISTING_PIDS=$(lsof -ti :3000 -sTCP:LISTEN 2>/dev/null || true)
 if [[ -n "$EXISTING_PIDS" ]]; then
   echo "  Stopping existing process on port 3000..."
   echo "$EXISTING_PIDS" | xargs kill 2>/dev/null || true
@@ -646,7 +646,7 @@ LAUNCHER
   success "Desktop launcher created: Agent SDR.command"
 
   # Kill any existing process on port 3000 before starting a fresh one.
-  if lsof -ti :3000 > /dev/null 2>&1; then
+  if lsof -ti :3000 -sTCP:LISTEN > /dev/null 2>&1; then
     info "Stopping existing process on port 3000..."
     kill_port_3000
   fi
