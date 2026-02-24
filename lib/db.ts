@@ -680,26 +680,10 @@ export function deleteAccountsByIds(ids: number[]): number {
 // Enhanced filtering with tier, SKU, priority
 export function getAccountsWithFilters(filters: {
   search?: string;
-  industry?: string;
-  status?: string;
   tier?: string | 'unassigned';
-  sku?: string;
-  useCase?: string;
-  minPriority?: number;
-  revenue?: string;
-  accountOwner?: string;
-  // Okta filters
   oktaTier?: string | 'unassigned';
-  oktaSku?: string;
-  oktaUseCase?: string;
-  oktaMinPriority?: number;
+  accountOwner?: string;
   oktaAccountOwner?: string;
-  oktaPatch?: string;
-  // Triage filters
-  triageAuth0Tier?: string;
-  triageOktaTier?: string;
-  freshness?: string;
-  tag?: string;
   sortBy?: string;
   limit?: number;
   offset?: number;
@@ -714,17 +698,6 @@ export function getAccountsWithFilters(filters: {
     params.push(searchPattern, searchPattern);
   }
 
-  if (filters.industry) {
-    query += ' AND industry = ?';
-    params.push(filters.industry);
-  }
-
-  if (filters.status) {
-    query += ' AND research_status = ?';
-    params.push(filters.status);
-  }
-
-  // Auth0 filters
   if (filters.tier) {
     if (filters.tier === 'unassigned') {
       query += ' AND tier IS NULL';
@@ -734,22 +707,6 @@ export function getAccountsWithFilters(filters: {
     }
   }
 
-  if (filters.sku) {
-    query += ' AND auth0_skus LIKE ?';
-    params.push(`%${filters.sku}%`);
-  }
-
-  if (filters.useCase) {
-    query += ' AND use_cases LIKE ?';
-    params.push(`%${filters.useCase}%`);
-  }
-
-  if (filters.minPriority !== undefined) {
-    query += ' AND priority_score >= ?';
-    params.push(filters.minPriority);
-  }
-
-  // Okta filters
   if (filters.oktaTier) {
     if (filters.oktaTier === 'unassigned') {
       query += ' AND okta_tier IS NULL';
@@ -757,26 +714,6 @@ export function getAccountsWithFilters(filters: {
       query += ' AND okta_tier = ?';
       params.push(filters.oktaTier);
     }
-  }
-
-  if (filters.oktaSku) {
-    query += ' AND okta_skus LIKE ?';
-    params.push(`%${filters.oktaSku}%`);
-  }
-
-  if (filters.oktaUseCase) {
-    query += ' AND okta_use_cases LIKE ?';
-    params.push(`%${filters.oktaUseCase}%`);
-  }
-
-  if (filters.oktaMinPriority !== undefined) {
-    query += ' AND okta_priority_score >= ?';
-    params.push(filters.oktaMinPriority);
-  }
-
-  if (filters.revenue) {
-    query += ' AND estimated_annual_revenue LIKE ?';
-    params.push(`%${filters.revenue}%`);
   }
 
   if (filters.accountOwner) {
@@ -794,45 +731,6 @@ export function getAccountsWithFilters(filters: {
     } else {
       query += ' AND okta_account_owner LIKE ?';
       params.push(`%${filters.oktaAccountOwner}%`);
-    }
-  }
-
-  if (filters.oktaPatch) {
-    query += ' AND okta_patch = ?';
-    params.push(filters.oktaPatch);
-  }
-
-  // Triage tier filters
-  if (filters.triageAuth0Tier) {
-    if (filters.triageAuth0Tier === 'unassigned') {
-      query += ' AND triage_auth0_tier IS NULL';
-    } else {
-      query += ' AND triage_auth0_tier = ?';
-      params.push(filters.triageAuth0Tier);
-    }
-  }
-
-  if (filters.triageOktaTier) {
-    if (filters.triageOktaTier === 'unassigned') {
-      query += ' AND triage_okta_tier IS NULL';
-    } else {
-      query += ' AND triage_okta_tier = ?';
-      params.push(filters.triageOktaTier);
-    }
-  }
-
-  if (filters.tag) {
-    query += ' AND id IN (SELECT account_id FROM account_tags WHERE tag = ?)';
-    params.push(filters.tag);
-  }
-
-  if (filters.freshness) {
-    if (filters.freshness === 'fresh') {
-      query += " AND processed_at >= datetime('now', '-30 days')";
-    } else if (filters.freshness === 'aging') {
-      query += " AND processed_at < datetime('now', '-30 days') AND processed_at >= datetime('now', '-60 days')";
-    } else if (filters.freshness === 'stale') {
-      query += " AND processed_at < datetime('now', '-60 days')";
     }
   }
 
@@ -873,24 +771,10 @@ export function getAccountsWithFilters(filters: {
 
 // Get unique filter options for dropdowns
 export function getFilterMetadata(): {
-  industries: string[];
-  tiers: string[];
   accountOwners: string[];
   oktaAccountOwners: string[];
-  skus: string[];
-  useCases: string[];
-  oktaSkus: string[];
-  oktaUseCases: string[];
 } {
   const db = getDb();
-
-  // Get unique industries
-  const industriesStmt = db.prepare('SELECT DISTINCT industry FROM accounts WHERE industry IS NOT NULL ORDER BY industry');
-  const industries = (industriesStmt.all() as Array<{ industry: string }>).map(row => row.industry);
-
-  // Get unique tiers
-  const tiersStmt = db.prepare('SELECT DISTINCT tier FROM accounts WHERE tier IS NOT NULL ORDER BY tier');
-  const tiers = (tiersStmt.all() as Array<{ tier: string }>).map(row => row.tier);
 
   // Get unique account owners (Auth0)
   const ownersStmt = db.prepare("SELECT DISTINCT auth0_account_owner FROM accounts WHERE auth0_account_owner IS NOT NULL AND auth0_account_owner != '' ORDER BY auth0_account_owner");
@@ -900,79 +784,9 @@ export function getFilterMetadata(): {
   const oktaOwnersStmt = db.prepare("SELECT DISTINCT okta_account_owner FROM accounts WHERE okta_account_owner IS NOT NULL AND okta_account_owner != '' ORDER BY okta_account_owner");
   const oktaAccountOwners = (oktaOwnersStmt.all() as Array<{ okta_account_owner: string }>).map(row => row.okta_account_owner);
 
-  // Get all Auth0 SKUs (need to parse JSON arrays)
-  const skusStmt = db.prepare('SELECT DISTINCT auth0_skus FROM accounts WHERE auth0_skus IS NOT NULL');
-  const skuResults = skusStmt.all() as Array<{ auth0_skus: string }>;
-  const skusSet = new Set<string>();
-  skuResults.forEach(row => {
-    try {
-      const skus = JSON.parse(row.auth0_skus);
-      if (Array.isArray(skus)) {
-        skus.forEach(sku => skusSet.add(sku));
-      }
-    } catch (e) {
-      // Skip invalid JSON
-    }
-  });
-  const skus = Array.from(skusSet).sort();
-
-  // Get all Auth0 use cases (need to parse JSON arrays)
-  const useCasesStmt = db.prepare('SELECT DISTINCT use_cases FROM accounts WHERE use_cases IS NOT NULL');
-  const useCaseResults = useCasesStmt.all() as Array<{ use_cases: string }>;
-  const useCasesSet = new Set<string>();
-  useCaseResults.forEach(row => {
-    try {
-      const cases = JSON.parse(row.use_cases);
-      if (Array.isArray(cases)) {
-        cases.forEach(uc => useCasesSet.add(uc));
-      }
-    } catch (e) {
-      // Skip invalid JSON
-    }
-  });
-  const useCases = Array.from(useCasesSet).sort();
-
-  // Get all Okta SKUs (need to parse JSON arrays)
-  const oktaSkusStmt = db.prepare('SELECT DISTINCT okta_skus FROM accounts WHERE okta_skus IS NOT NULL');
-  const oktaSkuResults = oktaSkusStmt.all() as Array<{ okta_skus: string }>;
-  const oktaSkusSet = new Set<string>();
-  oktaSkuResults.forEach(row => {
-    try {
-      const skus = JSON.parse(row.okta_skus);
-      if (Array.isArray(skus)) {
-        skus.forEach(sku => oktaSkusSet.add(sku));
-      }
-    } catch (e) {
-      // Skip invalid JSON
-    }
-  });
-  const oktaSkus = Array.from(oktaSkusSet).sort();
-
-  // Get all Okta use cases (need to parse JSON arrays)
-  const oktaUseCasesStmt = db.prepare('SELECT DISTINCT okta_use_cases FROM accounts WHERE okta_use_cases IS NOT NULL');
-  const oktaUseCaseResults = oktaUseCasesStmt.all() as Array<{ okta_use_cases: string }>;
-  const oktaUseCasesSet = new Set<string>();
-  oktaUseCaseResults.forEach(row => {
-    try {
-      const cases = JSON.parse(row.okta_use_cases);
-      if (Array.isArray(cases)) {
-        cases.forEach(uc => oktaUseCasesSet.add(uc));
-      }
-    } catch (e) {
-      // Skip invalid JSON
-    }
-  });
-  const oktaUseCases = Array.from(oktaUseCasesSet).sort();
-
   return {
-    industries,
-    tiers,
     accountOwners,
     oktaAccountOwners,
-    skus,
-    useCases,
-    oktaSkus,
-    oktaUseCases,
   };
 }
 

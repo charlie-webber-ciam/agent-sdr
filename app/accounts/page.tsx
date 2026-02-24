@@ -30,17 +30,11 @@ interface Account {
 
 const DEFAULT_FILTERS: FilterState = {
   search: '',
-  industry: '',
-  status: '',
   tier: '',
-  sku: '',
-  useCase: '',
-  minPriority: null,
-  revenue: '',
+  oktaTier: '',
   accountOwner: '',
+  oktaAccountOwner: '',
   sortBy: '',
-  freshness: '',
-  tag: '',
 };
 
 const ITEMS_PER_PAGE = 30;
@@ -52,7 +46,6 @@ function AccountsPageContent() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [industries, setIndustries] = useState<string[]>([]);
   const [accountOwners, setAccountOwners] = useState<string[]>([]);
   const [oktaAccountOwners, setOktaAccountOwners] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
@@ -64,7 +57,6 @@ function AccountsPageContent() {
 
   // Selection and bulk retry state
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
-  const [currentStatusFilter, setCurrentStatusFilter] = useState<string>('');
   const [isRetrying, setIsRetrying] = useState(false);
   const [reprocessMode, setReprocessMode] = useState<'both' | 'auth0' | 'okta'>('both');
 
@@ -77,9 +69,6 @@ function AccountsPageContent() {
 
   // Export modal state
   const [showExportModal, setShowExportModal] = useState(false);
-
-  // Available tags for filter dropdown
-  const [availableTags, setAvailableTags] = useState<string[]>([]);
 
   // Track selectable count from IDs endpoint for accurate "Select All" toggle
   const [selectableCount, setSelectableCount] = useState(0);
@@ -94,11 +83,7 @@ function AccountsPageContent() {
       if (key === 'page') {
         page = Math.max(1, parseInt(value) || 1);
       } else if (key in initFilters) {
-        if (key === 'minPriority') {
-          initFilters[key] = value ? parseInt(value) : null;
-        } else {
-          initFilters[key as keyof FilterState] = value as never;
-        }
+        initFilters[key as keyof FilterState] = value as never;
       }
     });
 
@@ -109,17 +94,6 @@ function AccountsPageContent() {
   // Perspective-aware effective default sort
   const isOkta = perspective === 'okta';
   const effectiveDefaultSortBy = isOkta ? 'okta_priority_score' : 'priority_score';
-
-  // Fetch available tags once on mount
-  useEffect(() => {
-    fetch('/api/tags')
-      .then(res => res.json())
-      .then(data => {
-        const combined = [...(data.presetTags || []), ...(data.customTags || [])];
-        setAvailableTags(Array.from(new Set(combined)));
-      })
-      .catch(() => {});
-  }, []);
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
@@ -154,11 +128,6 @@ function AccountsPageContent() {
       setTotalAccounts(data.total);
       setTotalPages(data.pagination.totalPages);
 
-      // Use industry metadata from all accounts (not just current page)
-      if (data.filters?.availableIndustries) {
-        setIndustries(data.filters.availableIndustries);
-      }
-
       // Set available account owners from API
       if (data.filters?.availableAccountOwners) {
         setAccountOwners(data.filters.availableAccountOwners);
@@ -180,7 +149,6 @@ function AccountsPageContent() {
 
   const handleFiltersChange = useCallback((newFilters: FilterState) => {
     setFilters(newFilters);
-    setCurrentStatusFilter(newFilters.status);
     setSelectedAccountIds(new Set()); // Clear selection when filters change
     setSelectableCount(0);
 
@@ -216,10 +184,6 @@ function AccountsPageContent() {
 
   const handleRemoveFilter = (key: keyof FilterState) => {
     handleFiltersChange({ ...filters, [key]: DEFAULT_FILTERS[key] });
-  };
-
-  const handleShowFailedOnly = () => {
-    handleFiltersChange({ ...filters, status: 'failed' });
   };
 
   const handleSelectionChange = (accountId: number, selected: boolean) => {
@@ -347,66 +311,32 @@ function AccountsPageContent() {
     }
   };
 
-  // Get active filter chips (perspective-aware)
+  // Get active filter chips
   const getActiveFilters = () => {
     const active: Array<{ key: keyof FilterState; label: string; value: string }> = [];
 
     if (filters.search) active.push({ key: 'search', label: 'Search', value: filters.search });
-    if (filters.industry) active.push({ key: 'industry', label: 'Industry', value: filters.industry });
-    if (filters.status) active.push({ key: 'status', label: 'Status', value: filters.status });
-    if (filters.tag) active.push({ key: 'tag', label: 'Tag', value: filters.tag });
 
-    // Perspective-aware tier/sku/useCase/priority/owner chips
-    if (isOkta) {
-      if (filters.oktaTier) {
-        const tierLabel = filters.oktaTier === 'unassigned' ? 'Unassigned' : `Tier ${filters.oktaTier}`;
-        active.push({ key: 'oktaTier', label: 'Okta Tier', value: tierLabel });
-      }
-      if (filters.oktaSku) active.push({ key: 'oktaSku', label: 'Okta SKU', value: filters.oktaSku });
-      if (filters.oktaUseCase) active.push({ key: 'oktaUseCase', label: 'Use Case', value: filters.oktaUseCase });
-      if (filters.oktaMinPriority !== undefined && filters.oktaMinPriority !== null) {
-        active.push({ key: 'oktaMinPriority', label: 'Min Priority', value: `≥ ${filters.oktaMinPriority}` });
-      }
-      if (filters.oktaAccountOwner) {
-        const ownerVal = filters.oktaAccountOwner === 'unassigned' ? 'No Owner' : filters.oktaAccountOwner;
-        active.push({ key: 'oktaAccountOwner', label: 'Okta Owner', value: ownerVal });
-      }
-      if (filters.oktaPatch) active.push({ key: 'oktaPatch', label: 'Okta Patch', value: filters.oktaPatch });
-    } else {
-      if (filters.tier) {
-        const tierLabel = filters.tier === 'unassigned' ? 'Unassigned' : `Tier ${filters.tier}`;
-        active.push({ key: 'tier', label: 'Tier', value: tierLabel });
-      }
-      if (filters.sku) active.push({ key: 'sku', label: 'SKU', value: filters.sku });
-      if (filters.useCase) active.push({ key: 'useCase', label: 'Use Case', value: filters.useCase });
-      if (filters.minPriority !== null) {
-        active.push({ key: 'minPriority', label: 'Min Priority', value: `≥ ${filters.minPriority}` });
-      }
-      if (filters.accountOwner) {
-        const ownerVal = filters.accountOwner === 'unassigned' ? 'No Owner' : filters.accountOwner;
-        active.push({ key: 'accountOwner', label: 'Account Owner', value: ownerVal });
-      }
+    if (filters.tier) {
+      const tierLabel = filters.tier === 'unassigned' ? 'Unassigned' : `Tier ${filters.tier}`;
+      active.push({ key: 'tier', label: 'Auth0 Tier', value: tierLabel });
     }
 
-    if (filters.revenue) active.push({ key: 'revenue', label: 'Revenue', value: filters.revenue });
-
-    if (filters.triageAuth0Tier) {
-      const label = filters.triageAuth0Tier === 'unassigned' ? 'Not Triaged' : `Tier ${filters.triageAuth0Tier}`;
-      active.push({ key: 'triageAuth0Tier', label: 'Triage Auth0', value: label });
-    }
-    if (filters.triageOktaTier) {
-      const label = filters.triageOktaTier === 'unassigned' ? 'Not Triaged' : `Tier ${filters.triageOktaTier}`;
-      active.push({ key: 'triageOktaTier', label: 'Triage Okta', value: label });
+    if (filters.oktaTier) {
+      const tierLabel = filters.oktaTier === 'unassigned' ? 'Unassigned' : `Tier ${filters.oktaTier}`;
+      active.push({ key: 'oktaTier', label: 'Okta Tier', value: tierLabel });
     }
 
-    if (filters.freshness) {
-      const freshnessLabels: Record<string, string> = {
-        fresh: 'Fresh (<30d)',
-        aging: 'Aging (30-60d)',
-        stale: 'Stale (>60d)',
-      };
-      active.push({ key: 'freshness', label: 'Freshness', value: freshnessLabels[filters.freshness] || filters.freshness });
+    if (filters.accountOwner) {
+      const ownerVal = filters.accountOwner === 'unassigned' ? 'No Owner' : filters.accountOwner;
+      active.push({ key: 'accountOwner', label: 'Auth0 Owner', value: ownerVal });
     }
+
+    if (filters.oktaAccountOwner) {
+      const ownerVal = filters.oktaAccountOwner === 'unassigned' ? 'No Owner' : filters.oktaAccountOwner;
+      active.push({ key: 'oktaAccountOwner', label: 'Okta Owner', value: ownerVal });
+    }
+
     if (filters.sortBy && filters.sortBy !== effectiveDefaultSortBy) {
       const sortLabels: Record<string, string> = {
         processed_at: 'Recently Processed',
@@ -424,16 +354,10 @@ function AccountsPageContent() {
   };
 
   const activeFilters = getActiveFilters();
-  const failedAccounts = accounts.filter((a) => a.status === 'failed');
-  const pendingAccounts = accounts.filter((a) => a.status === 'pending');
   const noOwnerAccounts = accounts.filter((a) => isOkta ? !a.oktaAccountOwner : !a.auth0AccountOwner);
-  const retryableAccounts = (currentStatusFilter === 'failed') ? failedAccounts :
-                            (currentStatusFilter === 'pending') ? pendingAccounts : [];
-  const showRetryMode = (currentStatusFilter === 'failed' || currentStatusFilter === 'pending') &&
-                        retryableAccounts.length > 0;
-  const ownerFilterActive = isOkta ? filters.oktaAccountOwner === 'unassigned' : filters.accountOwner === 'unassigned';
+  const ownerFilterActive = filters.accountOwner === 'unassigned' || filters.oktaAccountOwner === 'unassigned';
   const showOwnerMode = ownerFilterActive && noOwnerAccounts.length > 0;
-  const showSelectionMode = showRetryMode || showOwnerMode;
+  const showSelectionMode = showOwnerMode;
 
   const handleSelectAll = async () => {
     try {
@@ -453,12 +377,7 @@ function AccountsPageContent() {
       setSelectableCount(ids.length);
     } catch {
       // Fallback to current page selection
-      let idsToSelect: number[] = [];
-      if (showRetryMode) {
-        idsToSelect = retryableAccounts.map(a => a.id);
-      } else if (showOwnerMode) {
-        idsToSelect = noOwnerAccounts.map(a => a.id);
-      }
+      const idsToSelect = showOwnerMode ? noOwnerAccounts.map(a => a.id) : [];
       setSelectedAccountIds(new Set(idsToSelect));
       setSelectableCount(idsToSelect.length);
     }
@@ -479,45 +398,6 @@ function AccountsPageContent() {
             </p>
           </div>
           <div className="flex gap-2">
-            {failedAccounts.length > 0 && currentStatusFilter !== 'failed' && (
-              <button
-                onClick={handleShowFailedOnly}
-                className="px-4 py-2 bg-red-100 text-red-700 border border-red-300 rounded-lg font-semibold hover:bg-red-200 transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Show Failed Only ({failedAccounts.length})
-              </button>
-            )}
-            {pendingAccounts.length > 0 && currentStatusFilter !== 'pending' && (
-              <button
-                onClick={() => handleFiltersChange({ ...filters, status: 'pending' })}
-                className="px-4 py-2 bg-yellow-100 text-yellow-700 border border-yellow-300 rounded-lg font-semibold hover:bg-yellow-200 transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Show Pending Only ({pendingAccounts.length})
-              </button>
-            )}
-            {noOwnerAccounts.length > 0 && !ownerFilterActive && (
-              <button
-                onClick={() => {
-                  if (isOkta) {
-                    handleFiltersChange({ ...filters, oktaAccountOwner: 'unassigned' });
-                  } else {
-                    handleFiltersChange({ ...filters, accountOwner: 'unassigned' });
-                  }
-                }}
-                className="px-4 py-2 bg-blue-100 text-blue-700 border border-blue-300 rounded-lg font-semibold hover:bg-blue-200 transition-colors flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-                Show No Owner ({noOwnerAccounts.length})
-              </button>
-            )}
           </div>
         </div>
       </div>
@@ -525,10 +405,8 @@ function AccountsPageContent() {
       <SearchBar
         filters={filters}
         onFiltersChange={handleFiltersChange}
-        industries={industries}
-        accountOwners={accountOwners}
+        auth0AccountOwners={accountOwners}
         oktaAccountOwners={oktaAccountOwners}
-        availableTags={availableTags}
       />
 
       {/* Active Filter Chips */}
@@ -730,9 +608,7 @@ function AccountsPageContent() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {accounts.map((account) => {
-              const isSelectable = showRetryMode
-                ? (account.status === 'failed' || account.status === 'pending')
-                : showOwnerMode
+              const isSelectable = showOwnerMode
                 ? (isOkta ? !account.oktaAccountOwner : !account.auth0AccountOwner)
                 : false;
 
@@ -817,90 +693,6 @@ function AccountsPageContent() {
             </div>
           )}
         </>
-      )}
-
-      {/* Bulk Action Bar - Retry Mode */}
-      {selectedAccountIds.size > 0 && showRetryMode && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-200 shadow-2xl">
-          <div className="max-w-7xl mx-auto px-8 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span className="text-lg font-semibold text-gray-900">
-                    {selectedAccountIds.size} account{selectedAccountIds.size !== 1 ? 's' : ''} selected
-                  </span>
-                </div>
-                <button
-                  onClick={handleClearSelection}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium transition-colors"
-                >
-                  Clear Selection
-                </button>
-              </div>
-              <div className="flex items-center gap-3">
-                {/* Reprocess Mode Selector */}
-                <div className="flex items-center gap-2 border-l pl-4">
-                  <span className="text-sm font-medium text-gray-700">Research Type:</span>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setReprocessMode('both')}
-                      className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                        reprocessMode === 'both'
-                          ? 'bg-green-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                    >
-                      Both
-                    </button>
-                    <button
-                      onClick={() => setReprocessMode('auth0')}
-                      className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                        reprocessMode === 'auth0'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                    >
-                      Auth0
-                    </button>
-                    <button
-                      onClick={() => setReprocessMode('okta')}
-                      className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                        reprocessMode === 'okta'
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                    >
-                      Okta
-                    </button>
-                  </div>
-                </div>
-                <button
-                  onClick={handleBulkDelete}
-                  disabled={isDeleting}
-                  className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  {isDeleting ? 'Deleting...' : 'Delete Selected'}
-                </button>
-                <button
-                  onClick={handleBulkRetry}
-                  disabled={isRetrying}
-                  className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  {isRetrying ? 'Processing...' : 'Reprocess Selected'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Bulk Action Bar - Owner Assignment Mode */}

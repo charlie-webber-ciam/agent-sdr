@@ -7,27 +7,10 @@ export async function GET(request: Request) {
 
     const filters = {
       search: searchParams.get('search') || undefined,
-      industry: searchParams.get('industry') || undefined,
-      status: searchParams.get('status') || undefined,
-      // Auth0 filters
       tier: searchParams.get('tier') || undefined,
-      sku: searchParams.get('sku') || undefined,
-      useCase: searchParams.get('useCase') || undefined,
-      minPriority: searchParams.get('minPriority') ? parseInt(searchParams.get('minPriority')!) : undefined,
-      revenue: searchParams.get('revenue') || undefined,
-      accountOwner: searchParams.get('accountOwner') || undefined,
-      // Okta filters
       oktaTier: searchParams.get('oktaTier') || undefined,
-      oktaSku: searchParams.get('oktaSku') || undefined,
-      oktaUseCase: searchParams.get('oktaUseCase') || undefined,
-      oktaMinPriority: searchParams.get('oktaMinPriority') ? parseInt(searchParams.get('oktaMinPriority')!) : undefined,
+      accountOwner: searchParams.get('accountOwner') || undefined,
       oktaAccountOwner: searchParams.get('oktaAccountOwner') || undefined,
-      oktaPatch: searchParams.get('oktaPatch') || undefined,
-      // Triage filters
-      triageAuth0Tier: searchParams.get('triageAuth0Tier') || undefined,
-      triageOktaTier: searchParams.get('triageOktaTier') || undefined,
-      freshness: searchParams.get('freshness') || undefined,
-      tag: searchParams.get('tag') || undefined,
       sortBy: searchParams.get('sortBy') || undefined,
       limit: parseInt(searchParams.get('limit') || '100'),
       offset: parseInt(searchParams.get('offset') || '0'),
@@ -122,14 +105,7 @@ export async function GET(request: Request) {
         currentPage: Math.floor(filters.offset / filters.limit) + 1,
       },
       filters: {
-        availableIndustries: filterMetadata.industries,
-        availableTiers: filterMetadata.tiers,
-        availableSkus: filterMetadata.skus,
-        availableUseCases: filterMetadata.useCases,
         availableAccountOwners: filterMetadata.accountOwners,
-        // Okta filter metadata
-        availableOktaSkus: filterMetadata.oktaSkus,
-        availableOktaUseCases: filterMetadata.oktaUseCases,
         availableOktaAccountOwners: filterMetadata.oktaAccountOwners,
       },
     });

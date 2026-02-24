@@ -47,14 +47,10 @@ export default function ExportModal({
         // Convert FilterState to API filter format
         const apiFilters: any = {};
         if (currentFilters.search) apiFilters.search = currentFilters.search;
-        if (currentFilters.industry) apiFilters.industry = currentFilters.industry;
-        if (currentFilters.status) apiFilters.status = currentFilters.status;
         if (currentFilters.tier) apiFilters.tier = currentFilters.tier;
-        if (currentFilters.sku) apiFilters.sku = currentFilters.sku;
-        if (currentFilters.useCase) apiFilters.useCase = currentFilters.useCase;
-        if (currentFilters.minPriority !== null) apiFilters.minPriority = currentFilters.minPriority;
-        if (currentFilters.revenue) apiFilters.revenue = currentFilters.revenue;
+        if (currentFilters.oktaTier) apiFilters.oktaTier = currentFilters.oktaTier;
         if (currentFilters.accountOwner) apiFilters.accountOwner = currentFilters.accountOwner;
+        if (currentFilters.oktaAccountOwner) apiFilters.oktaAccountOwner = currentFilters.oktaAccountOwner;
         if (currentFilters.sortBy) apiFilters.sortBy = currentFilters.sortBy;
 
         body.filters = apiFilters;
