@@ -1,6 +1,7 @@
 import { Agent, run, setDefaultOpenAIClient, setTracingDisabled } from '@openai/agents';
 import OpenAI from 'openai';
 import { Account } from './db';
+import { buildActivityContext } from './activity-context';
 
 // Disable tracing — it tries to hit api.openai.com directly, which fails with a custom base URL
 setTracingDisabled(true);
@@ -187,6 +188,14 @@ function prepareAccountContext(account: Account, researchContext: 'auth0' | 'okt
     if (account.okta_tech_transformation) parts.push(`\nTECH TRANSFORMATION:\n${account.okta_tech_transformation}`);
     if (account.okta_ecosystem) parts.push(`\nOKTA ECOSYSTEM:\n${account.okta_ecosystem}`);
     if (account.okta_research_summary) parts.push(`\nEXECUTIVE SUMMARY:\n${account.okta_research_summary}`);
+  }
+
+  // Append activity context if available
+  if (account.id) {
+    const actContext = buildActivityContext(account.id);
+    if (actContext) {
+      parts.push(`\n${actContext}`);
+    }
   }
 
   return parts.join('\n');

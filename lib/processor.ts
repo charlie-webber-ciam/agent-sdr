@@ -19,6 +19,7 @@ import { PROCESSING_CONFIG } from './config';
 import { processJobParallel } from './parallel-processor';
 import { logDetailedError } from './error-logger';
 import { buildOpportunityContext } from './opportunity-context';
+import { buildActivityContext } from './activity-context';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -141,8 +142,12 @@ export async function processJobSequential(
     updateJobCurrentStep(jobId, 'Researching...');
 
     try {
-      // Fetch opportunity context for this account
-      const opportunityContext = buildOpportunityContext(account.id) || undefined;
+      // Fetch opportunity and activity context for this account
+      const opportunityContext = buildOpportunityContext(account.id) || '';
+      const activityContext = buildActivityContext(account.id) || '';
+
+      // Combine opportunity + activity context into a single string for the researcher
+      const combinedContext = [opportunityContext, activityContext].filter(Boolean).join('\n\n') || undefined;
 
       // Build onStep callback that writes events to DB
       const onStep = (source: 'auth0' | 'okta', step: string, i: number, total: number) => {
@@ -166,7 +171,7 @@ export async function processJobSequential(
         },
         researchType,
         model,
-        opportunityContext,
+        combinedContext,
         onStep,
         oktaPatch
       );
@@ -201,7 +206,7 @@ export async function processJobSequential(
             ...dualResearch.auth0,
             research_status: 'completed' as const,
           };
-          const suggestions = await analyzeAccountData(updatedAccount, opportunityContext);
+          const suggestions = await analyzeAccountData(updatedAccount, combinedContext);
 
           // Store both the suggestions and apply the categorization
           updateAccountMetadata(account.id, {
@@ -239,7 +244,7 @@ export async function processJobSequential(
             okta_opportunity_type: dualResearch.okta.opportunity_type,
             okta_priority_score: dualResearch.okta.priority_score,
           };
-          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount, opportunityContext, oktaPatch);
+          const oktaSuggestions = await analyzeOktaAccountData(updatedAccount, combinedContext, oktaPatch);
 
           // Store Okta categorization
           updateOktaAccountMetadata(account.id, {

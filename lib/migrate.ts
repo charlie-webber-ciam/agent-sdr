@@ -717,6 +717,48 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Failed to add held email columns to ql_import_jobs:', error);
   }
 
+  // Add account_activities table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_activities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        created_date TEXT,
+        subject TEXT NOT NULL,
+        comments TEXT DEFAULT '',
+        import_job_id INTEGER,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_activities_account ON account_activities(account_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_activities_date ON account_activities(created_date DESC)');
+    console.log('✓ Ensured account_activities table exists');
+  } catch (error) {
+    console.error('Failed to create account_activities table:', error);
+  }
+
+  // Add activity_import_jobs table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS activity_import_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT,
+        status TEXT DEFAULT 'pending',
+        total_rows INTEGER DEFAULT 0,
+        matched_accounts INTEGER DEFAULT 0,
+        unmatched_accounts INTEGER DEFAULT 0,
+        ambiguous_accounts INTEGER DEFAULT 0,
+        activities_created INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        completed_at TEXT
+      )
+    `);
+    console.log('✓ Ensured activity_import_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create activity_import_jobs table:', error);
+  }
+
   // Add SFDC index on prospects table
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_sfdc_id ON prospects(sfdc_id)');

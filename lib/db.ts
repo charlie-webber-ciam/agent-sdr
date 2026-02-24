@@ -3907,3 +3907,89 @@ export function getProspectsByIds(ids: number[]): (Prospect & { company_name: st
     ORDER BY p.id ASC
   `).all(...ids) as (Prospect & { company_name: string; domain: string | null; account_industry: string | null })[];
 }
+
+// ─── Activity Import Functions ──────────────────────────────────────────────
+
+export interface ActivityImportJob {
+  id: number;
+  filename: string | null;
+  status: string;
+  total_rows: number;
+  matched_accounts: number;
+  unmatched_accounts: number;
+  ambiguous_accounts: number;
+  activities_created: number;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface AccountActivity {
+  id: number;
+  account_id: number;
+  created_date: string | null;
+  subject: string;
+  comments: string;
+  import_job_id: number | null;
+  created_at: string;
+}
+
+export function createActivityImportJob(filename: string): number {
+  const db = getDb();
+  const stmt = db.prepare('INSERT INTO activity_import_jobs (filename) VALUES (?)');
+  return stmt.run(filename).lastInsertRowid as number;
+}
+
+export function getActivityImportJob(id: number): ActivityImportJob | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM activity_import_jobs WHERE id = ?').get(id) as ActivityImportJob | undefined;
+}
+
+export function updateActivityImportJob(id: number, updates: Partial<Omit<ActivityImportJob, 'id' | 'created_at'>>): void {
+  const db = getDb();
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE activity_import_jobs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function createActivity(
+  accountId: number,
+  createdDate: string | null,
+  subject: string,
+  comments: string,
+  importJobId: number | null
+): number {
+  const db = getDb();
+  const stmt = db.prepare(
+    'INSERT INTO account_activities (account_id, created_date, subject, comments, import_job_id) VALUES (?, ?, ?, ?, ?)'
+  );
+  return stmt.run(accountId, createdDate, subject, comments, importJobId).lastInsertRowid as number;
+}
+
+export function getActivitiesByAccount(accountId: number): AccountActivity[] {
+  const db = getDb();
+  return db.prepare(
+    'SELECT * FROM account_activities WHERE account_id = ? ORDER BY created_date DESC, created_at DESC'
+  ).all(accountId) as AccountActivity[];
+}
+
+export function findExistingActivity(accountId: number, createdDate: string | null, subject: string): AccountActivity | undefined {
+  const db = getDb();
+  if (createdDate) {
+    return db.prepare(
+      'SELECT * FROM account_activities WHERE account_id = ? AND created_date = ? AND subject = ?'
+    ).get(accountId, createdDate, subject) as AccountActivity | undefined;
+  }
+  return db.prepare(
+    'SELECT * FROM account_activities WHERE account_id = ? AND created_date IS NULL AND subject = ?'
+  ).get(accountId, subject) as AccountActivity | undefined;
+}
