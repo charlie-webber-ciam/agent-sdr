@@ -80,6 +80,8 @@ export default function ProcessingPage({
   // Stable refs — never trigger effect re-runs or cause stale closures
   const seenIds = useRef(new Set<number>());
   const stepCountRef = useRef(0);
+  const totalStepsRef = useRef(0);     // Tracks max total_steps seen per account
+  const seenSources = useRef(new Set<string>()); // Tracks which streams reported steps
   // Always holds the latest fetchJobData so the SSE closure never calls a stale version
   const fetchJobDataRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
@@ -346,13 +348,20 @@ export default function ProcessingPage({
         setCurrentStep(event.message);
         // Reset step counter for this new account
         stepCountRef.current = 0;
+        totalStepsRef.current = 0;
+        seenSources.current = new Set();
         setSubProgress(0);
       } else if (event.event_type === 'research_step') {
-        // Count total steps across both Auth0 (7) and Okta (8) = 15 combined.
-        // Monotonically increasing so parallel interleaving never goes backwards.
         stepCountRef.current++;
         setCurrentStep(event.message);
-        setSubProgress(Math.min(0.9, stepCountRef.current / 15));
+        // Track which streams ([Auth0] / [Okta]) have reported steps and their total_steps
+        const source = event.message?.startsWith('[Okta]') ? 'okta' : 'auth0';
+        if (!seenSources.current.has(source) && event.total_steps) {
+          seenSources.current.add(source);
+          totalStepsRef.current += event.total_steps;
+        }
+        const denominator = totalStepsRef.current || 15; // fallback to 15 if no total_steps
+        setSubProgress(Math.min(0.9, stepCountRef.current / denominator));
       } else if (event.event_type === 'categorizing') {
         setCurrentStep(event.message);
         setSubProgress(0.93);
