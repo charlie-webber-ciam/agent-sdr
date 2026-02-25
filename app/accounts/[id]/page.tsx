@@ -87,7 +87,7 @@ interface AccountDetail {
   oktaPatch: string | null;
   // Triage fields
   triageAuth0Tier: 'A' | 'B' | 'C' | null;
-  triageOktaTier: 'A' | 'B' | 'C' | null;
+  triageOktaTier: 'A' | 'B' | 'C' | 'DQ' | null;
   triageSummary: string | null;
   triageData: {
     auth0_tier_reasoning: string;
@@ -1945,23 +1945,146 @@ export default function AccountDetailPage({
           </div>
         </div>
       ) : (
-        /* Non-completed accounts: simple layout, no sidebar */
-        <div className="flex gap-4">
-          <button
-            onClick={() => router.push('/accounts')}
-            className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold"
-          >
-            Back to Accounts
-          </button>
-          <button
-            onClick={() => setShowDeleteModal(true)}
-            className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold flex items-center gap-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            Delete Account
-          </button>
+        /* Non-completed accounts: show triage data if available + action buttons */
+        <div>
+          {/* Triage Assessment (for triaged-but-not-yet-researched accounts) */}
+          {account.triagedAt && (
+            <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl p-6 mb-6 shadow-sm">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 bg-purple-600 rounded-lg text-white">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-bold text-purple-900">Triage Assessment</h3>
+                <div className="flex gap-2 ml-auto">
+                  {account.triageAuth0Tier && (
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      account.triageAuth0Tier === 'A' ? 'bg-green-100 text-green-800' :
+                      account.triageAuth0Tier === 'B' ? 'bg-blue-100 text-blue-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      Auth0: Tier {account.triageAuth0Tier}
+                    </span>
+                  )}
+                  {account.triageOktaTier && (
+                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      account.triageOktaTier === 'A' ? 'bg-green-100 text-green-800' :
+                      account.triageOktaTier === 'B' ? 'bg-blue-100 text-blue-800' :
+                      account.triageOktaTier === 'DQ' ? 'bg-red-100 text-red-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      Okta: {account.triageOktaTier === 'DQ' ? 'DQ' : `Tier ${account.triageOktaTier}`}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {account.triageSummary && (
+                <p className="text-gray-700 mb-3">{account.triageSummary}</p>
+              )}
+              {account.triageData && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  {account.triageData.estimated_arr && account.triageData.estimated_arr !== 'Unknown' && (
+                    <div>
+                      <span className="font-medium text-gray-600">Est. Revenue:</span>{' '}
+                      <span className="text-gray-800">{account.triageData.estimated_arr}</span>
+                    </div>
+                  )}
+                  {account.triageData.estimated_employees && account.triageData.estimated_employees !== 'Unknown' && (
+                    <div>
+                      <span className="font-medium text-gray-600">Est. Employees:</span>{' '}
+                      <span className="text-gray-800">{account.triageData.estimated_employees}</span>
+                    </div>
+                  )}
+                  {account.triageData.key_signals && account.triageData.key_signals.length > 0 && (
+                    <div className="md:col-span-2">
+                      <span className="font-medium text-gray-600">Key Signals:</span>{' '}
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {account.triageData.key_signals.map((signal: string, i: number) => (
+                          <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-yellow-50 text-yellow-800 border border-yellow-200">
+                            {signal}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {account.triageData.auth0_tier_reasoning && (
+                    <div>
+                      <span className="font-medium text-gray-600">Auth0 Reasoning:</span>{' '}
+                      <span className="text-gray-700">{account.triageData.auth0_tier_reasoning}</span>
+                    </div>
+                  )}
+                  {account.triageData.okta_tier_reasoning && (
+                    <div>
+                      <span className="font-medium text-gray-600">Okta Reasoning:</span>{' '}
+                      <span className="text-gray-700">{account.triageData.okta_tier_reasoning}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Process button */}
+              <div className="mt-4 pt-4 border-t border-purple-200">
+                <p className="text-sm text-purple-700 mb-3">This account has been triaged but not yet fully researched.</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleReprocess('both')}
+                    disabled={isReprocessing}
+                    className="px-5 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors disabled:bg-gray-400 text-sm"
+                  >
+                    {isReprocessing ? 'Starting...' : 'Research (Both)'}
+                  </button>
+                  <button
+                    onClick={() => handleReprocess('auth0')}
+                    disabled={isReprocessing}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 text-sm"
+                  >
+                    Auth0 Only
+                  </button>
+                  <button
+                    onClick={() => handleReprocess('okta')}
+                    disabled={isReprocessing}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:bg-gray-400 text-sm"
+                  >
+                    Okta Only
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!account.triagedAt && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-8 mb-6 text-center">
+              <p className="text-gray-600 mb-4">This account has not been researched yet.</p>
+              <div className="flex gap-2 justify-center">
+                <button
+                  onClick={() => handleReprocess('both')}
+                  disabled={isReprocessing}
+                  className="px-5 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:bg-gray-400 text-sm"
+                >
+                  {isReprocessing ? 'Starting...' : 'Start Research'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-4">
+            <button
+              onClick={() => router.push('/accounts')}
+              className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold"
+            >
+              Back to Accounts
+            </button>
+            <button
+              onClick={() => setShowDeleteModal(true)}
+              className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete Account
+            </button>
+          </div>
         </div>
       )}
       </>
