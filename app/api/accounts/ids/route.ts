@@ -7,6 +7,7 @@ export async function GET(request: Request) {
 
     const filters = {
       search: searchParams.get('search') || undefined,
+      status: searchParams.get('status') || undefined,
       tier: searchParams.get('tier') || undefined,
       oktaTier: searchParams.get('oktaTier') || undefined,
       accountOwner: searchParams.get('accountOwner') || undefined,

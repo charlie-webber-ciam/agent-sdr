@@ -30,6 +30,7 @@ interface Account {
 
 const DEFAULT_FILTERS: FilterState = {
   search: '',
+  status: '',
   tier: '',
   oktaTier: '',
   accountOwner: '',
@@ -337,6 +338,16 @@ function AccountsPageContent() {
       active.push({ key: 'oktaAccountOwner', label: 'Okta Owner', value: ownerVal });
     }
 
+    if (filters.status) {
+      const statusLabels: Record<string, string> = {
+        pending: 'Pending',
+        processing: 'Processing',
+        completed: 'Completed',
+        failed: 'Failed',
+      };
+      active.push({ key: 'status', label: 'Status', value: statusLabels[filters.status] || filters.status });
+    }
+
     if (filters.sortBy && filters.sortBy !== effectiveDefaultSortBy) {
       const sortLabels: Record<string, string> = {
         processed_at: 'Recently Processed',
@@ -357,7 +368,7 @@ function AccountsPageContent() {
   const noOwnerAccounts = accounts.filter((a) => isOkta ? !a.oktaAccountOwner : !a.auth0AccountOwner);
   const ownerFilterActive = filters.accountOwner === 'unassigned' || filters.oktaAccountOwner === 'unassigned';
   const showOwnerMode = ownerFilterActive && noOwnerAccounts.length > 0;
-  const showSelectionMode = showOwnerMode;
+  const showSelectionMode = true;
 
   const handleSelectAll = async () => {
     try {
@@ -377,7 +388,7 @@ function AccountsPageContent() {
       setSelectableCount(ids.length);
     } catch {
       // Fallback to current page selection
-      const idsToSelect = showOwnerMode ? noOwnerAccounts.map(a => a.id) : [];
+      const idsToSelect = accounts.map(a => a.id);
       setSelectedAccountIds(new Set(idsToSelect));
       setSelectableCount(idsToSelect.length);
     }
@@ -501,21 +512,19 @@ function AccountsPageContent() {
           <div className="mb-4 flex items-center justify-between">
             <div className="text-sm text-gray-600">
               Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(currentPage * ITEMS_PER_PAGE, totalAccounts)} of {totalAccounts} account{totalAccounts !== 1 ? 's' : ''}
-              {showSelectionMode && selectedAccountIds.size > 0 && (
+              {selectedAccountIds.size > 0 && (
                 <span className="ml-2 text-blue-600 font-semibold">
                   ({selectedAccountIds.size} selected)
                 </span>
               )}
             </div>
             <div className="flex items-center gap-3">
-              {showSelectionMode && (
-                <button
-                  onClick={isAllSelected ? handleClearSelection : handleSelectAll}
-                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
-                >
-                  {isAllSelected ? 'Deselect All' : 'Select All'}
-                </button>
-              )}
+              <button
+                onClick={isAllSelected ? handleClearSelection : handleSelectAll}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+              >
+                {isAllSelected ? 'Deselect All' : `Select All (${totalAccounts})`}
+              </button>
               <Link
                 href="/accounts/duplicates"
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 font-medium transition-colors text-sm"
@@ -607,21 +616,15 @@ function AccountsPageContent() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {accounts.map((account) => {
-              const isSelectable = showOwnerMode
-                ? (isOkta ? !account.oktaAccountOwner : !account.auth0AccountOwner)
-                : false;
-
-              return (
-                <AccountCard
-                  key={account.id}
-                  account={account}
-                  selectable={isSelectable}
-                  selected={selectedAccountIds.has(account.id)}
-                  onSelectionChange={handleSelectionChange}
-                />
-              );
-            })}
+            {accounts.map((account) => (
+              <AccountCard
+                key={account.id}
+                account={account}
+                selectable
+                selected={selectedAccountIds.has(account.id)}
+                onSelectionChange={handleSelectionChange}
+              />
+            ))}
           </div>
 
           {/* Pagination Controls - Bottom */}
@@ -695,9 +698,9 @@ function AccountsPageContent() {
         </>
       )}
 
-      {/* Bulk Action Bar - Owner Assignment Mode */}
-      {selectedAccountIds.size > 0 && showOwnerMode && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-blue-200 shadow-2xl">
+      {/* Bulk Action Bar */}
+      {selectedAccountIds.size > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-blue-200 shadow-2xl z-50">
           <div className="max-w-7xl mx-auto px-8 py-4">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -713,33 +716,58 @@ function AccountsPageContent() {
                   onClick={handleClearSelection}
                   className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium transition-colors"
                 >
-                  Clear Selection
+                  Clear
                 </button>
               </div>
 
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <label htmlFor="owner-input" className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                    Assign Owner:
-                  </label>
-                  <input
-                    id="owner-input"
-                    type="text"
-                    value={newOwnerName}
-                    onChange={(e) => setNewOwnerName(e.target.value)}
-                    placeholder="Enter owner name..."
-                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[250px]"
-                  />
-                </div>
-                <button
-                  onClick={handleBulkAssignOwner}
-                  disabled={isAssigningOwner || !newOwnerName.trim()}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2 whitespace-nowrap"
+                {/* Reprocess controls */}
+                <select
+                  value={reprocessMode}
+                  onChange={(e) => setReprocessMode(e.target.value as 'both' | 'auth0' | 'okta')}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                  {isAssigningOwner ? 'Assigning...' : 'Assign Owner'}
+                  <option value="both">Both</option>
+                  <option value="auth0">Auth0 Only</option>
+                  <option value="okta">Okta Only</option>
+                </select>
+                <button
+                  onClick={handleBulkRetry}
+                  disabled={isRetrying}
+                  className="px-5 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed whitespace-nowrap text-sm"
+                >
+                  {isRetrying ? 'Starting...' : `Process (${selectedAccountIds.size})`}
+                </button>
+
+                {/* Owner assignment (only in owner filter mode) */}
+                {showOwnerMode && (
+                  <>
+                    <div className="w-px h-8 bg-gray-300" />
+                    <input
+                      type="text"
+                      value={newOwnerName}
+                      onChange={(e) => setNewOwnerName(e.target.value)}
+                      placeholder="Owner name..."
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-[180px]"
+                    />
+                    <button
+                      onClick={handleBulkAssignOwner}
+                      disabled={isAssigningOwner || !newOwnerName.trim()}
+                      className="px-5 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed whitespace-nowrap text-sm"
+                    >
+                      {isAssigningOwner ? 'Assigning...' : 'Assign Owner'}
+                    </button>
+                  </>
+                )}
+
+                {/* Delete */}
+                <div className="w-px h-8 bg-gray-300" />
+                <button
+                  onClick={handleBulkDelete}
+                  disabled={isDeleting}
+                  className="px-5 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed whitespace-nowrap text-sm"
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete'}
                 </button>
               </div>
             </div>

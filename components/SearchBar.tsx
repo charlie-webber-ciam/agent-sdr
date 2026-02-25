@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 
 export interface FilterState {
   search: string;
+  status: string;            // research status filter
   tier: string;              // Auth0 tier
   oktaTier: string;          // Okta tier
   accountOwner: string;      // Auth0 account owner
@@ -54,7 +55,7 @@ export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6 shadow-sm">
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
         {/* Search */}
         <div className="md:col-span-2">
           <label htmlFor="search" className="block text-sm font-medium text-gray-600 mb-2">
@@ -68,6 +69,25 @@ export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners
             placeholder="Company name or domain..."
             className={inputClass}
           />
+        </div>
+
+        {/* Status */}
+        <div>
+          <label htmlFor="status" className="block text-sm font-medium text-gray-600 mb-2">
+            Status
+          </label>
+          <select
+            id="status"
+            value={filters.status}
+            onChange={(e) => handleFilterChange('status', e.target.value)}
+            className={selectClass}
+          >
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="processing">Processing</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+          </select>
         </div>
 
         {/* Auth0 Tier */}

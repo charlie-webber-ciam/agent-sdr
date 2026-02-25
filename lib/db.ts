@@ -683,6 +683,7 @@ export function deleteAccountsByIds(ids: number[]): number {
 // Enhanced filtering with tier, SKU, priority
 export function getAccountsWithFilters(filters: {
   search?: string;
+  status?: string;
   tier?: string | 'unassigned';
   oktaTier?: string | 'unassigned';
   accountOwner?: string;
@@ -699,6 +700,14 @@ export function getAccountsWithFilters(filters: {
     query += ' AND (company_name LIKE ? OR domain LIKE ?)';
     const searchPattern = `%${filters.search}%`;
     params.push(searchPattern, searchPattern);
+  }
+
+  if (filters.status) {
+    const validStatuses = ['pending', 'processing', 'completed', 'failed'];
+    if (validStatuses.includes(filters.status)) {
+      query += ' AND research_status = ?';
+      params.push(filters.status);
+    }
   }
 
   if (filters.tier) {
