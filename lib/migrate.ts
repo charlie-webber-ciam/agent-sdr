@@ -784,20 +784,59 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Failed to create sfdc_id index:', error);
   }
 
-  // Migrate existing CHECK constraints for scoring framework update (0-100 scale, DQ tier, pubsec patch)
-  // SQLite can't ALTER CHECK constraints, so we attempt a temp-table migration for affected columns.
-  // Application-level validation is the primary enforcement; this is best-effort for DB constraints.
+  // Migrate existing CHECK constraints for scoring framework update (0-100 scale, DQ tier, pubsec patch).
+  // SQLite CHECK constraints added via ALTER TABLE cannot be modified in place.
+  // Strategy: for each affected column, copy data to a temp column without constraints,
+  // drop the old column, add a new column with updated constraints, copy data back.
+  // This is wrapped in a transaction and try/catch so it's safe on repeated runs.
   try {
-    // Check if okta_priority_score column has the old 1-10 constraint by testing a value > 10
     const testStmt = db.prepare('SELECT sql FROM sqlite_master WHERE type=? AND name=?');
     const tableSql = (testStmt.get('table', 'accounts') as { sql: string } | undefined)?.sql || '';
 
-    if (tableSql.includes('BETWEEN 1 AND 10') || tableSql.includes("IN ('A', 'B', 'C')")) {
-      console.log('ℹ️  Detected old CHECK constraints on accounts table. Application-level validation handles 0-100 scores, DQ tier, and pubsec patch.');
-      console.log('ℹ️  For a clean schema, delete data/accounts.db and restart to recreate with updated constraints.');
+    // Only run if the old constraints are present (idempotent check)
+    const needsMigration =
+      tableSql.includes('okta_priority_score') && tableSql.includes('BETWEEN 1 AND 10') &&
+      !tableSql.includes('BETWEEN 0 AND 100');
+
+    if (needsMigration) {
+      console.log('⚙️  Migrating CHECK constraints for 0-100 scoring framework...');
+
+      // Use a transaction for safety
+      const migrate = db.transaction(() => {
+        // 1. okta_priority_score: BETWEEN 1 AND 10 → BETWEEN 0 AND 100
+        db.exec(`ALTER TABLE accounts RENAME COLUMN okta_priority_score TO _okta_priority_score_old`);
+        db.exec(`ALTER TABLE accounts ADD COLUMN okta_priority_score INTEGER CHECK(okta_priority_score BETWEEN 0 AND 100)`);
+        db.exec(`UPDATE accounts SET okta_priority_score = _okta_priority_score_old`);
+        db.exec(`ALTER TABLE accounts DROP COLUMN _okta_priority_score_old`);
+
+        // 2. okta_tier: IN ('A','B','C') → IN ('A','B','C','DQ')
+        db.exec(`ALTER TABLE accounts RENAME COLUMN okta_tier TO _okta_tier_old`);
+        db.exec(`ALTER TABLE accounts ADD COLUMN okta_tier TEXT CHECK(okta_tier IN ('A', 'B', 'C', 'DQ', NULL))`);
+        db.exec(`UPDATE accounts SET okta_tier = _okta_tier_old`);
+        db.exec(`ALTER TABLE accounts DROP COLUMN _okta_tier_old`);
+
+        // 3. okta_patch: add 'pubsec'
+        db.exec(`ALTER TABLE accounts RENAME COLUMN okta_patch TO _okta_patch_old`);
+        db.exec(`ALTER TABLE accounts ADD COLUMN okta_patch TEXT CHECK(okta_patch IN ('emerging','crp','ent','stg','pubsec', NULL))`);
+        db.exec(`UPDATE accounts SET okta_patch = _okta_patch_old`);
+        db.exec(`ALTER TABLE accounts DROP COLUMN _okta_patch_old`);
+
+        // 4. triage_okta_tier: add 'DQ'
+        db.exec(`ALTER TABLE accounts RENAME COLUMN triage_okta_tier TO _triage_okta_tier_old`);
+        db.exec(`ALTER TABLE accounts ADD COLUMN triage_okta_tier TEXT CHECK(triage_okta_tier IN ('A', 'B', 'C', 'DQ', NULL))`);
+        db.exec(`UPDATE accounts SET triage_okta_tier = _triage_okta_tier_old`);
+        db.exec(`ALTER TABLE accounts DROP COLUMN _triage_okta_tier_old`);
+      });
+
+      migrate();
+      console.log('✓ Migrated CHECK constraints for 0-100 scoring, DQ tier, and pubsec patch');
+
+      // Recreate indexes that may have been affected
+      db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_tier ON accounts(okta_tier)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_triage_okta_tier ON accounts(triage_okta_tier)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_patch ON accounts(okta_patch)');
     }
   } catch (error) {
-    // Non-critical — application-level validation is the real enforcement
-    console.error('Failed to check schema constraints:', error);
+    console.error('⚠️  CHECK constraint migration failed (non-fatal — app-level validation still enforces):', error);
   }
 }

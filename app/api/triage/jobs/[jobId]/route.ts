@@ -59,6 +59,7 @@ export async function GET(
           companyName: acc.company_name,
           domain: acc.domain,
           industry: acc.industry,
+          status: acc.research_status,
           triageAuth0Tier: acc.triage_auth0_tier,
           triageOktaTier: acc.triage_okta_tier,
           triageSummary: acc.triage_summary,
