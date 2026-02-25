@@ -3,7 +3,7 @@ import { processJob } from '@/lib/processor';
 import { PROCESSING_CONFIG } from '@/lib/config';
 import type { OktaPatch } from '@/lib/okta-categorizer';
 
-const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg'];
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg', 'pubsec'];
 
 export async function POST(request: Request) {
   try {

@@ -6,31 +6,38 @@ import { usePerspective, OktaPatch } from '@/lib/perspective-context';
 
 const PATCH_OPTIONS: { value: OktaPatch; label: string; desc: string }[] = [
   { value: 'emerging', label: 'Emerging', desc: '<300 employees' },
-  { value: 'crp', label: 'Corporate', desc: '1,250-5K employees' },
-  { value: 'ent', label: 'Enterprise', desc: 'Up to 20K employees' },
+  { value: 'crp', label: 'Corporate', desc: '300-1,250 employees' },
+  { value: 'ent', label: 'Enterprise', desc: '1,250-20K employees' },
   { value: 'stg', label: 'Strategic', desc: '20K+ employees' },
+  { value: 'pubsec', label: 'Public Sector', desc: 'Gov & public entities' },
 ];
 
-const PATCH_TIER_DEFS: Record<OktaPatch, { a: string; b: string; c: string }> = {
+const PATCH_TIER_DEFS: Record<OktaPatch, { a: string; b: string; c: string; dq?: string }> = {
   emerging: {
-    a: '$30K+ ARR, 150+ employees, SOC 2 / funding / rapid hiring triggers (~5-10%)',
-    b: '$10K-$30K ARR, 50-150 employees, moderate growth (majority)',
-    c: '<$10K ARR, <50 employees, very early stage (~20-30%)',
+    a: 'Score 75-100: $30K+ ARR, 150+ employees, SOC 2 / funding / rapid hiring triggers (~5-10%)',
+    b: 'Score 50-74: $10K-$30K ARR, 50-150 employees, moderate growth (majority)',
+    c: 'Score 25-49: <$10K ARR, <50 employees, very early stage (~20-30%)',
+    dq: 'Score 0-24: Not a fit — too early, no identity needs',
   },
   crp: {
-    a: '$150K+ ARR, 2,000+ employees, M&A / new CISO / HRIS gap triggers (~5-10%)',
-    b: '$75K-$150K ARR, 1,250-2,000 employees, no urgent catalyst (majority)',
-    c: '<$75K ARR, <1,250 employees, limited IAM complexity (~20-30%)',
+    a: 'Score 75-100: $75K+ ARR, 800+ employees, M&A / new CISO / HRIS gap triggers (~5-10%)',
+    b: 'Score 50-74: $30K-$75K ARR, 500-800 employees, no urgent catalyst (majority)',
+    c: 'Score 25-49: <$30K ARR, <500 employees, limited IAM complexity (~20-30%)',
   },
   ent: {
-    a: '$500K+ ARR, 5,000+ employees, breach / Zero Trust / AD EOL triggers (~5-10%)',
-    b: '$300K-$500K ARR, 2,000-5,000 employees, longer eval cycle (majority)',
-    c: '<$300K ARR, <2,000 employees, single-product scope (~20-30%)',
+    a: 'Score 75-100: $500K+ ARR, 5,000+ employees, breach / Zero Trust / AD EOL triggers (~5-10%)',
+    b: 'Score 50-74: $300K-$500K ARR, 2,000-5,000 employees, longer eval cycle (majority)',
+    c: 'Score 25-49: <$300K ARR, <2,000 employees, single-product scope (~20-30%)',
   },
   stg: {
-    a: '$2M+ ARR, 30,000+ employees, board mandate / regulatory triggers (~5-10%)',
-    b: '$1.5M-$2M ARR, 20K-30K employees, no board urgency (majority)',
-    c: '<$1.5M ARR, <20K employees, better in Enterprise patch (~20-30%)',
+    a: 'Score 70-100: $2M+ ARR, 30,000+ employees, board mandate / regulatory triggers (~5-10%)',
+    b: 'Score 45-69: $1.5M-$2M ARR, 20K-30K employees, no board urgency (majority)',
+    c: 'Score 25-44: <$1.5M ARR, <20K employees, better in Enterprise patch (~20-30%)',
+  },
+  pubsec: {
+    a: 'Score 70-100: $150K+ ARR, 500+ staff, active tender / Essential Eight uplift (~5-10%)',
+    b: 'Score 45-69: $75K-$150K ARR, 200-500 staff, no active procurement (majority)',
+    c: 'Score 25-44: <$75K ARR, <200 staff, basic SSO/MFA needs (~20-30%)',
   },
 };
 
@@ -448,7 +455,7 @@ export default function CategorizePage() {
                   5
                 </div>
                 <div>
-                  Calculates priority score (1-10) for outreach
+                  Calculates total score (0-100) for outreach
                 </div>
               </div>
             </div>
@@ -471,6 +478,12 @@ export default function CategorizePage() {
                     <span className="font-bold text-gray-600">C:</span>
                     <span>{PATCH_TIER_DEFS[selectedPatch].c}</span>
                   </div>
+                  {PATCH_TIER_DEFS[selectedPatch].dq && (
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-red-500">DQ:</span>
+                      <span>{PATCH_TIER_DEFS[selectedPatch].dq}</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-2 text-xs text-gray-600">

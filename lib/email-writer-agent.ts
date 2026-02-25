@@ -214,7 +214,7 @@ function prepareAccountContext(account: Account, researchContext: 'auth0' | 'okt
       parts.push(`\nOPPORTUNITY TYPE: ${account.okta_opportunity_type}`);
     }
     if (account.okta_priority_score) {
-      parts.push(`OKTA PRIORITY SCORE: ${account.okta_priority_score}/10`);
+      parts.push(`OKTA PRIORITY SCORE: ${account.okta_priority_score}/100`);
     }
     if (account.okta_current_iam_solution) {
       parts.push(`\nCURRENT IAM SOLUTION:\n${account.okta_current_iam_solution}`);

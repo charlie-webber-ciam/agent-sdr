@@ -98,10 +98,10 @@ export interface Account {
   okta_prospects: string | null; // JSON string
   okta_research_summary: string | null;
   okta_opportunity_type: 'net_new' | 'competitive_displacement' | 'expansion' | 'unknown' | null;
-  okta_priority_score: number | null;
+  okta_priority_score: number | null; // 0-100
   okta_processed_at: string | null;
   // Okta Categorization Fields
-  okta_tier: 'A' | 'B' | 'C' | null;
+  okta_tier: 'A' | 'B' | 'C' | 'DQ' | null;
   okta_estimated_annual_revenue: string | null;
   okta_estimated_user_volume: string | null;
   okta_use_cases: string | null; // JSON array
@@ -115,7 +115,7 @@ export interface Account {
   research_model: string | null;
   // Triage fields
   triage_auth0_tier: 'A' | 'B' | 'C' | null;
-  triage_okta_tier: 'A' | 'B' | 'C' | null;
+  triage_okta_tier: 'A' | 'B' | 'C' | 'DQ' | null;
   triage_summary: string | null;
   triage_data: string | null; // JSON string of TriageResult
   triaged_at: string | null;
@@ -440,7 +440,7 @@ export function updateAccountMetadata(
 export function updateOktaAccountMetadata(
   id: number,
   updates: {
-    okta_tier?: 'A' | 'B' | 'C' | null;
+    okta_tier?: 'A' | 'B' | 'C' | 'DQ' | null;
     okta_estimated_annual_revenue?: string;
     okta_estimated_user_volume?: string;
     okta_use_cases?: string; // JSON string
@@ -1349,7 +1349,7 @@ export function updateAccountMetadataSafe(
 export function updateOktaAccountMetadataSafe(
   id: number,
   updates: {
-    okta_tier?: 'A' | 'B' | 'C' | null;
+    okta_tier?: 'A' | 'B' | 'C' | 'DQ' | null;
     okta_estimated_annual_revenue?: string;
     okta_estimated_user_volume?: string;
     okta_use_cases?: string;
@@ -2041,7 +2041,7 @@ export function updateAccountTriage(
   id: number,
   triage: {
     triage_auth0_tier: 'A' | 'B' | 'C';
-    triage_okta_tier: 'A' | 'B' | 'C';
+    triage_okta_tier: 'A' | 'B' | 'C' | 'DQ';
     triage_summary: string;
     triage_data: string; // JSON string
   }

@@ -1042,7 +1042,7 @@ export default function AccountDetailPage({
                       )}
                       {account.oktaPatch && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
-                          {account.oktaPatch === 'emerging' ? 'Emerging' : account.oktaPatch === 'crp' ? 'Corporate' : account.oktaPatch === 'ent' ? 'Enterprise' : 'Strategic'}
+                          {account.oktaPatch === 'emerging' ? 'Emerging' : account.oktaPatch === 'crp' ? 'Corporate' : account.oktaPatch === 'ent' ? 'Enterprise' : account.oktaPatch === 'pubsec' ? 'Public Sector' : 'Strategic'}
                         </span>
                       )}
                     </div>
@@ -1256,7 +1256,7 @@ export default function AccountDetailPage({
                             )}
                             {account.oktaPatch && (
                               <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold border-2 border-purple-300">
-                                {account.oktaPatch === 'emerging' ? 'Emerging' : account.oktaPatch === 'crp' ? 'Corporate' : account.oktaPatch === 'ent' ? 'Enterprise' : 'Strategic'}
+                                {account.oktaPatch === 'emerging' ? 'Emerging' : account.oktaPatch === 'crp' ? 'Corporate' : account.oktaPatch === 'ent' ? 'Enterprise' : account.oktaPatch === 'pubsec' ? 'Public Sector' : 'Strategic'}
                               </span>
                             )}
                             {account.oktaPriorityScore !== null && (

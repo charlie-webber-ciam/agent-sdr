@@ -5,11 +5,15 @@ import {
   createTriageJob,
 } from '@/lib/db';
 import { processTriageJob } from '@/lib/triage-processor';
+import type { OktaPatch } from '@/lib/okta-categorizer';
+
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg', 'pubsec'];
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { jobId, concurrency, model } = body;
+    const { jobId, concurrency, model, oktaPatch: rawPatch } = body;
+    const oktaPatch: OktaPatch | undefined = rawPatch && VALID_PATCHES.includes(rawPatch) ? rawPatch : undefined;
 
     if (!jobId) {
       return NextResponse.json(
@@ -47,7 +51,8 @@ export async function POST(request: Request) {
       triageJobId,
       jobId,
       concurrency || undefined,
-      model || undefined
+      model || undefined,
+      oktaPatch
     ).catch((error) => {
       console.error(`Background triage processing failed for job ${triageJobId}:`, error);
     });

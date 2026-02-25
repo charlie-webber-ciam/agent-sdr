@@ -145,7 +145,7 @@ export default function AIAutoCategorizePanel({
               <div className="flex items-center justify-between mb-2">
                 <span className="font-semibold text-gray-700">Priority</span>
                 <span className={`text-xs font-medium text-gray-600`}>
-                  Score: {suggestions.priorityScore}/10
+                  Score: {suggestions.priorityScore}/100
                 </span>
               </div>
               <div className="text-2xl font-bold text-gray-900 mb-1">{suggestions.priorityScore}</div>

@@ -14,9 +14,10 @@ const MODELS = [
 
 const OKTA_PATCHES = [
   { value: 'emerging', label: 'Emerging', subtitle: '<300 employees' },
-  { value: 'crp', label: 'Corporate', subtitle: '1,250-5,000' },
-  { value: 'ent', label: 'Enterprise', subtitle: 'up to 20,000' },
+  { value: 'crp', label: 'Corporate', subtitle: '300-1,250' },
+  { value: 'ent', label: 'Enterprise', subtitle: '1,250-20,000' },
   { value: 'stg', label: 'Strategic', subtitle: '20,000+' },
+  { value: 'pubsec', label: 'Public Sector', subtitle: 'Gov & public entities' },
 ] as const;
 
 interface UploadResult {
@@ -46,7 +47,7 @@ export default function UploadPage() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem('sdr-okta-patch');
-      if (stored && ['emerging', 'crp', 'ent', 'stg'].includes(stored)) {
+      if (stored && ['emerging', 'crp', 'ent', 'stg', 'pubsec'].includes(stored)) {
         setOktaPatch(stored);
       }
     } catch {
@@ -428,7 +429,7 @@ export default function UploadPage() {
           {/* Okta Segment (Patch) Selector */}
           <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
             <label className="text-sm font-medium text-gray-700 mb-3 block">Okta Segment</label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
               {OKTA_PATCHES.map(p => (
                 <button
                   key={p.value}

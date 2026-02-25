@@ -18,6 +18,7 @@ const PATCH_OPTIONS: { value: OktaPatch; label: string }[] = [
   { value: 'crp', label: 'Corporate' },
   { value: 'ent', label: 'Enterprise' },
   { value: 'stg', label: 'Strategic' },
+  { value: 'pubsec', label: 'Public Sector' },
 ];
 
 const toolLinks = [

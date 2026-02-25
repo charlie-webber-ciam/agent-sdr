@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getAccount, updateOktaAccountMetadata } from '@/lib/db';
 import { analyzeOktaAccountData, OktaPatch } from '@/lib/okta-categorizer';
 
-const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg'];
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg', 'pubsec'];
 
 export async function POST(
   request: Request,

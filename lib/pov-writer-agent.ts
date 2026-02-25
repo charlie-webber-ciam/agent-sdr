@@ -175,7 +175,7 @@ function prepareAccountContext(account: Account, researchContext: 'auth0' | 'okt
     }
   } else {
     if (account.okta_opportunity_type) parts.push(`\nOPPORTUNITY TYPE: ${account.okta_opportunity_type}`);
-    if (account.okta_priority_score) parts.push(`OKTA PRIORITY SCORE: ${account.okta_priority_score}/10`);
+    if (account.okta_priority_score) parts.push(`OKTA PRIORITY SCORE: ${account.okta_priority_score}/100`);
     if (account.okta_current_iam_solution) parts.push(`\nCURRENT IAM SOLUTION:\n${account.okta_current_iam_solution}`);
     if (account.okta_workforce_info) parts.push(`\nWORKFORCE & IT COMPLEXITY:\n${account.okta_workforce_info}`);
     if (account.okta_security_incidents) parts.push(`\nSECURITY & COMPLIANCE:\n${account.okta_security_incidents}`);

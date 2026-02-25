@@ -9,7 +9,7 @@ const openai = new OpenAI({
 });
 
 // OktaPatch type — must stay in sync with perspective-context.tsx
-export type OktaPatch = 'emerging' | 'crp' | 'ent' | 'stg';
+export type OktaPatch = 'emerging' | 'crp' | 'ent' | 'stg' | 'pubsec';
 
 // Use case to Okta SKU mapping
 const USE_CASE_TO_SKU: Record<string, string[]> = {
@@ -38,6 +38,15 @@ const USE_CASE_TO_SKU: Record<string, string[]> = {
   'Zero Trust Architecture': ['Workforce Identity Cloud', 'Identity Threat Protection'],
 };
 
+// --- Scoring dimension definition ---
+
+export interface ScoringDimension {
+  name: string;
+  maxPoints: number;
+  topBandSignals: string[];   // what earns 80-100% of max
+  lowBandSignals: string[];   // what earns 0-20% of max
+}
+
 // --- Patch-specific configuration ---
 
 interface PatchConfig {
@@ -64,6 +73,153 @@ interface PatchConfig {
   decisionMakers: string[];
   topCompetitors: string[];
   priorityNotes: string;
+  // New scoring framework fields
+  scoringDimensions: ScoringDimension[];
+  tierThresholds: {
+    A: { min: number; max: number };
+    B: { min: number; max: number };
+    C: { min: number; max: number };
+    DQ?: { min: number; max: number };
+  };
+  icpDefinition: string;
+  qualifyingQuestions: string[];
+}
+
+// --- Scoring dimensions per patch ---
+
+function buildScoringDimensions(patch: OktaPatch): ScoringDimension[] {
+  const weights: Record<OktaPatch, number[]> = {
+    //                    IdInfra  TechEnv  SecComp  OrgCplx  BuySig   CompPos  StratVal
+    emerging:            [15,      15,      20,      20,      20,      5,       5],
+    crp:                 [20,      15,      20,      15,      15,      10,      5],
+    ent:                 [20,      15,      20,      15,      15,      10,      5],
+    stg:                 [20,      10,      20,      20,      15,      10,      5],
+    pubsec:              [20,      10,      25,      10,      20,      10,      5],
+  };
+
+  const w = weights[patch];
+
+  const dimensions: ScoringDimension[] = [
+    {
+      name: 'Identity Infrastructure Maturity',
+      maxPoints: w[0],
+      topBandSignals: [
+        'Legacy/fragmented IAM (on-prem AD only, no SSO/MFA)',
+        'Active IAM platform evaluation or RFP',
+        'Known pain with current vendor (outages, gaps)',
+      ],
+      lowBandSignals: [
+        'Already on modern IAM platform with high satisfaction',
+        'Recently signed multi-year IAM contract',
+      ],
+    },
+    {
+      name: 'Technology Environment',
+      maxPoints: w[1],
+      topBandSignals: [
+        'Multi-cloud or hybrid cloud environment',
+        'Active cloud migration or AD consolidation',
+        'High SaaS sprawl (100+ apps)',
+      ],
+      lowBandSignals: [
+        'Single-cloud Microsoft-only shop',
+        'Minimal SaaS adoption, on-prem only',
+      ],
+    },
+    {
+      name: 'Security & Compliance Pressure',
+      maxPoints: w[2],
+      topBandSignals: patch === 'pubsec'
+        ? [
+            'ASD Essential Eight gaps (especially MFA maturity)',
+            'ISM classification requirements, PSPF obligations',
+            'Recent audit findings or security incidents',
+            'APRA CPS 234 / CPS 230 compliance deadlines',
+          ]
+        : [
+            'Recent breach or security incident',
+            'Active compliance deadline (APRA CPS 234, Essential Eight, SOX)',
+            'Board-level security mandate or Zero Trust program',
+          ],
+      lowBandSignals: patch === 'pubsec'
+        ? [
+            'Already at Essential Eight Maturity Level 3',
+            'No compliance gaps identified',
+          ]
+        : [
+            'No compliance requirements or security pressure',
+            'Mature security posture with no gaps',
+          ],
+    },
+    {
+      name: 'Org Complexity & Growth',
+      maxPoints: w[3],
+      topBandSignals: [
+        'Recent M&A requiring identity consolidation',
+        'Rapid headcount growth (>30% YoY)',
+        'Multi-entity / subsidiary complexity',
+        'Large contractor/partner workforce',
+      ],
+      lowBandSignals: [
+        'Stable headcount, single entity',
+        'No M&A activity, simple org structure',
+      ],
+    },
+    {
+      name: 'Buying Signals & Budget',
+      maxPoints: w[4],
+      topBandSignals: patch === 'pubsec'
+        ? [
+            'Active tender or panel arrangement for IAM',
+            'MYEFO/PAES budget allocation for cyber/identity',
+            'New CISO/CIO driving vendor evaluation',
+            'Funded security uplift program',
+          ]
+        : [
+            'Active RFP or vendor evaluation',
+            'Recent significant funding or strong revenue growth',
+            'New CISO/CIO driving change',
+            'Budget allocated for identity modernisation',
+          ],
+      lowBandSignals: patch === 'pubsec'
+        ? [
+            'No current procurement activity',
+            'Budget constrained, no cyber allocation',
+          ]
+        : [
+            'No budget signals or procurement activity',
+            'Cost-cutting mode, vendor consolidation away from best-of-breed',
+          ],
+    },
+    {
+      name: 'Competitive Position',
+      maxPoints: w[5],
+      topBandSignals: [
+        'Current IAM vendor contract expiring within 12 months',
+        'Dissatisfaction with existing vendor (Entra, Ping, etc.)',
+        'Greenfield — no incumbent IAM platform',
+      ],
+      lowBandSignals: [
+        'Deeply embedded with Microsoft Entra + E5 licensing',
+        'Recently renewed with competitor on multi-year deal',
+      ],
+    },
+    {
+      name: 'Strategic Value',
+      maxPoints: w[6],
+      topBandSignals: [
+        'Marquee brand / reference account potential',
+        'Industry leader that would drive peer adoption',
+        'Existing Okta/Auth0 footprint to expand',
+      ],
+      lowBandSignals: [
+        'Low brand recognition, limited reference value',
+        'No strategic alignment',
+      ],
+    },
+  ];
+
+  return dimensions;
 }
 
 export const PATCH_CONFIGS: Record<OktaPatch, PatchConfig> = {
@@ -99,14 +255,28 @@ export const PATCH_CONFIGS: Record<OktaPatch, PatchConfig> = {
     acvRange: '$10K-$50K',
     decisionMakers: ['CTO', 'CEO', 'VP Engineering'],
     topCompetitors: ['JumpCloud', 'Microsoft Entra', 'Google Workspace'],
-    priorityNotes: 'For Emerging patch: SOC 2 timelines and first enterprise deals are the strongest triggers. Score 8+ only with active compliance deadline or Series B+ funding with rapid hiring.',
+    priorityNotes: 'For Emerging patch: SOC 2 timelines and first enterprise deals are the strongest triggers.',
+    scoringDimensions: buildScoringDimensions('emerging'),
+    tierThresholds: {
+      A: { min: 75, max: 100 },
+      B: { min: 50, max: 74 },
+      C: { min: 25, max: 49 },
+      DQ: { min: 0, max: 24 },
+    },
+    icpDefinition: 'Fast-growing ANZ startups (Series A-C) with 50-300 employees, scaling past consumer-grade auth tools, facing first compliance audit or enterprise customer SSO requirement.',
+    qualifyingQuestions: [
+      'Have you started a SOC 2 or ISO 27001 certification process?',
+      'Are enterprise customers asking for SSO/SAML support?',
+      'How are you managing employee onboarding/offboarding today?',
+      'What happens to app access when someone leaves?',
+    ],
   },
   crp: {
     label: 'Corporate',
-    headcountRange: '1,250-5,000 employees',
+    headcountRange: '300-1,250 employees',
     tierA: {
-      arrMin: '$150K',
-      employeeMin: '2,000',
+      arrMin: '$75K',
+      employeeMin: '800',
       triggers: [
         'M&A activity creating identity consolidation needs',
         'New CISO or CIO driving change',
@@ -117,27 +287,40 @@ export const PATCH_CONFIGS: Record<OktaPatch, PatchConfig> = {
         'Active RFP or vendor evaluation for IAM',
         'Growing contractor/partner workforce needing access management',
       ],
-      description: 'Mid-market company with $150K+ ARR potential, 2,000+ employees, and at least 2 near-term buying triggers. Multi-product opportunity.',
+      description: 'Mid-market company with $75K+ ARR potential, 800+ employees, and at least 2 near-term buying triggers. Multi-product opportunity.',
     },
     tierB: {
-      arrRange: '$75K-$150K',
-      employeeRange: '1,250-2,000',
+      arrRange: '$30K-$75K',
+      employeeRange: '500-800',
       description: 'Solid mid-market company with IAM needs but no urgent catalyst. Good fit for SSO + MFA bundle. 12-18 month cycle.',
     },
     tierC: {
-      arrMax: '$75K',
-      employeeMax: '1,250',
+      arrMax: '$30K',
+      employeeMax: '500',
       description: 'Smaller corporate, limited IAM complexity. Basic SSO needs. May not justify full Okta investment.',
     },
     entryProducts: ['SSO', 'MFA', 'Lifecycle Management'],
-    acvRange: '$75K-$300K',
+    acvRange: '$30K-$150K',
     decisionMakers: ['CISO', 'IT Director', 'VP IT'],
     topCompetitors: ['Microsoft Entra', 'Ping Identity', 'SailPoint'],
-    priorityNotes: 'For Corporate patch: M&A and new security leadership are the strongest triggers. Score 8+ only with active vendor evaluation or compliance deadline.',
+    priorityNotes: 'For Corporate patch: M&A and new security leadership are the strongest triggers.',
+    scoringDimensions: buildScoringDimensions('crp'),
+    tierThresholds: {
+      A: { min: 75, max: 100 },
+      B: { min: 50, max: 74 },
+      C: { min: 25, max: 49 },
+    },
+    icpDefinition: 'ANZ mid-market companies (300-1,250 employees) with growing IT complexity, typically post-M&A or mid-cloud migration, needing unified identity across SSO, lifecycle management, and basic governance.',
+    qualifyingQuestions: [
+      'How are you handling identity for acquired companies or subsidiaries?',
+      'Are you migrating off on-prem AD to cloud identity?',
+      'Who manages joiner/mover/leaver processes today?',
+      'Do you have visibility into which apps your employees access?',
+    ],
   },
   ent: {
     label: 'Enterprise',
-    headcountRange: 'up to 20,000 employees',
+    headcountRange: '1,250-20,000 employees',
     tierA: {
       arrMin: '$500K',
       employeeMin: '5,000',
@@ -167,7 +350,20 @@ export const PATCH_CONFIGS: Record<OktaPatch, PatchConfig> = {
     acvRange: '$300K-$1.5M',
     decisionMakers: ['CISO', 'CIO', 'Procurement'],
     topCompetitors: ['Microsoft Entra', 'SailPoint', 'CyberArk'],
-    priorityNotes: 'For Enterprise patch: Security incidents and Zero Trust mandates are the strongest triggers. Score 8+ only with active security initiative or competitive displacement opportunity.',
+    priorityNotes: 'For Enterprise patch: Security incidents and Zero Trust mandates are the strongest triggers.',
+    scoringDimensions: buildScoringDimensions('ent'),
+    tierThresholds: {
+      A: { min: 75, max: 100 },
+      B: { min: 50, max: 74 },
+      C: { min: 25, max: 49 },
+    },
+    icpDefinition: 'Large ANZ enterprises (1,250-20,000 employees) with multi-cloud environments, regulatory compliance pressure (APRA, Essential Eight), and need for unified identity governance, PAM, and Zero Trust architecture.',
+    qualifyingQuestions: [
+      'Where are you on your Zero Trust journey?',
+      'How are you addressing ASD Essential Eight MFA requirements?',
+      'Is AD consolidation or cloud migration on your roadmap?',
+      'How do you manage privileged access across cloud and on-prem?',
+    ],
   },
   stg: {
     label: 'Strategic',
@@ -201,7 +397,67 @@ export const PATCH_CONFIGS: Record<OktaPatch, PatchConfig> = {
     acvRange: '$1.5M-$10M+',
     decisionMakers: ['CISO', 'CIO', 'Board/Audit Committee'],
     topCompetitors: ['Microsoft Entra', 'CyberArk', 'SailPoint', 'IBM'],
-    priorityNotes: 'For Strategic patch: Board mandates and regulatory transformation are the strongest triggers. Score 8+ only with executive sponsorship and allocated budget.',
+    priorityNotes: 'For Strategic patch: Board mandates and regulatory transformation are the strongest triggers.',
+    scoringDimensions: buildScoringDimensions('stg'),
+    tierThresholds: {
+      A: { min: 70, max: 100 },
+      B: { min: 45, max: 69 },
+      C: { min: 25, max: 44 },
+    },
+    icpDefinition: 'Global enterprises with 20,000+ employees and ANZ presence, undergoing identity platform consolidation, with board-level security mandates and budget for full Okta platform (WIC + IGA + PAM + ITP).',
+    qualifyingQuestions: [
+      'Is identity consolidation on the board or audit committee agenda?',
+      'Are you migrating off legacy IAM (CA, IBM, Oracle)?',
+      'How are you managing identity across acquired entities globally?',
+      'What is your Zero Trust architecture roadmap and budget?',
+    ],
+  },
+  pubsec: {
+    label: 'Public Sector',
+    headcountRange: 'Government & public sector entities',
+    tierA: {
+      arrMin: '$150K',
+      employeeMin: '500',
+      triggers: [
+        'ASD Essential Eight maturity uplift program',
+        'ISM classification or PSPF compliance gaps',
+        'Active tender or panel arrangement for identity/cyber',
+        'MYEFO/PAES budget allocation for cyber security',
+        'Machinery of government changes creating consolidation needs',
+        'Audit findings requiring identity remediation',
+        'New CISO/CIO driving security modernisation',
+        'Legacy identity platform end-of-life (on-prem AD)',
+      ],
+      description: 'Government entity with $150K+ ARR potential, 500+ staff, and at least 2 near-term buying triggers. Compliance-driven sale with governance and MFA focus.',
+    },
+    tierB: {
+      arrRange: '$75K-$150K',
+      employeeRange: '200-500',
+      description: 'Mid-size agency or statutory authority with identity needs but no active procurement. 12-24 month cycle.',
+    },
+    tierC: {
+      arrMax: '$75K',
+      employeeMax: '200',
+      description: 'Small agency or local government entity. Limited budget, basic SSO/MFA needs. May use whole-of-government panel arrangements.',
+    },
+    entryProducts: ['SSO', 'MFA', 'Identity Governance'],
+    acvRange: '$75K-$500K',
+    decisionMakers: ['CISO/CSO', 'CIO', 'IT Security Lead', 'Procurement Officer'],
+    topCompetitors: ['Microsoft Entra', 'SailPoint', 'Ping Identity'],
+    priorityNotes: 'For Public Sector: Essential Eight maturity gaps and active tenders are the strongest triggers. Budget cycles (MYEFO/PAES) are critical timing signals.',
+    scoringDimensions: buildScoringDimensions('pubsec'),
+    tierThresholds: {
+      A: { min: 70, max: 100 },
+      B: { min: 45, max: 69 },
+      C: { min: 25, max: 44 },
+    },
+    icpDefinition: 'Australian federal, state, and local government agencies and statutory authorities requiring Essential Eight compliance uplift, ISM-aligned identity controls, and phishing-resistant MFA (FIDO2/passkeys). Procurement via panels (e.g., DTA Marketplace, state ICT panels).',
+    qualifyingQuestions: [
+      'What is your current ASD Essential Eight maturity level for MFA?',
+      'Are you on any whole-of-government identity panels or arrangements?',
+      'How are you managing identity across agency staff, contractors, and inter-agency access?',
+      'Is there a funded cyber security uplift program in the current budget cycle?',
+    ],
   },
 };
 
@@ -210,10 +466,11 @@ export const PATCH_LABELS: Record<OktaPatch, string> = {
   crp: 'Corporate',
   ent: 'Enterprise',
   stg: 'Strategic',
+  pubsec: 'Public Sector',
 };
 
 export interface OktaAISuggestions {
-  tier: 'A' | 'B' | 'C';
+  tier: 'A' | 'B' | 'C' | 'DQ';
   tierReasoning: string;
   estimatedAnnualRevenue: string;
   revenueReasoning: string;
@@ -223,7 +480,18 @@ export interface OktaAISuggestions {
   useCasesReasoning: string;
   oktaSkus: string[];
   skuReasoning: string;
-  priorityScore: number;
+  totalScore: number;                  // 0-100
+  dimensionReasoning: {
+    identityInfrastructure: string;
+    technologyEnvironment: string;
+    securityCompliance: string;
+    orgComplexity: string;
+    buyingSignals: string;
+    competitivePosition: string;
+    strategicValue: string;
+  };
+  scoreBreakdown: string;             // brief summary
+  priorityScore: number;              // kept for backward compat — set = totalScore
   priorityReasoning: string;
   patch?: OktaPatch;
   confidence: {
@@ -233,6 +501,17 @@ export interface OktaAISuggestions {
     useCases: number;
     skus: number;
   };
+}
+
+// Deterministic tier from score + thresholds
+function deriveTierFromScore(
+  score: number,
+  thresholds: PatchConfig['tierThresholds']
+): 'A' | 'B' | 'C' | 'DQ' {
+  if (score >= thresholds.A.min) return 'A';
+  if (score >= thresholds.B.min) return 'B';
+  if (thresholds.DQ && score <= thresholds.DQ.max) return 'DQ';
+  return 'C';
 }
 
 function buildOktaCategorizerPrompt(
@@ -245,11 +524,19 @@ function buildOktaCategorizerPrompt(
     ? `\n### Salesforce Opportunity History:\n${opportunityContext}\n`
     : '';
 
-  const triggersFormatted = patchConfig.tierA.triggers
-    .map(t => `       - ${t}`)
+  // Build scoring rubric table
+  const rubricRows = patchConfig.scoringDimensions
+    .map(d => `| ${d.name} | ${d.maxPoints} | ${d.topBandSignals.join('; ')} | ${d.lowBandSignals.join('; ')} |`)
     .join('\n');
 
-  return `You are an Okta Workforce Identity sales intelligence analyst. You are evaluating accounts for the **${patchConfig.label}** segment (${patchConfig.headcountRange}). Analyze the following company research data and provide structured categorization for sales prioritization.
+  // Build tier threshold text
+  const thresholdText = Object.entries(patchConfig.tierThresholds)
+    .map(([tier, { min, max }]) => `  - **Tier ${tier}**: Score ${min}-${max}`)
+    .join('\n');
+
+  return `You are an Okta Workforce Identity sales intelligence analyst. You are evaluating accounts for the **${patchConfig.label}** segment (${patchConfig.headcountRange}). Analyze the following company research data and provide a structured 0-100 score.
+
+**ICP Definition:** ${patchConfig.icpDefinition}
 
 Company: ${account.company_name}
 Industry: ${account.industry}
@@ -283,77 +570,69 @@ ${account.okta_opportunity_type || 'Not available'}
 ${oppSection}
 ---
 
+## Scoring Framework (0-100 points)
+
+Assess the account across these 7 dimensions. For each, consider where the evidence places the account on a scale from low-band (0-20% of max points) to top-band (80-100% of max points).
+
+| Dimension | Max Pts | Top-Band Signals (80-100%) | Low-Band Signals (0-20%) |
+|-----------|---------|---------------------------|-------------------------|
+${rubricRows}
+
+**Sum all dimensions for a total score out of 100.**
+
+## Tier Assignment (deterministic from score):
+${thresholdText}
+
+## Additional Context:
+- Entry products for this segment: ${patchConfig.entryProducts.join(', ')}
+- Expected ACV range: ${patchConfig.acvRange}
+- Key decision makers: ${patchConfig.decisionMakers.join(', ')}
+- Top competitors: ${patchConfig.topCompetitors.join(', ')}
+- ${patchConfig.priorityNotes}
+
 ## Your Task:
 
-Analyze this data and provide the following categorizations:
+1. Assess each of the 7 scoring dimensions based on the research data
+2. Sum to produce a **totalScore** (0-100)
+3. The tier is determined by the score thresholds above — assign accordingly
+4. Estimate annual revenue, employee count, use cases, and Okta SKUs
+5. Provide brief per-dimension reasoning (1-2 sentences each)
 
-1. **Tier (A/B/C):**
+**Use Cases** — choose from:
+${Object.keys(USE_CASE_TO_SKU).map(uc => `   - ${uc}`).join('\n')}
 
-   **IMPORTANT: Tier A is ONLY for exceptional opportunities. Most accounts should be B or C.**
-
-   - **Tier A** (Rare - only ~5-10% of accounts):
-     * ${patchConfig.tierA.description}
-     * **Minimum ${patchConfig.tierA.arrMin} USD ARR potential** — ${patchConfig.tierA.employeeMin}+ employees
-     * **Near-term buying triggers present** (must have at least 2 of these):
-${triggersFormatted}
-     * Strong Okta fit: multi-product opportunity, clear budget authority
-     * **High likelihood to purchase within 12 months**
-
-   - **Tier B** (Default - majority of accounts 60-70%):
-     * ${patchConfig.tierB.description}
-     * ${patchConfig.tierB.arrRange} ARR potential
-     * ${patchConfig.tierB.employeeRange} employees
-     * Some growth indicators but no urgent buying triggers
-     * Good technical fit but longer sales cycle
-
-   - **Tier C** (Lower priority - 20-30%):
-     * ${patchConfig.tierC.description}
-     * < ${patchConfig.tierC.arrMax} ARR potential
-     * < ${patchConfig.tierC.employeeMax} employees
-     * Limited budget or poor fit for Okta at this segment level
-     * Long sales cycle with uncertain timeline
-
-2. **Estimated Annual Revenue**: Provide a range (e.g., "$50M-$100M", "$500M+", "< $10M") based on funding, company size signals, workforce size
-
-3. **Estimated Employee Count**: How many employees/workforce members need identity management? (e.g., "500-1000", "5000+", "< 100")
-
-4. **Use Cases**: Identify which Okta use cases apply. Choose from:
-   ${Object.keys(USE_CASE_TO_SKU).map(uc => `   - ${uc}`).join('\n')}
-
-5. **Okta SKUs**: Based on use cases identified, which Okta products would fit?
-   - **Workforce Identity Cloud**: SSO, MFA, Lifecycle Management, Universal Directory, API Access Management, Device Access, Access Gateway, Workflows
-   - **Identity Governance**: Access Certifications, Access Requests, IGA, Segregation of Duties
-   - **Privileged Access**: PAM, Database PAM, Kubernetes PAM (enhanced with Axiom acquisition)
-   - **Identity Threat Protection**: ISPM, Real-time threat detection
-   - **Okta for AI Agents**: Securing and managing AI agent identities
-   Entry products for this segment: ${patchConfig.entryProducts.join(', ')}
-   Expected ACV range: ${patchConfig.acvRange}
-   Key decision makers: ${patchConfig.decisionMakers.join(', ')}
-   Top competitors: ${patchConfig.topCompetitors.join(', ')}
-
-6. **Priority Score (1-10)**: How high priority is this account for SDR outreach? **BE CONSERVATIVE - high scores should be rare.**
-   - **9-10** (Very rare - <5%): Tier A with multiple strong buying triggers, immediate opportunity
-   - **7-8** (Rare - ~10%): Tier A or strong Tier B with at least one clear buying trigger
-   - **5-6** (Most common - ~50%): Tier B accounts, moderate fit, some potential but no urgent triggers
-   - **3-4** (Common - ~30%): Tier C or weak Tier B, longer-term opportunity, limited triggers
-   - **1-2** (Reserved - ~10%): Poor fit, very small, or no clear Okta use case
-   ${patchConfig.priorityNotes}
+**Okta SKUs:**
+- **Workforce Identity Cloud**: SSO, MFA, Lifecycle Management, Universal Directory, API Access Management, Device Access, Access Gateway, Workflows
+- **Identity Governance**: Access Certifications, Access Requests, IGA, Segregation of Duties
+- **Privileged Access**: PAM, Database PAM, Kubernetes PAM (enhanced with Axiom acquisition)
+- **Identity Threat Protection**: ISPM, Real-time threat detection
+- **Okta for AI Agents**: Securing and managing AI agent identities
 
 **Response Format (JSON only):**
 \`\`\`json
 {
-  "tier": "A|B|C",
-  "tierReasoning": "For Tier A: List specific ARR potential ($XXX) AND buying triggers identified. For B/C: Explain why it doesn't meet Tier A criteria.",
+  "totalScore": 65,
+  "tier": "B",
+  "tierReasoning": "Score 65/100 maps to Tier B. Moderate IAM needs without urgent triggers.",
+  "dimensionReasoning": {
+    "identityInfrastructure": "Brief reasoning for this dimension",
+    "technologyEnvironment": "Brief reasoning",
+    "securityCompliance": "Brief reasoning",
+    "orgComplexity": "Brief reasoning",
+    "buyingSignals": "Brief reasoning",
+    "competitivePosition": "Brief reasoning",
+    "strategicValue": "Brief reasoning"
+  },
+  "scoreBreakdown": "One-sentence summary of the strongest and weakest dimensions",
   "estimatedAnnualRevenue": "$X-$Y",
   "revenueReasoning": "Brief explanation",
   "estimatedEmployeeCount": "X-Y employees",
   "employeeCountReasoning": "Brief explanation",
-  "useCases": ["UseCase1", "UseCase2", ...],
+  "useCases": ["UseCase1", "UseCase2"],
   "useCasesReasoning": "Brief explanation",
-  "oktaSkus": ["Workforce Identity Cloud", "Identity Governance", "Privileged Access", "Identity Threat Protection", "Okta for AI Agents"],
+  "oktaSkus": ["Workforce Identity Cloud"],
   "skuReasoning": "Brief explanation",
-  "priorityScore": 5,
-  "priorityReasoning": "Justify score based on buying triggers, ARR potential, and timeline. High scores (8+) require specific evidence.",
+  "priorityReasoning": "Brief summary of why this score is appropriate",
   "confidence": {
     "tier": 0.9,
     "revenue": 0.7,
@@ -365,11 +644,12 @@ ${triggersFormatted}
 \`\`\`
 
 **CRITICAL INSTRUCTIONS:**
-- Default to Tier B unless strong evidence supports A or C
-- Only assign Tier A if you can identify ${patchConfig.tierA.arrMin}+ ARR potential AND at least 2 specific buying triggers
-- Be conservative with priority scores - most should be 4-6
-- In tierReasoning, explicitly state the buying triggers if Tier A, or why it falls short if B/C
-- Consider M&A activity, compliance mandates, and Zero Trust initiatives as strong indicators
+- Score conservatively — most accounts should land 40-65 (Tier B range)
+- Top-band scores (75+) require multiple strong signals backed by evidence
+- Provide totalScore as an integer 0-100
+- The tier MUST match the score thresholds — do not override
+- In dimensionReasoning, cite specific evidence from the research data
+- Default to moderate scores when evidence is lacking
 
 Provide ONLY the JSON response, no additional text.`;
 }
@@ -391,7 +671,7 @@ export async function analyzeOktaAccountData(
       messages: [
         {
           role: 'system',
-          content: `You are an Okta Workforce Identity sales intelligence analyst evaluating accounts for the ${patchConfig.label} segment (${patchConfig.headcountRange}). Be highly selective with Tier A assignments - they require ${patchConfig.tierA.arrMin}+ ARR potential AND multiple buying triggers. Most accounts should be Tier B or C. Respond with valid JSON only.`,
+          content: `You are an Okta Workforce Identity sales intelligence analyst evaluating accounts for the ${patchConfig.label} segment (${patchConfig.headcountRange}). Score accounts 0-100 across 7 dimensions. Be conservative — most accounts should score 40-65. Respond with valid JSON only.`,
         },
         {
           role: 'user',
@@ -409,13 +689,41 @@ export async function analyzeOktaAccountData(
 
     const suggestions = JSON.parse(content) as OktaAISuggestions;
 
-    // Validate and ensure all fields are present
-    if (!suggestions.tier || !['A', 'B', 'C'].includes(suggestions.tier)) {
-      suggestions.tier = 'B'; // Default to B if invalid
+    // Validate totalScore
+    if (typeof suggestions.totalScore !== 'number' || suggestions.totalScore < 0 || suggestions.totalScore > 100) {
+      suggestions.totalScore = 50; // Default to 50 if invalid
+    }
+    suggestions.totalScore = Math.round(suggestions.totalScore);
+
+    // Deterministic tier from score — override AI's tier if it doesn't match
+    const derivedTier = deriveTierFromScore(suggestions.totalScore, patchConfig.tierThresholds);
+    if (suggestions.tier !== derivedTier) {
+      suggestions.tier = derivedTier;
     }
 
-    if (!suggestions.priorityScore || suggestions.priorityScore < 1 || suggestions.priorityScore > 10) {
-      suggestions.priorityScore = 5; // Default to 5 if invalid
+    // Validate tier
+    if (!suggestions.tier || !['A', 'B', 'C', 'DQ'].includes(suggestions.tier)) {
+      suggestions.tier = derivedTier;
+    }
+
+    // Set priorityScore = totalScore for backward compatibility
+    suggestions.priorityScore = suggestions.totalScore;
+
+    // Ensure dimensionReasoning exists
+    if (!suggestions.dimensionReasoning) {
+      suggestions.dimensionReasoning = {
+        identityInfrastructure: 'Not assessed',
+        technologyEnvironment: 'Not assessed',
+        securityCompliance: 'Not assessed',
+        orgComplexity: 'Not assessed',
+        buyingSignals: 'Not assessed',
+        competitivePosition: 'Not assessed',
+        strategicValue: 'Not assessed',
+      };
+    }
+
+    if (!suggestions.scoreBreakdown) {
+      suggestions.scoreBreakdown = `Total score: ${suggestions.totalScore}/100`;
     }
 
     // Tag with the patch used (set at call site, not by LLM)
@@ -436,7 +744,18 @@ export async function analyzeOktaAccountData(
       useCasesReasoning: 'Error during analysis',
       oktaSkus: ['Workforce Identity Cloud'],
       skuReasoning: 'Defaulted to Workforce Identity Cloud',
-      priorityScore: 5,
+      totalScore: 50,
+      dimensionReasoning: {
+        identityInfrastructure: 'Error during analysis',
+        technologyEnvironment: 'Error during analysis',
+        securityCompliance: 'Error during analysis',
+        orgComplexity: 'Error during analysis',
+        buyingSignals: 'Error during analysis',
+        competitivePosition: 'Error during analysis',
+        strategicValue: 'Error during analysis',
+      },
+      scoreBreakdown: 'Error during analysis — default score 50/100',
+      priorityScore: 50,
       priorityReasoning: 'Default priority due to analysis error',
       patch: resolvedPatch,
       confidence: {

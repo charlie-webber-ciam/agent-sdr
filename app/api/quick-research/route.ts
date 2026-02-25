@@ -16,7 +16,7 @@ import { researchCompanyDual } from '@/lib/dual-researcher';
 import { analyzeAccountData } from '@/lib/categorizer';
 import { analyzeOktaAccountData, OktaPatch } from '@/lib/okta-categorizer';
 
-const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg'];
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg', 'pubsec'];
 
 export async function POST(request: NextRequest) {
   try {

@@ -18,7 +18,7 @@ interface AccountCardProps {
     auth0Skus?: string[];
     priorityScore?: number | null;
     auth0AccountOwner?: string | null;
-    oktaTier?: 'A' | 'B' | 'C' | null;
+    oktaTier?: 'A' | 'B' | 'C' | 'DQ' | null;
     oktaSkus?: string[];
     oktaPriorityScore?: number | null;
     oktaAccountOwner?: string | null;
@@ -103,6 +103,7 @@ function AccountCardInner({
 
   const tierBorder = displayTier === 'A' ? 'border-l-green-500' :
                      displayTier === 'B' ? 'border-l-blue-500' :
+                     displayTier === 'DQ' ? 'border-l-red-400' :
                      displayTier === 'C' ? 'border-l-gray-500' : 'border-l-transparent';
 
   return (
@@ -149,9 +150,10 @@ function AccountCardInner({
               <span className={`badge ${
                 displayTier === 'A' ? 'tier-a' :
                 displayTier === 'B' ? 'tier-b' :
+                displayTier === 'DQ' ? 'tier-c' :
                 'tier-c'
               }`}>
-                Tier {displayTier}
+                {displayTier === 'DQ' ? 'DQ' : `Tier ${displayTier}`}
               </span>
             )}
             {displaySkus && displaySkus.map(sku => (
@@ -159,9 +161,9 @@ function AccountCardInner({
                 {sku}
               </span>
             ))}
-            {displayPriority !== null && displayPriority !== undefined && displayPriority >= 8 && (
+            {displayPriority !== null && displayPriority !== undefined && displayPriority >= 75 && (
               <span className="badge priority-high">
-                P{displayPriority}
+                {displayPriority}/100
               </span>
             )}
           </div>

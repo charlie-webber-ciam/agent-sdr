@@ -16,6 +16,7 @@ import {
 } from './db';
 import { triageCompany, TriageResult } from './triage-agent';
 import { PROCESSING_CONFIG } from './config';
+import type { OktaPatch } from './okta-categorizer';
 
 const activeJobs = new Set<number>();
 
@@ -33,7 +34,8 @@ export async function processTriageJob(
   jobId: number,
   processingJobId: number,
   concurrency: number = Math.min(PROCESSING_CONFIG.concurrency, 10),
-  model?: string
+  model?: string,
+  oktaPatch?: OktaPatch
 ): Promise<void> {
   if (activeJobs.has(jobId)) {
     console.log(`Triage job ${jobId} is already being processed`);
@@ -111,6 +113,7 @@ export async function processTriageJob(
                 company_name: account.company_name,
                 domain: account.domain,
                 industry: account.industry,
+                oktaPatch,
               },
               model
             );

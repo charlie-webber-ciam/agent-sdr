@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 export type Perspective = 'auth0' | 'okta';
-export type OktaPatch = 'emerging' | 'crp' | 'ent' | 'stg';
+export type OktaPatch = 'emerging' | 'crp' | 'ent' | 'stg' | 'pubsec';
 
 interface PerspectiveContextValue {
   perspective: Perspective;
@@ -12,7 +12,7 @@ interface PerspectiveContextValue {
   setOktaPatch: (p: OktaPatch) => void;
 }
 
-const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg'];
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg', 'pubsec'];
 
 const PerspectiveContext = createContext<PerspectiveContextValue>({
   perspective: 'auth0',

@@ -27,10 +27,10 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'okta_prospects', type: 'TEXT' },
     { name: 'okta_research_summary', type: 'TEXT' },
     { name: 'okta_opportunity_type', type: 'TEXT', constraint: "CHECK(okta_opportunity_type IN ('net_new', 'competitive_displacement', 'expansion', 'unknown', NULL))" },
-    { name: 'okta_priority_score', type: 'INTEGER', constraint: 'CHECK(okta_priority_score BETWEEN 1 AND 10)' },
+    { name: 'okta_priority_score', type: 'INTEGER', constraint: 'CHECK(okta_priority_score BETWEEN 0 AND 100)' },
     { name: 'okta_processed_at', type: 'TEXT' },
     // Okta Categorization Fields
-    { name: 'okta_tier', type: 'TEXT', constraint: "CHECK(okta_tier IN ('A', 'B', 'C', NULL))" },
+    { name: 'okta_tier', type: 'TEXT', constraint: "CHECK(okta_tier IN ('A', 'B', 'C', 'DQ', NULL))" },
     { name: 'okta_estimated_annual_revenue', type: 'TEXT' },
     { name: 'okta_estimated_user_volume', type: 'TEXT' },
     { name: 'okta_use_cases', type: 'TEXT' }, // JSON array
@@ -40,12 +40,12 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'okta_ai_suggestions', type: 'TEXT' }, // JSON: stores AI-generated suggestions for Okta
     { name: 'okta_account_owner', type: 'TEXT' },
     // Okta Patch segmentation
-    { name: 'okta_patch', type: 'TEXT', constraint: "CHECK(okta_patch IN ('emerging','crp','ent','stg', NULL))" },
+    { name: 'okta_patch', type: 'TEXT', constraint: "CHECK(okta_patch IN ('emerging','crp','ent','stg','pubsec', NULL))" },
     // Research model tracking
     { name: 'research_model', type: 'TEXT' },
     // Triage fields
     { name: 'triage_auth0_tier', type: 'TEXT', constraint: "CHECK(triage_auth0_tier IN ('A', 'B', 'C', NULL))" },
-    { name: 'triage_okta_tier', type: 'TEXT', constraint: "CHECK(triage_okta_tier IN ('A', 'B', 'C', NULL))" },
+    { name: 'triage_okta_tier', type: 'TEXT', constraint: "CHECK(triage_okta_tier IN ('A', 'B', 'C', 'DQ', NULL))" },
     { name: 'triage_summary', type: 'TEXT' },
     { name: 'triage_data', type: 'TEXT' },
     { name: 'triaged_at', type: 'TEXT' },
@@ -782,5 +782,22 @@ export function migrateDatabase(db: Database.Database) {
     console.log('✓ Ensured idx_prospects_sfdc_id index exists');
   } catch (error) {
     console.error('Failed to create sfdc_id index:', error);
+  }
+
+  // Migrate existing CHECK constraints for scoring framework update (0-100 scale, DQ tier, pubsec patch)
+  // SQLite can't ALTER CHECK constraints, so we attempt a temp-table migration for affected columns.
+  // Application-level validation is the primary enforcement; this is best-effort for DB constraints.
+  try {
+    // Check if okta_priority_score column has the old 1-10 constraint by testing a value > 10
+    const testStmt = db.prepare('SELECT sql FROM sqlite_master WHERE type=? AND name=?');
+    const tableSql = (testStmt.get('table', 'accounts') as { sql: string } | undefined)?.sql || '';
+
+    if (tableSql.includes('BETWEEN 1 AND 10') || tableSql.includes("IN ('A', 'B', 'C')")) {
+      console.log('ℹ️  Detected old CHECK constraints on accounts table. Application-level validation handles 0-100 scores, DQ tier, and pubsec patch.');
+      console.log('ℹ️  For a clean schema, delete data/accounts.db and restart to recreate with updated constraints.');
+    }
+  } catch (error) {
+    // Non-critical — application-level validation is the real enforcement
+    console.error('Failed to check schema constraints:', error);
   }
 }

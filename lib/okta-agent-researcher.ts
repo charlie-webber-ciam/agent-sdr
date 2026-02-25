@@ -28,7 +28,7 @@ export interface ResearchResult {
   prospects: string; // JSON string
   research_summary: string;
   opportunity_type: 'net_new' | 'competitive_displacement' | 'expansion' | 'unknown';
-  priority_score: number; // 1-10 based on trigger signals
+  priority_score: number; // 0-100 based on trigger signals
 }
 
 export interface CompanyInfo {
@@ -82,18 +82,30 @@ function validateCompanyInput(company: CompanyInfo): void {
 
 function buildSegmentContext(patch: OktaPatch): string {
   const cfg = PATCH_CONFIGS[patch];
+
+  // Sort scoring dimensions by weight descending
+  const sortedDimensions = [...cfg.scoringDimensions].sort((a, b) => b.maxPoints - a.maxPoints);
+  const dimensionText = sortedDimensions
+    .map(d => `  • ${d.name} (${d.maxPoints}pts) — top signals: ${d.topBandSignals.slice(0, 2).join('; ')}`)
+    .join('\n');
+
   return `
 **SEGMENT CONTEXT — ${cfg.label} Patch (${cfg.headcountRange}):**
 - Entry products: ${cfg.entryProducts.join(', ')}
 - ACV range: ${cfg.acvRange}
 - Key decision makers to prioritize: ${cfg.decisionMakers.join(', ')}
 - Top competitors to check for: ${cfg.topCompetitors.join(', ')}
+- ICP: ${cfg.icpDefinition}
+
+**Scoring Dimensions (by weight):**
+${dimensionText}
+
 - Tier A buying triggers to look for:
 ${cfg.tierA.triggers.map(t => `  • ${t}`).join('\n')}
 - Tier A thresholds: ${cfg.tierA.arrMin}+ ARR, ${cfg.tierA.employeeMin}+ employees
 - ${cfg.priorityNotes}
 
-Calibrate your research depth and focus to this segment. For example, for Emerging companies focus on startup-specific signals (funding rounds, SOC 2 timelines, first enterprise deals). For Strategic companies focus on board-level mandates, global platform consolidation, and legacy IAM migration.`;
+Calibrate your research depth and focus to this segment. For example, for Emerging companies focus on startup-specific signals (funding rounds, SOC 2 timelines, first enterprise deals). For Strategic companies focus on board-level mandates, global platform consolidation, and legacy IAM migration. For Public Sector focus on Essential Eight maturity, ISM/PSPF compliance, and government procurement cycles (MYEFO/PAES).`;
 }
 
 // ─── Shared Agent Instructions ─────────────────────────────────────────────────
@@ -502,7 +514,7 @@ export async function researchCompany(company: CompanyInfo, model?: string, oppo
   // Create specialist agents with segment-aware instructions
   const agentModel = model || 'gpt-5.2';
 
-  const iamInstructions = `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the IAM Discovery specialist. Your sole focus is identifying the target company's current identity and access management infrastructure, tools, vendors, and maturity.${opportunityContext ? `\n\n**HISTORICAL OPPORTUNITY CONTEXT:**\n${opportunityContext}\n\nUse this context to inform your research. Do not repeat this information verbatim — use it to guide your research focus and identify patterns.` : ''}`;
+  const iamInstructions = `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the IAM Discovery specialist. Your sole focus is identifying the target company's current identity and access management infrastructure, tools, vendors, and maturity.\n\n**Scoring note:** Your findings inform **Identity Infrastructure Maturity** scoring — note IAM maturity level, vendor, gaps, and any active platform evaluations.${opportunityContext ? `\n\n**HISTORICAL OPPORTUNITY CONTEXT:**\n${opportunityContext}\n\nUse this context to inform your research. Do not repeat this information verbatim — use it to guide your research focus and identify patterns.` : ''}`;
 
   const iamAgent = new Agent({
     model: agentModel,
@@ -513,31 +525,31 @@ export async function researchCompany(company: CompanyInfo, model?: string, oppo
   const workforceAgent = new Agent({
     model: agentModel,
     name: 'Okta Workforce Intelligence Agent',
-    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Workforce Intelligence specialist. Your sole focus is understanding the company's workforce size, IT complexity, organisational structure, and operational footprint — all of which indicate IAM needs and scale.`,
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Workforce Intelligence specialist. Your sole focus is understanding the company's workforce size, IT complexity, organisational structure, and operational footprint — all of which indicate IAM needs and scale.\n\n**Scoring note:** Your findings inform **Org Complexity & Growth** scoring — note headcount trajectory, M&A activity, multi-entity complexity, and contractor workforce size.`,
     tools: [webSearchTool()],
   });
   const securityAgent = new Agent({
     model: agentModel,
     name: 'Okta Security & Compliance Agent',
-    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Security & Compliance specialist. Your sole focus is identifying security incidents, compliance posture, Zero Trust maturity, and regulatory requirements that create urgency for Okta adoption.`,
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Security & Compliance specialist. Your sole focus is identifying security incidents, compliance posture, Zero Trust maturity, and regulatory requirements that create urgency for Okta adoption.\n\n**Scoring note:** Your findings inform **Security & Compliance Pressure** scoring — note ASD Essential Eight maturity, APRA CPS 234, audit findings, breach history. For Public Sector: ISM classification, PSPF requirements.`,
     tools: [webSearchTool()],
   });
   const newsAgent = new Agent({
     model: agentModel,
     name: 'Okta News & Funding Agent',
-    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the News & Funding specialist. Your sole focus is identifying recent company news, funding events, M&A activity, leadership changes, and strategic initiatives that create identity-related opportunities.`,
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the News & Funding specialist. Your sole focus is identifying recent company news, funding events, M&A activity, leadership changes, and strategic initiatives that create identity-related opportunities.\n\n**Scoring note:** Your findings inform **Buying Signals & Budget** scoring — note funding rounds, new CISO/CIO appointments, vendor evaluations, budget allocations, and procurement activity.`,
     tools: [webSearchTool()],
   });
   const techAgent = new Agent({
     model: agentModel,
     name: 'Okta Tech Transformation Agent',
-    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Technology Transformation specialist. Your sole focus is identifying cloud migration, IT modernisation, Zero Trust implementation, and digital transformation initiatives that indicate readiness for modern identity infrastructure.`,
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Technology Transformation specialist. Your sole focus is identifying cloud migration, IT modernisation, Zero Trust implementation, and digital transformation initiatives that indicate readiness for modern identity infrastructure.\n\n**Scoring note:** Your findings inform **Technology Environment** scoring — note cloud strategy, AD migration, SaaS breadth, on-prem vs cloud split.`,
     tools: [webSearchTool()],
   });
   const ecosystemAgent = new Agent({
     model: agentModel,
     name: 'Okta Ecosystem Check Agent',
-    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Okta Ecosystem specialist. Your sole focus is determining whether the target company has any existing relationship with Okta, Auth0, or the Okta partner/integration ecosystem — to classify the opportunity as net-new, competitive displacement, or expansion.`,
+    instructions: `${effectiveBaseInstructions}\n\n**Your Specialisation:** You are the Okta Ecosystem specialist. Your sole focus is determining whether the target company has any existing relationship with Okta, Auth0, or the Okta partner/integration ecosystem — to classify the opportunity as net-new, competitive displacement, or expansion.\n\n**Scoring note:** Your findings inform **Competitive Position** and **Strategic Value** scoring — note current IAM vendor, contract expiry, whether Okta is on approved panel, and reference account potential.`,
     tools: [webSearchTool()],
   });
   const prospectsAgent = new Agent({
@@ -817,14 +829,14 @@ ${ecosystemResult.finalOutput || 'No information found'}
 
 3. At the very end of your response, on separate lines, provide:
    OPPORTUNITY_TYPE: [net_new|competitive_displacement|expansion|unknown]
-   PRIORITY_SCORE: [1-10]
+   PRIORITY_SCORE: [0-100]
 
-   Score criteria:
-   - 9-10: Multiple strong triggers (M&A, security incident, compliance mandate, leadership change, existing Okta footprint to expand)
-   - 7-8: Clear pain points and timing signals (cloud migration, legacy AD, compliance gaps)
-   - 5-6: Moderate opportunity (general modernisation, some indicators)
-   - 3-4: Low urgency (stable environment, limited triggers)
-   - 1-2: Poor fit or insufficient information
+   Score criteria (0-100):
+   - 75-100: Multiple strong triggers (M&A, security incident, compliance mandate, leadership change, existing Okta footprint to expand)
+   - 50-74: Clear pain points and timing signals (cloud migration, legacy AD, compliance gaps)
+   - 25-49: Moderate opportunity (general modernisation, some indicators)
+   - 1-24: Low urgency or poor fit
+   - 0: No information or completely irrelevant
 
 **Return the summary in MARKDOWN format with:**
 - Use **bold** for key insights and pain points
@@ -878,7 +890,7 @@ ${ecosystemResult.finalOutput || 'No information found'}
     // ─── Parse Opportunity Type and Priority Score from Summary ─────────────────
 
     let opportunityType: ResearchResult['opportunity_type'] = 'unknown';
-    let priorityScore = 5;
+    let priorityScore = 50;
 
     const summaryOutput = summaryResult.finalOutput || '';
 
@@ -889,7 +901,7 @@ ${ecosystemResult.finalOutput || 'No information found'}
 
     const scoreMatch = summaryOutput.match(/PRIORITY_SCORE:\s*(\d+)/i);
     if (scoreMatch) {
-      priorityScore = Math.min(10, Math.max(1, parseInt(scoreMatch[1], 10)));
+      priorityScore = Math.min(100, Math.max(0, parseInt(scoreMatch[1], 10)));
     }
 
     // Clean the summary output by removing the classification lines
@@ -898,7 +910,7 @@ ${ecosystemResult.finalOutput || 'No information found'}
       .replace(/PRIORITY_SCORE:\s*.*/gi, '')
       .trim();
 
-    console.log(`[Okta SDR] Research complete for ${company.company_name}. Opportunity: ${opportunityType}, Priority: ${priorityScore}/10`);
+    console.log(`[Okta SDR] Research complete for ${company.company_name}. Opportunity: ${opportunityType}, Priority: ${priorityScore}/100`);
 
     return {
       current_iam_solution: iamResult.finalOutput || 'No information found',

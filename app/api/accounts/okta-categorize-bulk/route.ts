@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import type { OktaPatch } from '@/lib/okta-categorizer';
 
-const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg'];
+const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg', 'pubsec'];
 
 /**
  * POST /api/accounts/okta-categorize-bulk
