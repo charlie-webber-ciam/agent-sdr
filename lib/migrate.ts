@@ -151,6 +151,14 @@ export function migrateDatabase(db: Database.Database) {
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_triage_jobs_status ON triage_jobs(status)');
     console.log('✓ Ensured triage_jobs table exists');
+
+    // Add processing_job_id column if missing
+    try {
+      db.exec('ALTER TABLE triage_jobs ADD COLUMN processing_job_id INTEGER');
+      console.log('✓ Added processing_job_id to triage_jobs');
+    } catch {
+      // Column already exists
+    }
   } catch (error) {
     console.error('Failed to create triage_jobs table:', error);
   }
@@ -793,10 +801,31 @@ export function migrateDatabase(db: Database.Database) {
     const testStmt = db.prepare('SELECT sql FROM sqlite_master WHERE type=? AND name=?');
     const tableSql = (testStmt.get('table', 'accounts') as { sql: string } | undefined)?.sql || '';
 
-    // Only run if the old constraints are present (idempotent check)
-    const needsMigration =
-      tableSql.includes('okta_priority_score') && tableSql.includes('BETWEEN 1 AND 10') &&
-      !tableSql.includes('BETWEEN 0 AND 100');
+    // Test if the old constraint is still active by trying a value > 10
+    let needsMigration = false;
+    try {
+      // Create a temp row, try setting okta_priority_score = 50 — if it fails, old constraint is active
+      const testId = db.prepare("SELECT id FROM accounts LIMIT 1").get() as { id: number } | undefined;
+      if (testId) {
+        const currentVal = (db.prepare("SELECT okta_priority_score FROM accounts WHERE id = ?").get(testId.id) as any)?.okta_priority_score;
+        try {
+          db.prepare("UPDATE accounts SET okta_priority_score = 50 WHERE id = ?").run(testId.id);
+          // Restore original value
+          db.prepare("UPDATE accounts SET okta_priority_score = ? WHERE id = ?").run(currentVal, testId.id);
+          needsMigration = false; // Value 50 was accepted, constraint is already updated
+        } catch {
+          needsMigration = true; // CHECK constraint rejected 50
+          // Restore original value just in case
+          try { db.prepare("UPDATE accounts SET okta_priority_score = ? WHERE id = ?").run(currentVal, testId.id); } catch {}
+        }
+      } else {
+        // No accounts yet — check table SQL heuristic
+        needsMigration = tableSql.includes('BETWEEN 1 AND 10') && !tableSql.includes('BETWEEN 0 AND 100');
+      }
+    } catch {
+      // Fallback to SQL text heuristic
+      needsMigration = tableSql.includes('BETWEEN 1 AND 10') && !tableSql.includes('BETWEEN 0 AND 100');
+    }
 
     if (needsMigration) {
       console.log('⚙️  Migrating CHECK constraints for 0-100 scoring framework...');

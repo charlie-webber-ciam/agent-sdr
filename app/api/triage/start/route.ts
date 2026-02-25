@@ -43,7 +43,8 @@ export async function POST(request: Request) {
     // Create a triage job
     const triageJobId = createTriageJob(
       processingJob.filename,
-      accounts.length
+      accounts.length,
+      jobId
     );
 
     // Start processing in the background

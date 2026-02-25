@@ -155,6 +155,7 @@ export interface CategorizationJob {
 export interface TriageJob {
   id: number;
   filename: string;
+  processing_job_id: number | null;
   total_accounts: number;
   processed_count: number;
   failed_count: number;
@@ -1987,13 +1988,13 @@ export function getAccountsForReprocessing(filters: {
 
 // Triage job operations
 
-export function createTriageJob(filename: string, totalAccounts: number): number {
+export function createTriageJob(filename: string, totalAccounts: number, processingJobId?: number): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO triage_jobs (filename, total_accounts)
-    VALUES (?, ?)
+    INSERT INTO triage_jobs (filename, total_accounts, processing_job_id)
+    VALUES (?, ?, ?)
   `);
-  const result = stmt.run(filename, totalAccounts);
+  const result = stmt.run(filename, totalAccounts, processingJobId ?? null);
   return result.lastInsertRowid as number;
 }
 

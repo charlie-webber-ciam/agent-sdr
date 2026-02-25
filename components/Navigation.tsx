@@ -11,6 +11,7 @@ const primaryLinks = [
   { href: '/accounts', label: 'Accounts' },
   { href: '/prospects', label: 'Prospects' },
   { href: '/opportunities', label: 'Opportunities' },
+  { href: '/triage', label: 'Triage' },
 ];
 
 const PATCH_OPTIONS: { value: OktaPatch; label: string }[] = [
