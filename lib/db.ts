@@ -12,33 +12,48 @@ if (!existsSync(dataDir)) {
 
 const DB_PATH = join(dataDir, 'accounts.db');
 
-let db: Database.Database | null = null;
+// Bump this version whenever migrations change to force re-run in dev mode
+const MIGRATION_VERSION = 2;
+
+// Use globalThis to survive HMR in Next.js dev mode
+const globalDb = globalThis as unknown as {
+  __sdr_db?: Database.Database;
+  __sdr_db_migration_version?: number;
+};
 
 export function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+  const needsMigrationRerun = globalDb.__sdr_db_migration_version !== MIGRATION_VERSION;
+
+  if (!globalDb.__sdr_db) {
+    globalDb.__sdr_db = new Database(DB_PATH);
+    globalDb.__sdr_db.pragma('journal_mode = WAL');
+    globalDb.__sdr_db.pragma('foreign_keys = ON');
 
     // Initialize schema
     const schema = readFileSync(join(process.cwd(), 'lib', 'schema.sql'), 'utf-8');
-    db.exec(schema);
+    globalDb.__sdr_db.exec(schema);
 
     // Initialize employee count schema
     const employeeCountSchema = readFileSync(join(process.cwd(), 'lib', 'employee-count-schema.sql'), 'utf-8');
-    db.exec(employeeCountSchema);
+    globalDb.__sdr_db.exec(employeeCountSchema);
 
     // Run migrations to add new columns
-    migrateDatabase(db);
+    migrateDatabase(globalDb.__sdr_db);
+    globalDb.__sdr_db_migration_version = MIGRATION_VERSION;
 
     // Reset any accounts stuck in 'processing' from a previous server crash
-    const resetCount = resetStuckProcessingAccounts(db);
+    const resetCount = resetStuckProcessingAccounts(globalDb.__sdr_db);
     if (resetCount > 0) {
       console.log(`✓ Reset ${resetCount} stuck 'processing' account(s) to 'pending'`);
     }
+  } else if (needsMigrationRerun) {
+    // Migration version changed (code was updated via HMR) — re-run migrations
+    console.log(`⚙️  Migration version changed (${globalDb.__sdr_db_migration_version} → ${MIGRATION_VERSION}), re-running migrations...`);
+    migrateDatabase(globalDb.__sdr_db);
+    globalDb.__sdr_db_migration_version = MIGRATION_VERSION;
   }
 
-  return db;
+  return globalDb.__sdr_db;
 }
 
 /**

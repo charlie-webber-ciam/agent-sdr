@@ -794,78 +794,58 @@ export function migrateDatabase(db: Database.Database) {
 
   // Migrate existing CHECK constraints for scoring framework update (0-100 scale, DQ tier, pubsec patch).
   // SQLite CHECK constraints added via ALTER TABLE cannot be modified in place.
-  // Strategy: for each affected column, copy data to a temp column without constraints,
-  // drop the old column, add a new column with updated constraints, copy data back.
-  // This is wrapped in a transaction and try/catch so it's safe on repeated runs.
-  try {
-    const testStmt = db.prepare('SELECT sql FROM sqlite_master WHERE type=? AND name=?');
-    const tableSql = (testStmt.get('table', 'accounts') as { sql: string } | undefined)?.sql || '';
+  // Strategy: recreate each column without constraints (no CHECK at all — validation is at app level).
+  // Each column migration is independent so partial failures don't block others.
 
-    // Test if the old constraint is still active by trying a value > 10
-    let needsMigration = false;
+  const migrateColumn = (colName: string, colType: string, tempName: string) => {
     try {
-      // Create a temp row, try setting okta_priority_score = 50 — if it fails, old constraint is active
-      const testId = db.prepare("SELECT id FROM accounts LIMIT 1").get() as { id: number } | undefined;
-      if (testId) {
-        const currentVal = (db.prepare("SELECT okta_priority_score FROM accounts WHERE id = ?").get(testId.id) as any)?.okta_priority_score;
-        try {
-          db.prepare("UPDATE accounts SET okta_priority_score = 50 WHERE id = ?").run(testId.id);
-          // Restore original value
-          db.prepare("UPDATE accounts SET okta_priority_score = ? WHERE id = ?").run(currentVal, testId.id);
-          needsMigration = false; // Value 50 was accepted, constraint is already updated
-        } catch {
-          needsMigration = true; // CHECK constraint rejected 50
-          // Restore original value just in case
-          try { db.prepare("UPDATE accounts SET okta_priority_score = ? WHERE id = ?").run(currentVal, testId.id); } catch {}
-        }
-      } else {
-        // No accounts yet — check table SQL heuristic
-        needsMigration = tableSql.includes('BETWEEN 1 AND 10') && !tableSql.includes('BETWEEN 0 AND 100');
+      // Check if the old column exists (temp column means a previous partial migration)
+      const cols = db.prepare('PRAGMA table_info(accounts)').all() as { name: string }[];
+      const colExists = cols.some(c => c.name === colName);
+      const tempExists = cols.some(c => c.name === tempName);
+
+      if (tempExists && !colExists) {
+        // Previous migration was interrupted after RENAME but before re-add
+        db.exec(`ALTER TABLE accounts ADD COLUMN ${colName} ${colType}`);
+        db.exec(`UPDATE accounts SET ${colName} = ${tempName}`);
+        db.exec(`ALTER TABLE accounts DROP COLUMN ${tempName}`);
+        console.log(`✓ Recovered ${colName} from interrupted migration`);
+        return;
       }
-    } catch {
-      // Fallback to SQL text heuristic
-      needsMigration = tableSql.includes('BETWEEN 1 AND 10') && !tableSql.includes('BETWEEN 0 AND 100');
+
+      if (!colExists) return; // Column doesn't exist at all, nothing to migrate
+
+      // Test if constraint is blocking: try a known-good value for the new range
+      // For okta_priority_score, 50 would fail under old BETWEEN 1 AND 10
+      // For okta_tier / triage_okta_tier, 'DQ' would fail under old CHECK
+      // For okta_patch, 'pubsec' would fail under old CHECK
+      // We use a dry-run approach: just recreate unconditionally — it's idempotent
+      db.exec(`ALTER TABLE accounts RENAME COLUMN ${colName} TO ${tempName}`);
+      db.exec(`ALTER TABLE accounts ADD COLUMN ${colName} ${colType}`);
+      db.exec(`UPDATE accounts SET ${colName} = ${tempName}`);
+      db.exec(`ALTER TABLE accounts DROP COLUMN ${tempName}`);
+      console.log(`✓ Recreated ${colName} without restrictive CHECK constraint`);
+    } catch (error: any) {
+      // If it fails with "no such column" on the temp name, the migration already completed
+      if (error?.message?.includes('no such column') || error?.message?.includes('duplicate column')) {
+        return; // Already migrated
+      }
+      console.error(`⚠️  Migration of ${colName} failed:`, error?.message);
     }
+  };
 
-    if (needsMigration) {
-      console.log('⚙️  Migrating CHECK constraints for 0-100 scoring framework...');
+  // Run each column migration independently (no CHECK constraints — app validates)
+  migrateColumn('okta_priority_score', 'INTEGER', '_okta_ps_mig');
+  migrateColumn('okta_tier', 'TEXT', '_okta_tier_mig');
+  migrateColumn('okta_patch', 'TEXT', '_okta_patch_mig');
+  migrateColumn('triage_okta_tier', 'TEXT', '_triage_ot_mig');
 
-      // Use a transaction for safety
-      const migrate = db.transaction(() => {
-        // 1. okta_priority_score: BETWEEN 1 AND 10 → BETWEEN 0 AND 100
-        db.exec(`ALTER TABLE accounts RENAME COLUMN okta_priority_score TO _okta_priority_score_old`);
-        db.exec(`ALTER TABLE accounts ADD COLUMN okta_priority_score INTEGER CHECK(okta_priority_score BETWEEN 0 AND 100)`);
-        db.exec(`UPDATE accounts SET okta_priority_score = _okta_priority_score_old`);
-        db.exec(`ALTER TABLE accounts DROP COLUMN _okta_priority_score_old`);
-
-        // 2. okta_tier: IN ('A','B','C') → IN ('A','B','C','DQ')
-        db.exec(`ALTER TABLE accounts RENAME COLUMN okta_tier TO _okta_tier_old`);
-        db.exec(`ALTER TABLE accounts ADD COLUMN okta_tier TEXT CHECK(okta_tier IN ('A', 'B', 'C', 'DQ', NULL))`);
-        db.exec(`UPDATE accounts SET okta_tier = _okta_tier_old`);
-        db.exec(`ALTER TABLE accounts DROP COLUMN _okta_tier_old`);
-
-        // 3. okta_patch: add 'pubsec'
-        db.exec(`ALTER TABLE accounts RENAME COLUMN okta_patch TO _okta_patch_old`);
-        db.exec(`ALTER TABLE accounts ADD COLUMN okta_patch TEXT CHECK(okta_patch IN ('emerging','crp','ent','stg','pubsec', NULL))`);
-        db.exec(`UPDATE accounts SET okta_patch = _okta_patch_old`);
-        db.exec(`ALTER TABLE accounts DROP COLUMN _okta_patch_old`);
-
-        // 4. triage_okta_tier: add 'DQ'
-        db.exec(`ALTER TABLE accounts RENAME COLUMN triage_okta_tier TO _triage_okta_tier_old`);
-        db.exec(`ALTER TABLE accounts ADD COLUMN triage_okta_tier TEXT CHECK(triage_okta_tier IN ('A', 'B', 'C', 'DQ', NULL))`);
-        db.exec(`UPDATE accounts SET triage_okta_tier = _triage_okta_tier_old`);
-        db.exec(`ALTER TABLE accounts DROP COLUMN _triage_okta_tier_old`);
-      });
-
-      migrate();
-      console.log('✓ Migrated CHECK constraints for 0-100 scoring, DQ tier, and pubsec patch');
-
-      // Recreate indexes that may have been affected
-      db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_tier ON accounts(okta_tier)');
-      db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_triage_okta_tier ON accounts(triage_okta_tier)');
-      db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_patch ON accounts(okta_patch)');
-    }
-  } catch (error) {
-    console.error('⚠️  CHECK constraint migration failed (non-fatal — app-level validation still enforces):', error);
+  // Recreate indexes that may have been affected
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_tier ON accounts(okta_tier)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_triage_okta_tier ON accounts(triage_okta_tier)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_patch ON accounts(okta_patch)');
+  } catch {
+    // Indexes may already exist
   }
 }
