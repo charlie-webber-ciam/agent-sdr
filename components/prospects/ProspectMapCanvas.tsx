@@ -79,6 +79,7 @@ interface ProspectMapCanvasProps {
   isBuildingMap: boolean;
   buildStep: string | null;
   onBuildMap: () => void;
+  onImport: () => void;
 }
 
 const DEAL_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444'];
@@ -159,6 +160,7 @@ export default function ProspectMapCanvas({
   isBuildingMap,
   buildStep,
   onBuildMap,
+  onImport,
 }: ProspectMapCanvasProps) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -395,6 +397,7 @@ export default function ProspectMapCanvas({
         isBuildingMap={isBuildingMap}
         buildStep={buildStep}
         onBuildMap={onBuildMap}
+        onImport={onImport}
       />
       <ReactFlow
         nodes={nodes}

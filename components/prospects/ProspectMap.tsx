@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import ProspectMapCanvas from './ProspectMapCanvas';
+import ProspectImportModal from './ProspectImportModal';
 import type { Prospect } from './ProspectTab';
 
 interface GhostProspect {
@@ -47,9 +48,7 @@ interface ProspectMapProps {
 }
 
 const BUILD_STEP_LABELS: Record<string, string> = {
-  analyzing: 'Analyzing org structure...',
-  building: 'Creating prospects...',
-  positioning: 'Laying out map...',
+  analyzing: 'Analyzing hierarchy...',
 };
 
 export default function ProspectMap({
@@ -63,8 +62,9 @@ export default function ProspectMap({
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
-  // Build AI Map state
+  // AI Hierarchy state
   const [isBuildingMap, setIsBuildingMap] = useState(false);
   const [buildJobId, setBuildJobId] = useState<number | null>(null);
   const [buildStep, setBuildStep] = useState<string | null>(null);
@@ -121,13 +121,12 @@ export default function ProspectMap({
       });
 
       if (!res.ok) {
-        throw new Error('Failed to start build job');
+        throw new Error('Failed to start hierarchy job');
       }
 
       const { jobId } = await res.json();
       setBuildJobId(jobId);
 
-      // Start polling
       pollRef.current = setInterval(async () => {
         try {
           const pollRes = await fetch(`/api/accounts/${accountId}/prospect-map/build/${jobId}`);
@@ -143,10 +142,8 @@ export default function ProspectMap({
             if (pollRef.current) clearInterval(pollRef.current);
             pollRef.current = null;
             setBuildStep('Done!');
-            // Refresh map data and parent prospect list
             await fetchMapData();
             onRefresh();
-            // Brief delay to show "Done!" then reset
             setTimeout(() => {
               setIsBuildingMap(false);
               setBuildJobId(null);
@@ -167,11 +164,16 @@ export default function ProspectMap({
         }
       }, 2000);
     } catch (err) {
-      console.error('Error starting build map:', err);
+      console.error('Error starting hierarchy build:', err);
       setIsBuildingMap(false);
       setBuildStep(null);
     }
   }, [accountId, isBuildingMap, fetchMapData, onRefresh]);
+
+  const handleImportComplete = useCallback(() => {
+    fetchMapData();
+    onRefresh();
+  }, [fetchMapData, onRefresh]);
 
   const handleSavePositions = useCallback(async (
     positions: Array<{ prospectId?: number; ghostKey?: string; x: number; y: number; nodeType: string }>
@@ -255,7 +257,6 @@ export default function ProspectMap({
   }, [accountId, onRefresh, fetchMapData]);
 
   const handleAddProspect = useCallback(() => {
-    // Trigger the parent's add prospect flow
     onSelectProspect(null as unknown as Prospect);
   }, [onSelectProspect]);
 
@@ -302,28 +303,38 @@ export default function ProspectMap({
       isBuildingMap={isBuildingMap}
       buildStep={buildStep}
       onBuildMap={handleBuildMap}
+      onImport={() => setShowImportModal(true)}
     />
   );
 
-  if (isFullscreen) {
-    return createPortal(
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9999,
-          backgroundColor: 'white',
-        }}
-      >
-        {canvasContent}
-      </div>,
-      document.body
-    );
-  }
-
   return (
-    <div className="h-[600px] rounded-xl border border-gray-200 overflow-hidden bg-white">
-      {canvasContent}
-    </div>
+    <>
+      {isFullscreen ? (
+        createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9999,
+              backgroundColor: 'white',
+            }}
+          >
+            {canvasContent}
+          </div>,
+          document.body
+        )
+      ) : (
+        <div className="h-[600px] rounded-xl border border-gray-200 overflow-hidden bg-white">
+          {canvasContent}
+        </div>
+      )}
+      {showImportModal && (
+        <ProspectImportModal
+          accountId={accountId}
+          onClose={() => setShowImportModal(false)}
+          onImportComplete={handleImportComplete}
+        />
+      )}
+    </>
   );
 }
