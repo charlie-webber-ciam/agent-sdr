@@ -76,3 +76,8 @@ body {
     @apply bg-red-100 text-red-800 border border-red-300;
   }
 }
+
+/* Smooth node position transitions for collapse/expand relayout */
+.react-flow__node {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}

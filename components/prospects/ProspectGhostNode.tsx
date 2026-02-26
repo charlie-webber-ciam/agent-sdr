@@ -9,6 +9,10 @@ function ProspectGhostNode({ data }: NodeProps) {
     title: string | null;
     source: string;
     onPromote: () => void;
+    isCollapsed?: boolean;
+    collapsedCount?: number;
+    hasChildren?: boolean;
+    onToggleCollapse?: () => void;
   };
 
   return (
@@ -39,6 +43,29 @@ function ProspectGhostNode({ data }: NodeProps) {
           </button>
         </div>
       </div>
+
+      {/* Collapse/expand button */}
+      {d.hasChildren && d.onToggleCollapse && (
+        <div className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 z-10">
+          <button
+            onClick={(e) => { e.stopPropagation(); d.onToggleCollapse!(); }}
+            className={`
+              flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold
+              border shadow-sm transition-all duration-200 hover:scale-110
+              ${d.isCollapsed
+                ? 'bg-gray-600 text-white border-gray-700 hover:bg-gray-700'
+                : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50'}
+            `}
+            title={d.isCollapsed ? `Expand ${d.collapsedCount} hidden` : 'Collapse'}
+          >
+            {d.isCollapsed ? (
+              <>{`+ ${d.collapsedCount}`}</>
+            ) : (
+              <>{'−'}</>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

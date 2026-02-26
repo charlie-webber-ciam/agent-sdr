@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -250,10 +250,90 @@ export default function ProspectMapCanvas({
     return edges;
   }, [prospects, mapEdges, onUpdateEdgeLabel]);
 
+  // Build hierarchy data for collapse/expand
+  const treeData = useMemo(() => {
+    const childrenMap = new Map<string, string[]>();
+    const parentMap = new Map<string, string>();
+
+    for (const edge of initialEdges) {
+      if (edge.type !== 'reportsToEdge') continue;
+      if (!childrenMap.has(edge.source)) childrenMap.set(edge.source, []);
+      childrenMap.get(edge.source)!.push(edge.target);
+      parentMap.set(edge.target, edge.source);
+    }
+
+    const allNodeIds = new Set(initialNodes.map(n => n.id));
+    const rootNodeIds = [...allNodeIds].filter(id => !parentMap.has(id));
+
+    // BFS for depths
+    const depthMap = new Map<string, number>();
+    const queue = rootNodeIds.map(id => ({ id, depth: 0 }));
+    while (queue.length > 0) {
+      const { id, depth } = queue.shift()!;
+      if (depthMap.has(id)) continue;
+      depthMap.set(id, depth);
+      for (const childId of (childrenMap.get(id) ?? []))
+        queue.push({ id: childId, depth: depth + 1 });
+    }
+    for (const n of initialNodes)
+      if (!depthMap.has(n.id)) depthMap.set(n.id, 0);
+
+    // Descendant counts (with cycle guard)
+    function countDesc(id: string, visited = new Set<string>()): number {
+      if (visited.has(id)) return 0;
+      visited.add(id);
+      const ch = childrenMap.get(id) ?? [];
+      return ch.length + ch.reduce((s, c) => s + countDesc(c, visited), 0);
+    }
+    const descendantCountMap = new Map<string, number>();
+    for (const n of initialNodes) descendantCountMap.set(n.id, countDesc(n.id));
+
+    return { childrenMap, parentMap, rootNodeIds, depthMap, descendantCountMap };
+  }, [initialNodes, initialEdges]);
+
+  // Collapsed state — auto-collapse nodes matching criteria on mount
+  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    for (const n of initialNodes) {
+      const depth = treeData.depthMap.get(n.id) ?? 0;
+      const childCount = (treeData.childrenMap.get(n.id) ?? []).length;
+      const hasDesc = (treeData.descendantCountMap.get(n.id) ?? 0) > 0;
+      if ((depth > 3 && hasDesc) || childCount > 6) s.add(n.id);
+    }
+    return s;
+  });
+
+  const handleToggleCollapse = useCallback((nodeId: string) => {
+    setCollapsedNodes(prev => {
+      const next = new Set(prev);
+      next.has(nodeId) ? next.delete(nodeId) : next.add(nodeId);
+      return next;
+    });
+  }, []);
+
+  // Compute which nodes are visible based on collapsed state
+  const visibleNodeIds = useMemo(() => {
+    const visible = new Set<string>();
+    function visit(id: string, hidden: boolean) {
+      if (hidden) return;
+      visible.add(id);
+      for (const c of (treeData.childrenMap.get(id) ?? []))
+        visit(c, collapsedNodes.has(id));
+    }
+    for (const r of treeData.rootNodeIds) visit(r, false);
+    // Orphans always visible
+    for (const n of initialNodes)
+      if (!treeData.parentMap.has(n.id) && !treeData.rootNodeIds.includes(n.id))
+        visible.add(n.id);
+    return visible;
+  }, [collapsedNodes, treeData, initialNodes]);
+
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
 
   // Debounced position save on drag end
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
@@ -264,7 +344,7 @@ export default function ProspectMapCanvas({
     if (hasDrag) {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
-        const positionsToSave = nodesRef.current.map(n => {
+        const positionsToSave = nodesRef.current.filter(n => !n.hidden).map(n => {
           const isGhost = n.id.startsWith('g_');
           return {
             prospectId: isGhost ? undefined : parseInt(n.id.replace('p_', '')),
@@ -300,37 +380,39 @@ export default function ProspectMapCanvas({
     }
   }, [onEdgesChange, onDeleteEdge]);
 
-  // Auto layout with dagre
+  // Auto layout with dagre (visible nodes only)
   const handleAutoLayout = useCallback(() => {
+    const visNodes = nodesRef.current.filter(n => !n.hidden);
+    const visEdges = edgesRef.current.filter(e => !e.hidden);
+
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
     g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 });
 
-    nodes.forEach(node => {
+    visNodes.forEach(node => {
       g.setNode(node.id, { width: 220, height: 100 });
     });
 
-    edges.forEach(edge => {
+    visEdges.forEach(edge => {
       g.setEdge(edge.source, edge.target);
     });
 
     dagre.layout(g);
 
-    const newNodes = nodes.map(node => {
+    setNodes(prev => prev.map(node => {
+      if (node.hidden) return node;
       const dagreNode = g.node(node.id);
-      return {
+      return dagreNode ? {
         ...node,
         position: {
-          x: dagreNode.x - 100,
+          x: dagreNode.x - 110,
           y: dagreNode.y - 50,
         },
-      };
-    });
+      } : node;
+    }));
 
-    setNodes(newNodes);
-
-    // Save new positions
-    const positionsToSave = newNodes.map(n => {
+    // Save visible positions
+    const positionsToSave = nodesRef.current.filter(n => !n.hidden).map(n => {
       const isGhost = n.id.startsWith('g_');
       return {
         prospectId: isGhost ? undefined : parseInt(n.id.replace('p_', '')),
@@ -341,7 +423,7 @@ export default function ProspectMapCanvas({
       };
     });
     onSavePositions(positionsToSave);
-  }, [nodes, edges, setNodes, onSavePositions]);
+  }, [setNodes, onSavePositions]);
 
   // Keep ref in sync so the mount effect gets the latest function
   autoLayoutRef.current = handleAutoLayout;
@@ -356,6 +438,61 @@ export default function ProspectMapCanvas({
       return () => clearTimeout(timer);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- only on mount
+
+  // Sync hidden state and collapse metadata into ReactFlow nodes & edges
+  useEffect(() => {
+    setNodes(prev => prev.map(n => ({
+      ...n,
+      hidden: !visibleNodeIds.has(n.id),
+      data: {
+        ...n.data,
+        isCollapsed: collapsedNodes.has(n.id),
+        collapsedCount: collapsedNodes.has(n.id)
+          ? (treeData.descendantCountMap.get(n.id) ?? 0) : 0,
+        hasChildren: (treeData.childrenMap.get(n.id) ?? []).length > 0,
+        onToggleCollapse: (treeData.childrenMap.get(n.id) ?? []).length > 0
+          ? () => handleToggleCollapse(n.id) : undefined,
+      },
+    })));
+    setEdges(prev => prev.map(e => ({
+      ...e,
+      hidden: !visibleNodeIds.has(e.source) || !visibleNodeIds.has(e.target),
+    })));
+  }, [visibleNodeIds, collapsedNodes, treeData, setNodes, setEdges, handleToggleCollapse]);
+
+  // Re-layout after collapse/expand (skip initial render)
+  const isFirstCollapseRender = useRef(true);
+  useEffect(() => {
+    if (isFirstCollapseRender.current) {
+      isFirstCollapseRender.current = false;
+      return;
+    }
+    const timer = setTimeout(() => {
+      const visNodes = nodesRef.current.filter(n => !n.hidden);
+      const visEdges = edgesRef.current.filter(e => !e.hidden);
+      const g = new dagre.graphlib.Graph();
+      g.setDefaultEdgeLabel(() => ({}));
+      g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 });
+      visNodes.forEach(n => g.setNode(n.id, { width: 220, height: 100 }));
+      visEdges.forEach(e => g.setEdge(e.source, e.target));
+      dagre.layout(g);
+      setNodes(prev => prev.map(n => {
+        if (n.hidden) return n;
+        const dn = g.node(n.id);
+        return dn ? { ...n, position: { x: dn.x - 110, y: dn.y - 50 } } : n;
+      }));
+      // Save visible positions
+      const positionsToSave = nodesRef.current.filter(n => !n.hidden).map(n => ({
+        prospectId: n.id.startsWith('g_') ? undefined : parseInt(n.id.replace('p_', '')),
+        ghostKey: n.id.startsWith('g_') ? n.id.replace('g_', '') : undefined,
+        x: n.position.x,
+        y: n.position.y,
+        nodeType: n.id.startsWith('g_') ? 'ghost' : 'structured',
+      }));
+      onSavePositions(positionsToSave);
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [collapsedNodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="relative w-full h-full">

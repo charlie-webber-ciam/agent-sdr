@@ -34,6 +34,10 @@ function ProspectMapNode({ data }: NodeProps) {
     contactReadiness: string | null;
     onSelect: () => void;
     onWriteEmail: () => void;
+    isCollapsed?: boolean;
+    collapsedCount?: number;
+    hasChildren?: boolean;
+    onToggleCollapse?: () => void;
   };
 
   return (
@@ -83,6 +87,29 @@ function ProspectMapNode({ data }: NodeProps) {
           </svg>
         </button>
       </div>
+
+      {/* Collapse/expand button */}
+      {d.hasChildren && d.onToggleCollapse && (
+        <div className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 z-10">
+          <button
+            onClick={(e) => { e.stopPropagation(); d.onToggleCollapse!(); }}
+            className={`
+              flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold
+              border shadow-sm transition-all duration-200 hover:scale-110
+              ${d.isCollapsed
+                ? 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700'
+                : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50'}
+            `}
+            title={d.isCollapsed ? `Expand ${d.collapsedCount} hidden` : 'Collapse'}
+          >
+            {d.isCollapsed ? (
+              <>{`+ ${d.collapsedCount}`}</>
+            ) : (
+              <>{'−'}</>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
