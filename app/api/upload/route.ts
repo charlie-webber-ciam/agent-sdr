@@ -108,10 +108,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate max 10000 accounts
-    if (records.length > 10000) {
+    // Validate max 15000 accounts
+    if (records.length > 15000) {
       return NextResponse.json(
-        { error: `Too many accounts. Maximum is 10,000, got ${records.length}` },
+        { error: `Too many accounts. Maximum is 15,000, got ${records.length}` },
         { status: 400 }
       );
     }

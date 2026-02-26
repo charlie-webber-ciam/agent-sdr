@@ -96,9 +96,7 @@ function AccountCardInner({
   };
 
   const handleCardClick = () => {
-    if (!selectable) {
-      router.push(`/accounts/${account.id}`);
-    }
+    router.push(`/accounts/${account.id}`);
   };
 
   const tierBorder = displayTier === 'A' ? 'border-l-green-500' :
