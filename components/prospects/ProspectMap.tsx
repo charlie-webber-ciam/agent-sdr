@@ -57,6 +57,8 @@ export default function ProspectMap({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [pendingAutoLayout, setPendingAutoLayout] = useState(false);
 
   // AI Hierarchy state
   const [isBuildingMap, setIsBuildingMap] = useState(false);
@@ -135,14 +137,20 @@ export default function ProspectMap({
           if (status === 'completed') {
             if (pollRef.current) clearInterval(pollRef.current);
             pollRef.current = null;
-            setBuildStep('Done!');
+            setBuildStep('Done! Refreshing map...');
+            // Buffer to ensure backend DB writes are fully committed
+            await new Promise(resolve => setTimeout(resolve, 2000));
             await fetchMapData();
             onRefresh();
+            // Force canvas remount with fresh data + trigger auto-layout
+            setPendingAutoLayout(true);
+            setRefreshKey(k => k + 1);
             setTimeout(() => {
               setIsBuildingMap(false);
               setBuildJobId(null);
               setBuildStep(null);
-            }, 1500);
+              setPendingAutoLayout(false);
+            }, 2000);
           } else if (status === 'failed') {
             if (pollRef.current) clearInterval(pollRef.current);
             pollRef.current = null;
@@ -164,9 +172,10 @@ export default function ProspectMap({
     }
   }, [accountId, isBuildingMap, fetchMapData, onRefresh]);
 
-  const handleImportComplete = useCallback(() => {
-    fetchMapData();
+  const handleImportComplete = useCallback(async () => {
+    await fetchMapData();
     onRefresh();
+    setRefreshKey(k => k + 1);
   }, [fetchMapData, onRefresh]);
 
   const handleSavePositions = useCallback(async (
@@ -277,10 +286,12 @@ export default function ProspectMap({
 
   const canvasContent = (
     <ProspectMapCanvas
+      key={`canvas-${refreshKey}`}
       prospects={mapData.prospects}
       ghostProspects={mapData.ghostProspects}
       positions={mapData.positions}
       edges={mapData.edges}
+      autoLayoutOnMount={pendingAutoLayout}
       accountId={accountId}
       isFullscreen={isFullscreen}
       onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}

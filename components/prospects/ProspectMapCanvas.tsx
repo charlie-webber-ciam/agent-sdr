@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -71,6 +71,7 @@ interface ProspectMapCanvasProps {
   buildStep: string | null;
   onBuildMap: () => void;
   onImport: () => void;
+  autoLayoutOnMount?: boolean;
 }
 
 const SENIORITY_ORDER: Record<string, number> = {
@@ -148,8 +149,10 @@ export default function ProspectMapCanvas({
   buildStep,
   onBuildMap,
   onImport,
+  autoLayoutOnMount,
 }: ProspectMapCanvasProps) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoLayoutRef = useRef<(() => void) | null>(null);
 
   // Build position lookup
   const positionLookup = useMemo(() => {
@@ -339,6 +342,20 @@ export default function ProspectMapCanvas({
     });
     onSavePositions(positionsToSave);
   }, [nodes, edges, setNodes, onSavePositions]);
+
+  // Keep ref in sync so the mount effect gets the latest function
+  autoLayoutRef.current = handleAutoLayout;
+
+  // Auto-layout on mount after hierarchy build completes
+  useEffect(() => {
+    if (autoLayoutOnMount) {
+      // Delay to let React Flow fully render nodes before running dagre
+      const timer = setTimeout(() => {
+        autoLayoutRef.current?.();
+      }, 600);
+      return () => clearTimeout(timer);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- only on mount
 
   return (
     <div className="relative w-full h-full">
