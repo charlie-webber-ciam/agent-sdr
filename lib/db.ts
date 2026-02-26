@@ -13,7 +13,7 @@ if (!existsSync(dataDir)) {
 const DB_PATH = join(dataDir, 'accounts.db');
 
 // Bump this version whenever migrations change to force re-run in dev mode
-const MIGRATION_VERSION = 2;
+const MIGRATION_VERSION = 3;
 
 // Use globalThis to survive HMR in Next.js dev mode
 const globalDb = globalThis as unknown as {
@@ -4141,4 +4141,131 @@ export function getAccountsByStatus(filters: {
 
   const accounts = db.prepare(query).all(...params) as Account[];
   return { accounts, total: totalRow.total };
+}
+
+// ─── Prospect Map Functions ─────────────────────────────────────────────────
+
+export interface ProspectPosition {
+  id: number;
+  account_id: number;
+  prospect_id: number | null;
+  ghost_key: string | null;
+  node_type: string;
+  x: number;
+  y: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProspectEdge {
+  id: number;
+  account_id: number;
+  source_prospect_id: number | null;
+  source_ghost_key: string | null;
+  target_prospect_id: number | null;
+  target_ghost_key: string | null;
+  edge_type: string;
+  label: string | null;
+  created_at: string;
+}
+
+export function getProspectPositions(accountId: number): ProspectPosition[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospect_positions WHERE account_id = ?').all(accountId) as ProspectPosition[];
+}
+
+export function bulkUpsertProspectPositions(
+  accountId: number,
+  positions: Array<{ prospectId?: number | null; ghostKey?: string | null; x: number; y: number; nodeType: string }>
+): void {
+  const db = getDb();
+  const transaction = db.transaction(() => {
+    for (const pos of positions) {
+      if (pos.prospectId) {
+        db.prepare(`
+          INSERT INTO prospect_positions (account_id, prospect_id, node_type, x, y)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(account_id, prospect_id) DO UPDATE SET
+            x = excluded.x, y = excluded.y, node_type = excluded.node_type, updated_at = datetime('now')
+        `).run(accountId, pos.prospectId, pos.nodeType, pos.x, pos.y);
+      } else if (pos.ghostKey) {
+        db.prepare(`
+          INSERT INTO prospect_positions (account_id, ghost_key, node_type, x, y)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(account_id, ghost_key) DO UPDATE SET
+            x = excluded.x, y = excluded.y, node_type = excluded.node_type, updated_at = datetime('now')
+        `).run(accountId, pos.ghostKey, pos.nodeType, pos.x, pos.y);
+      }
+    }
+  });
+  transaction();
+}
+
+export function getProspectEdges(accountId: number): ProspectEdge[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM prospect_edges WHERE account_id = ?').all(accountId) as ProspectEdge[];
+}
+
+export function createProspectEdge(data: {
+  account_id: number;
+  source_prospect_id?: number | null;
+  source_ghost_key?: string | null;
+  target_prospect_id?: number | null;
+  target_ghost_key?: string | null;
+  edge_type?: string;
+  label?: string | null;
+}): ProspectEdge {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO prospect_edges (account_id, source_prospect_id, source_ghost_key, target_prospect_id, target_ghost_key, edge_type, label)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.account_id,
+    data.source_prospect_id || null,
+    data.source_ghost_key || null,
+    data.target_prospect_id || null,
+    data.target_ghost_key || null,
+    data.edge_type || 'custom',
+    data.label || null
+  );
+  return db.prepare('SELECT * FROM prospect_edges WHERE id = ?').get(result.lastInsertRowid) as ProspectEdge;
+}
+
+export function updateProspectEdge(id: number, data: { label?: string }): ProspectEdge | undefined {
+  const db = getDb();
+  if (data.label !== undefined) {
+    db.prepare('UPDATE prospect_edges SET label = ? WHERE id = ?').run(data.label, id);
+  }
+  return db.prepare('SELECT * FROM prospect_edges WHERE id = ?').get(id) as ProspectEdge | undefined;
+}
+
+export function deleteProspectEdge(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM prospect_edges WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+export function migrateGhostToProspect(accountId: number, ghostKey: string, prospectId: number): void {
+  const db = getDb();
+  const transaction = db.transaction(() => {
+    // Migrate position
+    db.prepare(`
+      UPDATE prospect_positions SET prospect_id = ?, ghost_key = NULL, node_type = 'structured', updated_at = datetime('now')
+      WHERE account_id = ? AND ghost_key = ?
+    `).run(prospectId, accountId, ghostKey);
+
+    // Migrate edges: source
+    db.prepare(`
+      UPDATE prospect_edges SET source_prospect_id = ?, source_ghost_key = NULL
+      WHERE account_id = ? AND source_ghost_key = ?
+    `).run(prospectId, accountId, ghostKey);
+
+    // Migrate edges: target
+    db.prepare(`
+      UPDATE prospect_edges SET target_prospect_id = ?, target_ghost_key = NULL
+      WHERE account_id = ? AND target_ghost_key = ?
+    `).run(prospectId, accountId, ghostKey);
+  });
+  transaction();
 }

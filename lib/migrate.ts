@@ -848,4 +848,53 @@ export function migrateDatabase(db: Database.Database) {
   } catch {
     // Indexes may already exist
   }
+
+  // Add prospect_positions table for relationship map node positions
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_positions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        prospect_id INTEGER,
+        ghost_key TEXT,
+        node_type TEXT NOT NULL DEFAULT 'structured',
+        x REAL NOT NULL DEFAULT 0,
+        y REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+        FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE,
+        UNIQUE(account_id, prospect_id),
+        UNIQUE(account_id, ghost_key)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_positions_account_id ON prospect_positions(account_id)');
+    console.log('✓ Ensured prospect_positions table exists');
+  } catch (error) {
+    console.error('Failed to create prospect_positions table:', error);
+  }
+
+  // Add prospect_edges table for user-drawn freeform edges
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS prospect_edges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        source_prospect_id INTEGER,
+        source_ghost_key TEXT,
+        target_prospect_id INTEGER,
+        target_ghost_key TEXT,
+        edge_type TEXT NOT NULL DEFAULT 'custom',
+        label TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+        FOREIGN KEY (source_prospect_id) REFERENCES prospects(id) ON DELETE CASCADE,
+        FOREIGN KEY (target_prospect_id) REFERENCES prospects(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_prospect_edges_account_id ON prospect_edges(account_id)');
+    console.log('✓ Ensured prospect_edges table exists');
+  } catch (error) {
+    console.error('Failed to create prospect_edges table:', error);
+  }
 }

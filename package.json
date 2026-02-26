@@ -13,8 +13,10 @@
     "reprocess-pending": "tsx scripts/reprocess-pending.ts"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^2.0.4",
     "@openai/agents": "^0.4.6",
     "@tailwindcss/typography": "^0.5.19",
+    "@xyflow/react": "^12.10.1",
     "better-sqlite3": "^12.6.2",
     "csv-parse": "^6.1.0",
     "csv-stringify": "^6.6.0",
