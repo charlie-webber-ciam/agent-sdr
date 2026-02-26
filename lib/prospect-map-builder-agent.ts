@@ -33,6 +33,7 @@ export async function analyzeProspectHierarchy(
   companyName: string,
   industry: string,
   existingProspects: ExistingProspect[],
+  opportunityContext?: string,
 ): Promise<HierarchyResult> {
   const agentModel = 'claude-4-6-opus';
 
@@ -58,16 +59,21 @@ Rules:
 - Individual contributors report to relevant Manager/Director
 - When multiple people share the same level, use department alignment to determine hierarchy
 - If you can't determine a clear reporting relationship, set parentProspectId to null (top-level)
-- Every person must appear exactly once in the hierarchy array`,
+- Every person must appear exactly once in the hierarchy array
+- Use any opportunity/deal context provided to understand working relationships — people involved in the same deal often work together closely, which can hint at who manages whom or which department they belong to`,
     tools: [],
   });
+
+  const oppSection = opportunityContext
+    ? `\nOPPORTUNITY / DEAL CONTEXT (use this as background for relationship inference):\n${opportunityContext}\n`
+    : '';
 
   const prompt = `Analyze the following prospect roster at ${companyName} (industry: ${industry}) and infer the reporting hierarchy.
 
 PROSPECTS:
 ${existingRoster}
-
-For each prospect, determine who they most likely report to among the other prospects.
+${oppSection}
+For each prospect, determine who they most likely report to among the other prospects. Use title seniority as the primary signal, and opportunity/deal involvement as secondary context for understanding working relationships.
 
 Return ONLY valid JSON:
 {

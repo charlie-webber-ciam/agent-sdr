@@ -8,6 +8,7 @@ import {
   type Account,
 } from './db';
 import { analyzeProspectHierarchy } from './prospect-map-builder-agent';
+import { buildWeightedOpportunityContext } from './opportunity-context';
 import dagre from '@dagrejs/dagre';
 
 const activeJobs = new Set<number>();
@@ -48,10 +49,14 @@ export async function buildHierarchyForAccount(
     role_type: p.role_type,
   }));
 
+  // Fetch opportunity context to inform hierarchy decisions
+  const opportunityContext = buildWeightedOpportunityContext(account.id) || undefined;
+
   const result = await analyzeProspectHierarchy(
     account.company_name,
     account.industry,
     prospectInput,
+    opportunityContext,
   );
 
   // Apply hierarchy

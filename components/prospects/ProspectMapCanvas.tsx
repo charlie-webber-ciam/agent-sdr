@@ -21,7 +21,6 @@ import '@xyflow/react/dist/style.css';
 import ProspectMapNode from './ProspectMapNode';
 import ProspectGhostNode from './ProspectGhostNode';
 import ReportsToEdge from './map/ReportsToEdge';
-import DealEdge from './map/DealEdge';
 import CustomEdge from './map/CustomEdge';
 import ProspectMapToolbar from './ProspectMapToolbar';
 import type { Prospect } from './ProspectTab';
@@ -51,19 +50,11 @@ interface MapEdge {
   label: string | null;
 }
 
-interface Opportunity {
-  id: number;
-  name: string;
-  stage: string | null;
-  linkedProspectIds: number[];
-}
-
 interface ProspectMapCanvasProps {
   prospects: Prospect[];
   ghostProspects: GhostProspect[];
   positions: MapPosition[];
   edges: MapEdge[];
-  opportunities: Opportunity[];
   accountId: number;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
@@ -82,8 +73,6 @@ interface ProspectMapCanvasProps {
   onImport: () => void;
 }
 
-const DEAL_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444'];
-
 const SENIORITY_ORDER: Record<string, number> = {
   c_suite: 0,
   vp: 1,
@@ -99,7 +88,6 @@ const nodeTypes = {
 
 const edgeTypes = {
   reportsToEdge: ReportsToEdge,
-  dealEdge: DealEdge,
   customEdge: CustomEdge,
 };
 
@@ -144,7 +132,6 @@ export default function ProspectMapCanvas({
   ghostProspects,
   positions,
   edges: mapEdges,
-  opportunities,
   accountId,
   isFullscreen,
   onToggleFullscreen,
@@ -174,18 +161,6 @@ export default function ProspectMapCanvas({
     return lookup;
   }, [positions]);
 
-  // Build opportunity color lookup
-  const prospectOppColor = useMemo(() => {
-    const lookup: Record<number, string> = {};
-    for (const opp of opportunities) {
-      const color = DEAL_COLORS[opp.id % DEAL_COLORS.length];
-      for (const pid of opp.linkedProspectIds) {
-        if (!lookup[pid]) lookup[pid] = color;
-      }
-    }
-    return lookup;
-  }, [opportunities]);
-
   const hasPositions = positions.length > 0;
   const defaultPositions = useMemo(
     () => hasPositions ? {} : getDefaultPositions(prospects, ghostProspects),
@@ -209,7 +184,6 @@ export default function ProspectMapCanvas({
           roleType: p.role_type,
           relationshipStatus: p.relationship_status,
           contactReadiness: p.contact_readiness,
-          opportunityColor: prospectOppColor[p.id] || null,
           onSelect: () => onSelectProspect(p),
           onWriteEmail: () => onWriteEmail(p),
         },
@@ -233,7 +207,7 @@ export default function ProspectMapCanvas({
     }
 
     return nodes;
-  }, [prospects, ghostProspects, positionLookup, defaultPositions, prospectOppColor, onSelectProspect, onWriteEmail, onPromoteGhost]);
+  }, [prospects, ghostProspects, positionLookup, defaultPositions, onSelectProspect, onWriteEmail, onPromoteGhost]);
 
   // Build initial edges
   const initialEdges: Edge[] = useMemo(() => {
@@ -249,26 +223,6 @@ export default function ProspectMapCanvas({
           type: 'reportsToEdge',
           deletable: false,
         });
-      }
-    }
-
-    // Deal edges from opportunities
-    for (const opp of opportunities) {
-      const pids = opp.linkedProspectIds;
-      for (let i = 0; i < pids.length; i++) {
-        for (let j = i + 1; j < pids.length; j++) {
-          edges.push({
-            id: `deal_${opp.id}_${pids[i]}_${pids[j]}`,
-            source: `p_${pids[i]}`,
-            target: `p_${pids[j]}`,
-            type: 'dealEdge',
-            deletable: false,
-            data: {
-              opportunityId: opp.id,
-              opportunityName: opp.name,
-            },
-          });
-        }
       }
     }
 
@@ -291,7 +245,7 @@ export default function ProspectMapCanvas({
     }
 
     return edges;
-  }, [prospects, opportunities, mapEdges, onUpdateEdgeLabel]);
+  }, [prospects, mapEdges, onUpdateEdgeLabel]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);

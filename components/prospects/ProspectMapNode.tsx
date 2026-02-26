@@ -32,7 +32,6 @@ function ProspectMapNode({ data }: NodeProps) {
     roleType: string | null;
     relationshipStatus: string;
     contactReadiness: string | null;
-    opportunityColor: string | null;
     onSelect: () => void;
     onWriteEmail: () => void;
   };
@@ -43,8 +42,6 @@ function ProspectMapNode({ data }: NodeProps) {
       style={{
         width: 220,
         minHeight: 80,
-        borderLeftWidth: d.opportunityColor ? 4 : 1,
-        borderLeftColor: d.opportunityColor || undefined,
       }}
       onClick={d.onSelect}
     >

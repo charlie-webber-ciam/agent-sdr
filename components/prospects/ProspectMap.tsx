@@ -31,12 +31,6 @@ interface MapData {
     edge_type: string;
     label: string | null;
   }>;
-  opportunities: Array<{
-    id: number;
-    name: string;
-    stage: string | null;
-    linkedProspectIds: number[];
-  }>;
   ghostProspects: GhostProspect[];
 }
 
@@ -287,7 +281,6 @@ export default function ProspectMap({
       ghostProspects={mapData.ghostProspects}
       positions={mapData.positions}
       edges={mapData.edges}
-      opportunities={mapData.opportunities}
       accountId={accountId}
       isFullscreen={isFullscreen}
       onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
