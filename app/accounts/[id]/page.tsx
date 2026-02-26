@@ -6,6 +6,10 @@ import { use } from 'react';
 import { useSearchParams } from 'next/navigation';
 import MarkdownSection from '@/components/MarkdownSection';
 import ProspectTab from '@/components/prospects/ProspectTab';
+import ProspectMap from '@/components/prospects/ProspectMap';
+import ProspectDetailModal from '@/components/prospects/ProspectDetailModal';
+import ProspectEmailModal from '@/components/prospects/ProspectEmailModal';
+import type { Prospect } from '@/components/prospects/ProspectTab';
 import AccountTags from '@/components/AccountTags';
 import AccountNotes from '@/components/AccountNotes';
 import TierSelector from '@/components/TierSelector';
@@ -197,9 +201,9 @@ export default function AccountDetailPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Top-level tab: Research, Prospects, or Opportunities
-  const [activeTab, setActiveTab] = useState<'research' | 'prospects' | 'opportunities' | 'activities'>(
-    searchParams.get('tab') === 'prospects' ? 'prospects' : searchParams.get('tab') === 'opportunities' ? 'opportunities' : searchParams.get('tab') === 'activities' ? 'activities' : 'research'
+  // Top-level tab: Research, Prospects, Map, Opportunities, or Activities
+  const [activeTab, setActiveTab] = useState<'research' | 'prospects' | 'map' | 'opportunities' | 'activities'>(
+    searchParams.get('tab') === 'prospects' ? 'prospects' : searchParams.get('tab') === 'map' ? 'map' : searchParams.get('tab') === 'opportunities' ? 'opportunities' : searchParams.get('tab') === 'activities' ? 'activities' : 'research'
   );
 
   // Perspective state for research view (local to this page, initialized from global)
@@ -239,6 +243,11 @@ export default function AccountDetailPage({
 
   // Reprocess state
   const [isReprocessing, setIsReprocessing] = useState(false);
+
+  // Map tab prospect modal state
+  const [mapSelectedProspect, setMapSelectedProspect] = useState<Prospect | null>(null);
+  const [mapEmailingProspect, setMapEmailingProspect] = useState<Prospect | null>(null);
+  const [mapProspects, setMapProspects] = useState<Prospect[]>([]);
 
   // Enrichment state
   const [tags, setTags] = useState<AccountDetail['tags']>([]);
@@ -310,6 +319,17 @@ export default function AccountDetailPage({
     };
 
     fetchAccount();
+  }, [id]);
+
+  // Fetch prospects for the map tab modals
+  const fetchMapProspects = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/accounts/${id}/prospects`);
+      if (res.ok) {
+        const data = await res.json();
+        setMapProspects(data.prospects);
+      }
+    } catch {}
   }, [id]);
 
   // Scroll-spy with IntersectionObserver
@@ -860,6 +880,16 @@ export default function AccountDetailPage({
           )}
         </button>
         <button
+          onClick={() => setActiveTab('map')}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+            activeTab === 'map'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          Map
+        </button>
+        <button
           onClick={() => setActiveTab('opportunities')}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
             activeTab === 'opportunities'
@@ -881,9 +911,38 @@ export default function AccountDetailPage({
         </button>
       </div>
 
-      {/* Prospects Tab Content */}
+      {/* Tab Content */}
       {activeTab === 'prospects' ? (
         <ProspectTab accountId={account.id} />
+      ) : activeTab === 'map' ? (
+        <>
+          <ProspectMap
+            accountId={account.id}
+            onSelectProspect={(p) => { setMapSelectedProspect(p); fetchMapProspects(); }}
+            onWriteEmail={(p) => setMapEmailingProspect(p)}
+            onRefresh={fetchMapProspects}
+          />
+          {mapSelectedProspect && (
+            <ProspectDetailModal
+              prospect={mapSelectedProspect}
+              accountId={account.id}
+              allProspects={mapProspects}
+              onClose={() => setMapSelectedProspect(null)}
+              onSave={() => { setMapSelectedProspect(null); fetchMapProspects(); }}
+              onWriteEmail={(p) => setMapEmailingProspect(p)}
+              onViewExisting={(p) => setMapSelectedProspect(p)}
+            />
+          )}
+          {mapEmailingProspect && (
+            <ProspectEmailModal
+              prospect={mapEmailingProspect}
+              accountId={account.id}
+              researchContext={perspective}
+              onClose={() => setMapEmailingProspect(null)}
+              onSave={() => {}}
+            />
+          )}
+        </>
       ) : activeTab === 'opportunities' ? (
         <OpportunitiesSection accountId={account.id} />
       ) : activeTab === 'activities' ? (

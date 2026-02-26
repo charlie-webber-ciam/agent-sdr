@@ -2,12 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import ProspectListView from './ProspectListView';
-import ProspectHierarchy from './ProspectHierarchy';
-import ProspectTreeView from './ProspectTreeView';
 import ProspectDetailModal from './ProspectDetailModal';
 import ProspectEmailModal from './ProspectEmailModal';
-import ProspectListManager from './ProspectListManager';
-import ProspectMap from './ProspectMap';
 import AccountWorkingModal from './AccountWorkingModal';
 import AccountWorkingView from './AccountWorkingView';
 import { usePerspective } from '@/lib/perspective-context';
@@ -53,7 +49,7 @@ export interface Prospect {
   updated_at: string;
 }
 
-type SubTab = 'list' | 'orgchart' | 'tree' | 'lists' | 'working' | 'map';
+type SubTab = 'list' | 'working';
 
 export default function ProspectTab({ accountId }: { accountId: number }) {
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -173,11 +169,7 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
         <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
           {([
             { key: 'list', label: 'List' },
-            { key: 'orgchart', label: 'Org Chart' },
-            { key: 'tree', label: 'Tree' },
-            { key: 'lists', label: 'Lists' },
             { key: 'working', label: 'Working' },
-            { key: 'map', label: 'Map' },
           ] as const).map(({ key, label }) => (
             <button
               key={key}
@@ -203,14 +195,7 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
       </div>
 
       {/* Content */}
-      {activeSubTab === 'map' ? (
-        <ProspectMap
-          accountId={accountId}
-          onSelectProspect={handleSelectProspect}
-          onWriteEmail={handleWriteEmail}
-          onRefresh={fetchProspects}
-        />
-      ) : fetchError ? (
+      {fetchError ? (
         <div className="text-center py-12 bg-red-50 rounded-xl border border-red-200">
           <svg className="w-12 h-12 mx-auto text-red-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
@@ -250,25 +235,6 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
               onSelectProspect={handleSelectProspect}
               onWriteEmail={handleWriteEmail}
             />
-          )}
-          {activeSubTab === 'orgchart' && (
-            <ProspectHierarchy
-              prospects={filteredProspects}
-              onSelectProspect={handleSelectProspect}
-              onWriteEmail={handleWriteEmail}
-            />
-          )}
-          {activeSubTab === 'tree' && (
-            <ProspectTreeView
-              prospects={filteredProspects}
-              accountId={accountId}
-              onRefresh={fetchProspects}
-              onSelectProspect={handleSelectProspect}
-              onWriteEmail={handleWriteEmail}
-            />
-          )}
-          {activeSubTab === 'lists' && (
-            <ProspectListManager accountId={accountId} />
           )}
           {activeSubTab === 'working' && (
             <AccountWorkingView
