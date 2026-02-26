@@ -34,6 +34,7 @@ export async function analyzeProspectHierarchy(
   industry: string,
   existingProspects: ExistingProspect[],
   opportunityContext?: string,
+  userContext?: string,
 ): Promise<HierarchyResult> {
   const agentModel = 'claude-4-6-opus';
 
@@ -60,7 +61,8 @@ Rules:
 - When multiple people share the same level, use department alignment to determine hierarchy
 - If you can't determine a clear reporting relationship, set parentProspectId to null (top-level)
 - Every person must appear exactly once in the hierarchy array
-- Use any opportunity/deal context provided to understand working relationships — people involved in the same deal often work together closely, which can hint at who manages whom or which department they belong to`,
+- Use any opportunity/deal context provided to understand working relationships — people involved in the same deal often work together closely, which can hint at who manages whom or which department they belong to
+- If user-provided context specifies explicit relationships (e.g. "Alice reports to Bob", "Carol manages the security team"), treat those as authoritative and prioritize them over inferred relationships from titles`,
     tools: [],
   });
 
@@ -68,12 +70,16 @@ Rules:
     ? `\nOPPORTUNITY / DEAL CONTEXT (use this as background for relationship inference):\n${opportunityContext}\n`
     : '';
 
+  const userSection = userContext
+    ? `\nUSER-PROVIDED CONTEXT (treat this as high-priority guidance — the user has direct knowledge of these relationships):\n${userContext}\n`
+    : '';
+
   const prompt = `Analyze the following prospect roster at ${companyName} (industry: ${industry}) and infer the reporting hierarchy.
 
 PROSPECTS:
 ${existingRoster}
-${oppSection}
-For each prospect, determine who they most likely report to among the other prospects. Use title seniority as the primary signal, and opportunity/deal involvement as secondary context for understanding working relationships.
+${oppSection}${userSection}
+For each prospect, determine who they most likely report to among the other prospects. Use title seniority as the primary signal, user-provided context as high-priority overrides, and opportunity/deal involvement as additional background.
 
 Return ONLY valid JSON:
 {

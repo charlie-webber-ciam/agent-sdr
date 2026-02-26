@@ -69,7 +69,7 @@ interface ProspectMapCanvasProps {
   isSaving: boolean;
   isBuildingMap: boolean;
   buildStep: string | null;
-  onBuildMap: () => void;
+  onBuildMap: (userContext?: string) => void;
   onImport: () => void;
   autoLayoutOnMount?: boolean;
 }

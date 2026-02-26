@@ -103,7 +103,7 @@ export default function ProspectMap({
     };
   }, []);
 
-  const handleBuildMap = useCallback(async () => {
+  const handleBuildMap = useCallback(async (userContext?: string) => {
     if (isBuildingMap) return;
 
     setIsBuildingMap(true);
@@ -113,7 +113,7 @@ export default function ProspectMap({
       const res = await fetch(`/api/accounts/${accountId}/prospect-map/build`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ userContext: userContext || '' }),
       });
 
       if (!res.ok) {

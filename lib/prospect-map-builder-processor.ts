@@ -22,7 +22,8 @@ export function isMapBuilderJobActive(jobId: number): boolean {
  * No prospect discovery — purely analyzes and positions what's already there.
  */
 export async function buildHierarchyForAccount(
-  account: Account
+  account: Account,
+  userContext?: string,
 ): Promise<{ hierarchyUpdates: number }> {
   const existingProspects = getProspectsByAccount(account.id);
 
@@ -57,6 +58,7 @@ export async function buildHierarchyForAccount(
     account.industry,
     prospectInput,
     opportunityContext,
+    userContext || undefined,
   );
 
   // Apply hierarchy
@@ -129,7 +131,7 @@ export async function processMapBuilderJob(jobId: number): Promise<void> {
       current_step: `Analyzing hierarchy at ${account.company_name}...`,
     });
 
-    const stats = await buildHierarchyForAccount(account);
+    const stats = await buildHierarchyForAccount(account, job.user_context || undefined);
 
     updateAccountWorkingJob(jobId, {
       status: 'completed',

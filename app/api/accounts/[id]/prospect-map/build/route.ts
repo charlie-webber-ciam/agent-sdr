@@ -19,9 +19,13 @@ export async function POST(
       return NextResponse.json({ error: 'Account not found' }, { status: 404 });
     }
 
+    const body = await request.json().catch(() => ({}));
+    const userContext = typeof body.userContext === 'string' ? body.userContext.trim() : '';
+
     const jobId = createAccountWorkingJob({
       account_id: accountId,
       job_type: 'map_builder',
+      user_context: userContext || undefined,
     });
 
     // Fire background processor (don't await)
