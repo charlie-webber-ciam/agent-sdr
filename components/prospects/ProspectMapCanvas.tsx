@@ -287,6 +287,8 @@ export default function ProspectMapCanvas({
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
 
   // Debounced position save on drag end
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
@@ -297,24 +299,20 @@ export default function ProspectMapCanvas({
     if (hasDrag) {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
-        // Read current positions from updated nodes state
-        setNodes(currentNodes => {
-          const positionsToSave = currentNodes.map(n => {
-            const isGhost = n.id.startsWith('g_');
-            return {
-              prospectId: isGhost ? undefined : parseInt(n.id.replace('p_', '')),
-              ghostKey: isGhost ? n.id.replace('g_', '') : undefined,
-              x: n.position.x,
-              y: n.position.y,
-              nodeType: isGhost ? 'ghost' : 'structured',
-            };
-          });
-          onSavePositions(positionsToSave);
-          return currentNodes;
+        const positionsToSave = nodesRef.current.map(n => {
+          const isGhost = n.id.startsWith('g_');
+          return {
+            prospectId: isGhost ? undefined : parseInt(n.id.replace('p_', '')),
+            ghostKey: isGhost ? n.id.replace('g_', '') : undefined,
+            x: n.position.x,
+            y: n.position.y,
+            nodeType: isGhost ? 'ghost' : 'structured',
+          };
         });
+        onSavePositions(positionsToSave);
       }, 800);
     }
-  }, [onNodesChange, onSavePositions, setNodes]);
+  }, [onNodesChange, onSavePositions]);
 
   const handleConnect = useCallback((connection: Connection) => {
     // Create custom edge
