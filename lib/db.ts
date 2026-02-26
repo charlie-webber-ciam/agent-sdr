@@ -13,7 +13,7 @@ if (!existsSync(dataDir)) {
 const DB_PATH = join(dataDir, 'accounts.db');
 
 // Bump this version whenever migrations change to force re-run in dev mode
-const MIGRATION_VERSION = 3;
+const MIGRATION_VERSION = 4;
 
 // Use globalThis to survive HMR in Next.js dev mode
 const globalDb = globalThis as unknown as {
@@ -3790,6 +3790,7 @@ export interface AccountWorkingJob {
   emails_failed: number;
   current_step: string | null;
   error_log: string | null;
+  job_type: string;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -3799,16 +3800,18 @@ export function createAccountWorkingJob(data: {
   account_id: number;
   user_context?: string;
   research_context?: string;
+  job_type?: string;
 }): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO account_working_jobs (account_id, user_context, research_context)
-    VALUES (?, ?, ?)
+    INSERT INTO account_working_jobs (account_id, user_context, research_context, job_type)
+    VALUES (?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.account_id,
     data.user_context || null,
-    data.research_context || 'auth0'
+    data.research_context || 'auth0',
+    data.job_type || 'prospect_mapping'
   );
   return Number(result.lastInsertRowid);
 }
@@ -4266,6 +4269,21 @@ export function migrateGhostToProspect(accountId: number, ghostKey: string, pros
       UPDATE prospect_edges SET target_prospect_id = ?, target_ghost_key = NULL
       WHERE account_id = ? AND target_ghost_key = ?
     `).run(prospectId, accountId, ghostKey);
+  });
+  transaction();
+}
+
+export function bulkUpdateProspectParents(
+  updates: Array<{ prospectId: number; parentProspectId: number | null }>
+): void {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE prospects SET parent_prospect_id = ?, updated_at = datetime('now') WHERE id = ?
+  `);
+  const transaction = db.transaction(() => {
+    for (const u of updates) {
+      stmt.run(u.parentProspectId, u.prospectId);
+    }
   });
   transaction();
 }

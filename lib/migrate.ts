@@ -849,6 +849,17 @@ export function migrateDatabase(db: Database.Database) {
     // Indexes may already exist
   }
 
+  // Add job_type column to account_working_jobs if missing
+  try {
+    const awjCols = db.prepare('PRAGMA table_info(account_working_jobs)').all() as any[];
+    if (!awjCols.some((col: any) => col.name === 'job_type')) {
+      db.exec("ALTER TABLE account_working_jobs ADD COLUMN job_type TEXT DEFAULT 'prospect_mapping'");
+      console.log('✓ Added job_type column to account_working_jobs');
+    }
+  } catch (error) {
+    console.error('Failed to add job_type column to account_working_jobs:', error);
+  }
+
   // Add prospect_positions table for relationship map node positions
   try {
     db.exec(`

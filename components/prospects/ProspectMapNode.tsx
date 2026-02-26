@@ -41,7 +41,7 @@ function ProspectMapNode({ data }: NodeProps) {
     <div
       className="relative bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group"
       style={{
-        width: 200,
+        width: 220,
         minHeight: 80,
         borderLeftWidth: d.opportunityColor ? 4 : 1,
         borderLeftColor: d.opportunityColor || undefined,
@@ -65,7 +65,7 @@ function ProspectMapNode({ data }: NodeProps) {
           )}
         </div>
         {d.title && (
-          <p className="text-xs text-gray-500 truncate mb-1.5" title={d.title}>{d.title}</p>
+          <p className="text-xs text-gray-500 mb-1.5 line-clamp-2" title={d.title}>{d.title}</p>
         )}
         {d.roleType && d.roleType !== 'unknown' && (
           <span className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded-full ${ROLE_COLORS[d.roleType] || ROLE_COLORS.unknown}`}>

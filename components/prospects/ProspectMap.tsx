@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import ProspectMapCanvas from './ProspectMapCanvas';
 import type { Prospect } from './ProspectTab';
@@ -46,6 +46,12 @@ interface ProspectMapProps {
   onRefresh: () => void;
 }
 
+const BUILD_STEP_LABELS: Record<string, string> = {
+  analyzing: 'Analyzing org structure...',
+  building: 'Creating prospects...',
+  positioning: 'Laying out map...',
+};
+
 export default function ProspectMap({
   accountId,
   onSelectProspect,
@@ -57,6 +63,12 @@ export default function ProspectMap({
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Build AI Map state
+  const [isBuildingMap, setIsBuildingMap] = useState(false);
+  const [buildJobId, setBuildJobId] = useState<number | null>(null);
+  const [buildStep, setBuildStep] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchMapData = useCallback(async () => {
     try {
@@ -87,6 +99,79 @@ export default function ProspectMap({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isFullscreen]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const handleBuildMap = useCallback(async () => {
+    if (isBuildingMap) return;
+
+    setIsBuildingMap(true);
+    setBuildStep('Starting...');
+
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/prospect-map/build`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to start build job');
+      }
+
+      const { jobId } = await res.json();
+      setBuildJobId(jobId);
+
+      // Start polling
+      pollRef.current = setInterval(async () => {
+        try {
+          const pollRes = await fetch(`/api/accounts/${accountId}/prospect-map/build/${jobId}`);
+          if (!pollRes.ok) return;
+
+          const { job } = await pollRes.json();
+          const status = job.status as string;
+          const step = job.current_step as string | null;
+
+          setBuildStep(step || BUILD_STEP_LABELS[status] || status);
+
+          if (status === 'completed') {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+            setBuildStep('Done!');
+            // Refresh map data and parent prospect list
+            await fetchMapData();
+            onRefresh();
+            // Brief delay to show "Done!" then reset
+            setTimeout(() => {
+              setIsBuildingMap(false);
+              setBuildJobId(null);
+              setBuildStep(null);
+            }, 1500);
+          } else if (status === 'failed') {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+            setBuildStep('Failed');
+            setTimeout(() => {
+              setIsBuildingMap(false);
+              setBuildJobId(null);
+              setBuildStep(null);
+            }, 3000);
+          }
+        } catch {
+          // Polling error, keep trying
+        }
+      }, 2000);
+    } catch (err) {
+      console.error('Error starting build map:', err);
+      setIsBuildingMap(false);
+      setBuildStep(null);
+    }
+  }, [accountId, isBuildingMap, fetchMapData, onRefresh]);
 
   const handleSavePositions = useCallback(async (
     positions: Array<{ prospectId?: number; ghostKey?: string; x: number; y: number; nodeType: string }>
@@ -214,6 +299,9 @@ export default function ProspectMap({
       onDeleteEdge={handleDeleteEdge}
       onUpdateEdgeLabel={handleUpdateEdgeLabel}
       isSaving={isSaving}
+      isBuildingMap={isBuildingMap}
+      buildStep={buildStep}
+      onBuildMap={handleBuildMap}
     />
   );
 

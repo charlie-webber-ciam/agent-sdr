@@ -76,6 +76,9 @@ interface ProspectMapCanvasProps {
   onDeleteEdge: (edgeId: string) => void;
   onUpdateEdgeLabel: (edgeId: string, label: string) => void;
   isSaving: boolean;
+  isBuildingMap: boolean;
+  buildStep: string | null;
+  onBuildMap: () => void;
 }
 
 const DEAL_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444'];
@@ -153,6 +156,9 @@ export default function ProspectMapCanvas({
   onDeleteEdge,
   onUpdateEdgeLabel,
   isSaving,
+  isBuildingMap,
+  buildStep,
+  onBuildMap,
 }: ProspectMapCanvasProps) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -342,7 +348,7 @@ export default function ProspectMapCanvas({
     g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 });
 
     nodes.forEach(node => {
-      g.setNode(node.id, { width: 200, height: 100 });
+      g.setNode(node.id, { width: 220, height: 100 });
     });
 
     edges.forEach(edge => {
@@ -386,6 +392,9 @@ export default function ProspectMapCanvas({
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
         isSaving={isSaving}
+        isBuildingMap={isBuildingMap}
+        buildStep={buildStep}
+        onBuildMap={onBuildMap}
       />
       <ReactFlow
         nodes={nodes}
