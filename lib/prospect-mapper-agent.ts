@@ -43,7 +43,19 @@ export async function mapAccountProspects(
     name: 'Prospect Mapper',
     instructions: `You are an expert SDR researcher specializing in finding key personnel at target companies. Your goal is to identify real people with their actual names, titles, and LinkedIn profiles. Focus on finding decision-makers and influencers relevant to identity/security/authentication solutions.
 
-Be precise with names - only include people you can confirm work at or recently worked at the target company. Include LinkedIn URLs when found.`,
+CRITICAL RECENCY RULES:
+- Only include people who CURRENTLY work at the target company as of 2024-2025.
+- If a LinkedIn profile or article shows someone left the company, moved to a different company, or their tenure ended — EXCLUDE them.
+- Look for present-tense indicators: "is the CTO at", "works at", current LinkedIn headline showing the company.
+- EXCLUDE anyone whose profile says "Former", "Ex-", "Previously at", or shows a different current employer.
+- When in doubt about whether someone still works there, EXCLUDE them. False positives (stale contacts) are worse than missing someone.
+- Include LinkedIn URLs when found.
+
+GEOGRAPHIC FOCUS:
+- Only include prospects based in Australia or New Zealand (ANZ region).
+- Look for location indicators: Sydney, Melbourne, Brisbane, Perth, Adelaide, Auckland, Wellington, etc.
+- If a person is clearly based outside ANZ (e.g. San Francisco, London, Singapore), EXCLUDE them.
+- When the company has global offices, focus specifically on ANZ-based staff.`,
     tools: [webSearchTool()],
   });
 
@@ -85,13 +97,18 @@ ${itResult.finalOutput || 'No results'}
 ${productResult.finalOutput || 'No results'}
 
 Synthesize all findings into a deduplicated list of prospects. For each person:
-1. Confirm they are a real person at this company (not a generic title)
+1. Confirm they CURRENTLY work at this company (not a former employee — EXCLUDE anyone who has left)
 2. Assign a department: Engineering | Security | IT | Product | Executive | Other
 3. Assign a role_type: decision_maker | champion | influencer | end_user | unknown
 4. Assign seniority_level: c_suite | vp | director | manager | individual_contributor
 5. Write a 1-2 sentence relevance_reason explaining why they matter for identity/auth sales
 
-Remove duplicates. Filter out low-confidence matches (people you aren't sure actually work there).
+Remove duplicates. STRICTLY filter out:
+- Anyone who no longer works at the company (former employees, "Ex-", "Previously at")
+- Low-confidence matches where you can't verify current employment
+- Generic titles without a confirmed real person behind them
+- Anyone NOT based in Australia or New Zealand — only include ANZ-based prospects
+When in doubt, EXCLUDE — stale contacts are worse than a smaller list.
 
 Return ONLY valid JSON:
 {

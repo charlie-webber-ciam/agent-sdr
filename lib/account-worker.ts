@@ -23,6 +23,7 @@ import { analyzeOktaAccountData, OktaPatch } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
 import { logDetailedError } from './error-logger';
 import { buildOpportunityContext } from './opportunity-context';
+import { buildProspectMapForAccount } from './prospect-map-builder-processor';
 
 export interface AccountProcessingResult {
   accountId: number;
@@ -157,6 +158,17 @@ export async function processAccountWithRetry(
           logDetailedError(`[Account ${account.id}] Okta categorization failed for ${account.company_name}`, categorizationError);
           // Continue even if categorization fails - research is still valuable
         }
+      }
+
+      // Prospect Map Building
+      try {
+        const mapStats = await buildProspectMapForAccount(account);
+        console.log(
+          `[Account ${account.id}] ✓ Prospect map: ${mapStats.prospectsCreated} created, ${mapStats.prospectsSkipped} skipped, ${mapStats.hierarchyUpdates} hierarchy updates`
+        );
+      } catch (mapError) {
+        logDetailedError(`[Account ${account.id}] Prospect map building failed for ${account.company_name}`, mapError);
+        // Continue even if map building fails
       }
 
       // Mark account as completed

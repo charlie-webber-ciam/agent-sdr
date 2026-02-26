@@ -8,6 +8,7 @@ import {
   updateProspectAIData,
   bulkUpdateProspectParents,
   bulkUpsertProspectPositions,
+  type Account,
 } from './db';
 import { buildProspectMap } from './prospect-map-builder-agent';
 import { assessContactReadiness } from './prospect-contact-readiness';
@@ -17,6 +18,143 @@ const activeJobs = new Set<number>();
 
 export function isMapBuilderJobActive(jobId: number): boolean {
   return activeJobs.has(jobId);
+}
+
+/**
+ * Build prospect map for an account inline (no job tracking).
+ * Called from the bulk research pipeline after categorization.
+ * Returns stats about what was created.
+ */
+export async function buildProspectMapForAccount(
+  account: Account
+): Promise<{ prospectsCreated: number; prospectsSkipped: number; hierarchyUpdates: number }> {
+  const existingProspects = getProspectsByAccount(account.id);
+  const prospectInput = existingProspects.map(p => ({
+    id: p.id,
+    first_name: p.first_name,
+    last_name: p.last_name,
+    title: p.title,
+    department: p.department,
+    seniority_level: p.seniority_level,
+    role_type: p.role_type,
+  }));
+
+  const mapResult = await buildProspectMap(
+    account.company_name,
+    account.domain,
+    account.industry,
+    prospectInput,
+  );
+
+  // Apply hierarchy to existing prospects
+  if (mapResult.hierarchy.length > 0) {
+    const existingIds = new Set(existingProspects.map(p => p.id));
+    const validHierarchy = mapResult.hierarchy.filter(h =>
+      existingIds.has(h.prospectId) &&
+      (h.parentProspectId === null || existingIds.has(h.parentProspectId))
+    );
+    if (validHierarchy.length > 0) {
+      bulkUpdateProspectParents(validHierarchy);
+    }
+  }
+
+  // Create new prospects and track name→id for resolving reportsToName
+  const nameToId = new Map<string, number>();
+  for (const p of existingProspects) {
+    nameToId.set(`${p.first_name} ${p.last_name}`.toLowerCase(), p.id);
+  }
+
+  let prospectsCreated = 0;
+  let prospectsSkipped = 0;
+
+  for (const np of mapResult.newProspects) {
+    const existing = findExistingProspectByEmailOrName(
+      account.id,
+      undefined,
+      np.first_name,
+      np.last_name
+    );
+
+    if (existing) {
+      prospectsSkipped++;
+      nameToId.set(`${np.first_name} ${np.last_name}`.toLowerCase(), existing.id);
+      continue;
+    }
+
+    const prospect = createProspect({
+      account_id: account.id,
+      first_name: np.first_name,
+      last_name: np.last_name,
+      title: np.title,
+      department: np.department,
+      linkedin_url: np.linkedin_url || undefined,
+      role_type: np.role_type,
+      relationship_status: 'new',
+      source: 'ai_research',
+      description: np.relevance_reason,
+    });
+
+    nameToId.set(`${np.first_name} ${np.last_name}`.toLowerCase(), prospect.id);
+    prospectsCreated++;
+
+    try {
+      const readiness = assessContactReadiness(prospect);
+      updateProspectAIData(prospect.id, {
+        seniority_level: np.seniority_level,
+        contact_readiness: readiness,
+      });
+    } catch {
+      // non-critical
+    }
+  }
+
+  // Resolve reportsToName → parent_prospect_id for new prospects
+  const parentUpdates: Array<{ prospectId: number; parentProspectId: number | null }> = [];
+  for (const np of mapResult.newProspects) {
+    if (!np.reportsToName) continue;
+    const childId = nameToId.get(`${np.first_name} ${np.last_name}`.toLowerCase());
+    const parentId = nameToId.get(np.reportsToName.toLowerCase());
+    if (childId && parentId && childId !== parentId) {
+      parentUpdates.push({ prospectId: childId, parentProspectId: parentId });
+    }
+  }
+  if (parentUpdates.length > 0) {
+    bulkUpdateProspectParents(parentUpdates);
+  }
+
+  // Run dagre layout and save positions
+  const allProspects = getProspectsByAccount(account.id);
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 });
+
+  for (const p of allProspects) {
+    g.setNode(`p_${p.id}`, { width: 220, height: 100 });
+  }
+  for (const p of allProspects) {
+    if (p.parent_prospect_id) {
+      g.setEdge(`p_${p.parent_prospect_id}`, `p_${p.id}`);
+    }
+  }
+  dagre.layout(g);
+
+  const positions = allProspects.map(p => {
+    const dagreNode = g.node(`p_${p.id}`);
+    return {
+      prospectId: p.id,
+      x: dagreNode ? dagreNode.x - 100 : 0,
+      y: dagreNode ? dagreNode.y - 50 : 0,
+      nodeType: 'structured',
+    };
+  });
+
+  bulkUpsertProspectPositions(account.id, positions);
+
+  return {
+    prospectsCreated,
+    prospectsSkipped,
+    hierarchyUpdates: mapResult.hierarchy.length,
+  };
 }
 
 export async function processMapBuilderJob(jobId: number): Promise<void> {

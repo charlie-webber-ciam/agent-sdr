@@ -20,6 +20,7 @@ import { processJobParallel } from './parallel-processor';
 import { logDetailedError } from './error-logger';
 import { buildOpportunityContext } from './opportunity-context';
 import { buildActivityContext } from './activity-context';
+import { buildProspectMapForAccount } from './prospect-map-builder-processor';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -265,6 +266,24 @@ export async function processJobSequential(
           logDetailedError(`[Job ${jobId}] Okta categorization failed for account ${account.id} (${account.company_name})`, categorizationError);
           // Continue even if categorization fails - the research is still valuable
         }
+      }
+
+      // Prospect Map Building
+      insertJobEvent(jobId, 'processing', 'mapping_prospects', {
+        accountId: account.id,
+        companyName: account.company_name,
+        message: `Building prospect map: ${account.company_name}`,
+      });
+      updateJobCurrentStep(jobId, 'Building prospect map...');
+
+      try {
+        const mapStats = await buildProspectMapForAccount(account);
+        console.log(
+          `✓ Prospect map: ${account.company_name} → ${mapStats.prospectsCreated} created, ${mapStats.prospectsSkipped} skipped, ${mapStats.hierarchyUpdates} hierarchy updates`
+        );
+      } catch (mapError) {
+        logDetailedError(`[Job ${jobId}] Prospect map building failed for account ${account.id} (${account.company_name})`, mapError);
+        // Continue even if map building fails
       }
 
       // Mark account as completed

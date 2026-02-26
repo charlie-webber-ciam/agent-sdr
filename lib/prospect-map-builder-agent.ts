@@ -63,7 +63,18 @@ export async function buildProspectMap(
     name: 'Prospect Map Builder (Search)',
     instructions: `You are an expert SDR researcher specializing in finding key personnel at target companies. Your goal is to identify real people with their actual names, titles, and LinkedIn profiles. Focus on identity, security, authentication, and IT infrastructure roles.
 
-Be precise with names — only include people you can confirm work at or recently worked at the target company.`,
+CRITICAL RECENCY RULES:
+- Only include people who CURRENTLY work at the target company as of 2024-2025.
+- If a LinkedIn profile or article shows someone left the company, moved to a different company, or their tenure ended — EXCLUDE them.
+- Look for present-tense indicators: "is the CTO at", "works at", current LinkedIn headline showing the company.
+- EXCLUDE anyone whose profile says "Former", "Ex-", "Previously at", or shows a different current employer.
+- When in doubt about whether someone still works there, EXCLUDE them. False positives (stale contacts) are worse than missing someone.
+
+GEOGRAPHIC FOCUS:
+- Only include prospects based in Australia or New Zealand (ANZ region).
+- Look for location indicators: Sydney, Melbourne, Brisbane, Perth, Adelaide, Auckland, Wellington, etc.
+- If a person is clearly based outside ANZ (e.g. San Francisco, London, Singapore), EXCLUDE them.
+- When the company has global offices, focus specifically on ANZ-based staff.`,
     tools: [webSearchTool()],
   });
 
@@ -126,30 +137,44 @@ Return ONLY valid JSON:
 
 ${gapResult.finalOutput || 'No gap analysis available'}
 
-Search for specific people filling these missing roles at ${companyIdentifier}. For each gap role, search LinkedIn and the web for real people at this company.
+Search for specific people CURRENTLY filling these missing roles at ${companyIdentifier}. For each gap role, search LinkedIn and the web for real people at this company.
 
 Search queries to try:
-- "${companyName} CISO site:linkedin.com"
-- "${companyName} Head of Identity site:linkedin.com"
-- "${companyName} VP Security${domain ? ' ' + domain : ''}"
-- "${companyName} IAM Director${domain ? ' ' + domain : ''}"
+- "${companyName} CISO Australia site:linkedin.com"
+- "${companyName} Head of Identity Australia New Zealand site:linkedin.com"
+- "${companyName} VP Security Australia${domain ? ' ' + domain : ''}"
+- "${companyName} IAM Director ANZ${domain ? ' ' + domain : ''}"
 
-For each person found, note their full name, exact title, department, and LinkedIn URL if available. Only include people you are confident work at this company.`;
+IMPORTANT: Only include people who CURRENTLY work at ${companyName} right now AND are based in Australia or New Zealand. Verify by checking:
+- Their LinkedIn headline/current position shows ${companyName}
+- Their location is in Australia or New Zealand
+- Articles or pages from the last 12 months confirm they are there
+- EXCLUDE anyone who has moved on, shows "Former" or "Ex-${companyName}", or whose LinkedIn shows a different current employer
+- EXCLUDE anyone based outside Australia/New Zealand
+
+For each person found, note their full name, exact current title, department, location, and LinkedIn URL if available.`;
 
   const targetedResult = await run(searchAgent, targetedPrompt);
 
   // ── Step 4: Discovery Search ──
-  const discoveryPrompt = `Do a broader search for identity, authentication, and security-adjacent people at ${companyIdentifier} (${industry}) who may not have obvious titles.
+  const discoveryPrompt = `Do a broader search for identity, authentication, and security-adjacent people CURRENTLY at ${companyIdentifier} (${industry}) who may not have obvious titles.
 
 Search for:
-- "${companyName} authentication engineer site:linkedin.com"
-- "${companyName} identity platform${domain ? ' ' + domain : ''}"
-- "${companyName} security operations${domain ? ' ' + domain : ''}"
-- "${companyName} cloud infrastructure director${domain ? ' ' + domain : ''}"
+- "${companyName} authentication engineer Australia site:linkedin.com"
+- "${companyName} identity platform ANZ${domain ? ' ' + domain : ''}"
+- "${companyName} security operations Australia${domain ? ' ' + domain : ''}"
+- "${companyName} cloud infrastructure director Australia New Zealand${domain ? ' ' + domain : ''}"
 
 Look for people in roles like: Security Operations, Cloud Infrastructure, DevSecOps, Platform Engineering, Developer Experience, IT Operations. These are people who influence identity/auth purchasing decisions even if they're not the primary buyer.
 
-For each person found, note their full name, exact title, department, and LinkedIn URL. Only include confirmed employees.`;
+IMPORTANT: Only include people who CURRENTLY work at ${companyName} AND are based in Australia or New Zealand. EXCLUDE anyone who:
+- Shows a different current employer on LinkedIn
+- Is described as "Former" or "Ex-" employee
+- Left the company more than 6 months ago
+- You cannot verify is still there
+- Is based outside Australia or New Zealand
+
+For each person found, note their full name, exact current title, department, location, and LinkedIn URL.`;
 
   const discoveryResult = await run(searchAgent, discoveryPrompt);
 
@@ -176,10 +201,13 @@ Produce a final JSON result that:
 2. Lists NEW prospects found via search (not duplicating anyone already in the roster)
 3. For each new prospect, indicates who they report to by full name (can be an existing or another new prospect)
 
-DEDUPLICATION RULES:
+DEDUPLICATION, RECENCY & GEOGRAPHIC RULES:
 - If a search result matches an existing prospect by name, skip it
 - If two search results match each other, keep only one
-- Only include people you're confident actually work at ${companyName}
+- ONLY include people you're confident CURRENTLY work at ${companyName} right now
+- EXCLUDE anyone who has left, shows "Former"/"Ex-", or whose current employer is different
+- ONLY include people based in Australia or New Zealand — exclude anyone in other regions
+- When in doubt, leave them out — stale contacts are worse than a smaller list
 
 Return ONLY valid JSON:
 {
