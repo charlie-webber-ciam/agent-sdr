@@ -30,6 +30,7 @@ const toolLinks = [
   { href: '/ql-import', label: 'QL Import' },
   { href: '/employee-counts/jobs', label: 'Employee Counts', activePath: '/employee-counts' },
   { href: '/summarize-activities', label: 'Summarize Activities' },
+  { href: '/parent-company', label: 'Parent Company Finder' },
   { href: '/test', label: 'System Diagnostics' },
 ];
 

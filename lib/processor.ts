@@ -9,9 +9,11 @@ import {
   updateAccountMetadata,
   updateOktaAccountMetadata,
   updateAccountResearchModel,
+  updateAccountParentCompany,
   insertJobEvent,
   updateJobCurrentStep,
 } from './db';
+import { findParentCompanies } from './parent-company-finder';
 import { researchCompanyDual, ResearchMode } from './dual-researcher';
 import { analyzeAccountData } from './categorizer';
 import { analyzeOktaAccountData, OktaPatch } from './okta-categorizer';
@@ -265,6 +267,37 @@ export async function processJobSequential(
           logDetailedError(`[Job ${jobId}] Okta categorization failed for account ${account.id} (${account.company_name})`, categorizationError);
           // Continue even if categorization fails - the research is still valuable
         }
+      }
+
+      // Detect parent company
+      try {
+        insertJobEvent(jobId, 'processing', 'research_step', {
+          accountId: account.id,
+          companyName: account.company_name,
+          message: 'Detecting parent company...',
+        });
+        updateJobCurrentStep(jobId, 'Detecting parent company...');
+
+        const parentResults = await findParentCompanies([{
+          id: account.id,
+          company_name: account.company_name,
+          domain: account.domain,
+          industry: account.industry,
+        }]);
+
+        if (parentResults.length > 0) {
+          const result = parentResults[0];
+          updateAccountParentCompany(account.id, {
+            parent_company: result.parent_company,
+            parent_company_region: result.parent_company_region,
+          });
+          if (result.parent_company) {
+            console.log(`✓ Parent company: ${account.company_name} → ${result.parent_company} (${result.parent_company_region})`);
+          }
+        }
+      } catch (parentError) {
+        console.error(`Parent company detection failed for ${account.company_name}:`, parentError);
+        // Non-fatal: continue processing
       }
 
       // Mark account as completed

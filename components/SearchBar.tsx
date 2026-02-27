@@ -9,6 +9,7 @@ export interface FilterState {
   oktaTier: string;          // Okta tier
   accountOwner: string;      // Auth0 account owner
   oktaAccountOwner: string;  // Okta account owner
+  showGlobalParent: boolean; // show accounts with global parent companies
   sortBy: string;            // not exposed in UI, kept for default sort
 }
 
@@ -171,6 +172,27 @@ export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners
             ))}
           </select>
         </div>
+      </div>
+
+      {/* Global Parent toggle */}
+      <div className="mt-4">
+        <button
+          onClick={() => onFiltersChange({ ...filters, showGlobalParent: !filters.showGlobalParent })}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${
+            filters.showGlobalParent
+              ? 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'
+              : 'bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={
+              filters.showGlobalParent
+                ? "M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                : "M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878l4.242 4.242M21 21l-4.35-4.35"
+            } />
+          </svg>
+          {filters.showGlobalParent ? 'Showing Global Parent Accounts' : 'Global Parent Accounts Hidden'}
+        </button>
       </div>
     </div>
   );

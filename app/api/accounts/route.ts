@@ -12,6 +12,7 @@ export async function GET(request: Request) {
       oktaTier: searchParams.get('oktaTier') || undefined,
       accountOwner: searchParams.get('accountOwner') || undefined,
       oktaAccountOwner: searchParams.get('oktaAccountOwner') || undefined,
+      includeGlobalParent: searchParams.get('includeGlobalParent') === 'true',
       sortBy: searchParams.get('sortBy') || undefined,
       limit: parseInt(searchParams.get('limit') || '100'),
       offset: parseInt(searchParams.get('offset') || '0'),
@@ -96,6 +97,9 @@ export async function GET(request: Request) {
           triageOktaTier: acc.triage_okta_tier,
           triageSummary: acc.triage_summary,
           triagedAt: acc.triaged_at,
+          // Parent company
+          parentCompany: acc.parent_company,
+          parentCompanyRegion: acc.parent_company_region,
         };
       }),
       total,

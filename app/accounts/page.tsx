@@ -26,6 +26,8 @@ interface Account {
   oktaSkus?: string[];
   oktaAccountOwner?: string | null;
   oktaPatch?: string | null;
+  parentCompany?: string | null;
+  parentCompanyRegion?: 'australia' | 'global' | null;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -35,6 +37,7 @@ const DEFAULT_FILTERS: FilterState = {
   oktaTier: '',
   accountOwner: '',
   oktaAccountOwner: '',
+  showGlobalParent: false,
   sortBy: '',
 };
 
@@ -83,6 +86,8 @@ function AccountsPageContent() {
     searchParams.forEach((value, key) => {
       if (key === 'page') {
         page = Math.max(1, parseInt(value) || 1);
+      } else if (key === 'showGlobalParent') {
+        initFilters.showGlobalParent = value === 'true';
       } else if (key in initFilters) {
         initFilters[key as keyof FilterState] = value as never;
       }
@@ -105,6 +110,11 @@ function AccountsPageContent() {
 
       // Add all non-empty filter values
       Object.entries(filters).forEach(([key, value]) => {
+        if (key === 'showGlobalParent') {
+          // Map showGlobalParent to includeGlobalParent API param
+          if (value) params.set('includeGlobalParent', 'true');
+          return;
+        }
         if (value !== null && value !== '' && value !== DEFAULT_FILTERS[key as keyof FilterState]) {
           params.set(key, String(value));
         }
@@ -348,6 +358,10 @@ function AccountsPageContent() {
       active.push({ key: 'status', label: 'Status', value: statusLabels[filters.status] || filters.status });
     }
 
+    if (filters.showGlobalParent) {
+      active.push({ key: 'showGlobalParent', label: 'Global Parent', value: 'Showing' });
+    }
+
     if (filters.sortBy && filters.sortBy !== effectiveDefaultSortBy) {
       const sortLabels: Record<string, string> = {
         processed_at: 'Recently Processed',
@@ -374,6 +388,10 @@ function AccountsPageContent() {
     try {
       const params = new URLSearchParams();
       Object.entries(filters).forEach(([key, value]) => {
+        if (key === 'showGlobalParent') {
+          if (value) params.set('includeGlobalParent', 'true');
+          return;
+        }
         if (value !== null && value !== '' && value !== DEFAULT_FILTERS[key as keyof FilterState]) {
           params.set(key, String(value));
         }

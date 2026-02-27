@@ -13,7 +13,7 @@ if (!existsSync(dataDir)) {
 const DB_PATH = join(dataDir, 'accounts.db');
 
 // Bump this version whenever migrations change to force re-run in dev mode
-const MIGRATION_VERSION = 4;
+const MIGRATION_VERSION = 5;
 
 // Use globalThis to survive HMR in Next.js dev mode
 const globalDb = globalThis as unknown as {
@@ -137,6 +137,9 @@ export interface Account {
   // Activity summary
   activity_summary: string | null;
   activity_summary_updated_at: string | null;
+  // Parent company
+  parent_company: string | null;
+  parent_company_region: 'australia' | 'global' | null;
 }
 
 export interface ProcessingJob {
@@ -704,6 +707,7 @@ export function getAccountsWithFilters(filters: {
   oktaTier?: string | 'unassigned';
   accountOwner?: string;
   oktaAccountOwner?: string;
+  includeGlobalParent?: boolean;
   sortBy?: string;
   limit?: number;
   offset?: number;
@@ -711,6 +715,11 @@ export function getAccountsWithFilters(filters: {
   const db = getDb();
   let query = 'SELECT * FROM accounts WHERE 1=1';
   const params: any[] = [];
+
+  // By default, hide accounts with a confirmed global parent company
+  if (!filters.includeGlobalParent) {
+    query += " AND (parent_company_region IS NULL OR parent_company_region != 'global')";
+  }
 
   if (filters.search) {
     query += ' AND (company_name LIKE ? OR domain LIKE ?)';
@@ -4097,6 +4106,71 @@ export function getActivitySummarizationStats(): {
     accountsWithActivities: row.accountsWithActivities || 0,
     alreadySummarized: row.alreadySummarized || 0,
     needsSummary: row.needsSummary || 0,
+  };
+}
+
+// Parent company operations
+
+export function updateAccountParentCompany(
+  id: number,
+  data: { parent_company: string | null; parent_company_region: 'australia' | 'global' | null }
+): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE accounts
+    SET parent_company = ?,
+        parent_company_region = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(data.parent_company, data.parent_company_region, id);
+}
+
+export function getAccountsForParentCompanyFinder(filters: {
+  unprocessedOnly?: boolean;
+  limit?: number;
+}): Account[] {
+  const db = getDb();
+  let query = 'SELECT * FROM accounts WHERE research_status = \'completed\'';
+  const params: any[] = [];
+
+  if (filters.unprocessedOnly) {
+    query += ' AND parent_company_region IS NULL';
+  }
+
+  query += ' ORDER BY id';
+
+  if (filters.limit) {
+    query += ' LIMIT ?';
+    params.push(filters.limit);
+  }
+
+  return db.prepare(query).all(...params) as Account[];
+}
+
+export function getParentCompanyFinderStats(): {
+  totalCompleted: number;
+  alreadyProcessed: number;
+  needsProcessing: number;
+  australianParent: number;
+  globalParent: number;
+} {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) as totalCompleted,
+      COUNT(CASE WHEN parent_company_region IS NOT NULL THEN 1 END) as alreadyProcessed,
+      COUNT(CASE WHEN parent_company_region IS NULL THEN 1 END) as needsProcessing,
+      COUNT(CASE WHEN parent_company_region = 'australia' THEN 1 END) as australianParent,
+      COUNT(CASE WHEN parent_company_region = 'global' THEN 1 END) as globalParent
+    FROM accounts
+    WHERE research_status = 'completed'
+  `).get() as any;
+  return {
+    totalCompleted: row.totalCompleted || 0,
+    alreadyProcessed: row.alreadyProcessed || 0,
+    needsProcessing: row.needsProcessing || 0,
+    australianParent: row.australianParent || 0,
+    globalParent: row.globalParent || 0,
   };
 }
 

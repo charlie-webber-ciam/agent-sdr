@@ -12,6 +12,7 @@ export async function GET(request: Request) {
       oktaTier: searchParams.get('oktaTier') || undefined,
       accountOwner: searchParams.get('accountOwner') || undefined,
       oktaAccountOwner: searchParams.get('oktaAccountOwner') || undefined,
+      includeGlobalParent: searchParams.get('includeGlobalParent') === 'true',
       sortBy: searchParams.get('sortBy') || undefined,
       // No limit/offset — return all matching IDs
     };
