@@ -13,7 +13,7 @@ if (!existsSync(dataDir)) {
 const DB_PATH = join(dataDir, 'accounts.db');
 
 // Bump this version whenever migrations change to force re-run in dev mode
-const MIGRATION_VERSION = 5;
+const MIGRATION_VERSION = 6;
 
 // Use globalThis to survive HMR in Next.js dev mode
 const globalDb = globalThis as unknown as {
@@ -708,6 +708,7 @@ export function getAccountsWithFilters(filters: {
   accountOwner?: string;
   oktaAccountOwner?: string;
   includeGlobalParent?: boolean;
+  hqState?: string;
   sortBy?: string;
   limit?: number;
   offset?: number;
@@ -771,6 +772,15 @@ export function getAccountsWithFilters(filters: {
     }
   }
 
+  if (filters.hqState) {
+    if (filters.hqState === 'unassigned') {
+      query += ' AND hq_state IS NULL';
+    } else {
+      query += ' AND hq_state = ?';
+      params.push(filters.hqState);
+    }
+  }
+
   // Get total count before applying limit/offset
   const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
   const countStmt = db.prepare(countQuery);
@@ -810,6 +820,7 @@ export function getAccountsWithFilters(filters: {
 export function getFilterMetadata(): {
   accountOwners: string[];
   oktaAccountOwners: string[];
+  availableHqStates: string[];
 } {
   const db = getDb();
 
@@ -821,9 +832,14 @@ export function getFilterMetadata(): {
   const oktaOwnersStmt = db.prepare("SELECT DISTINCT okta_account_owner FROM accounts WHERE okta_account_owner IS NOT NULL AND okta_account_owner != '' ORDER BY okta_account_owner");
   const oktaAccountOwners = (oktaOwnersStmt.all() as Array<{ okta_account_owner: string }>).map(row => row.okta_account_owner);
 
+  // Get unique HQ states
+  const hqStatesStmt = db.prepare("SELECT DISTINCT hq_state FROM accounts WHERE hq_state IS NOT NULL AND hq_state != '' ORDER BY hq_state");
+  const availableHqStates = (hqStatesStmt.all() as Array<{ hq_state: string }>).map(row => row.hq_state);
+
   return {
     accountOwners,
     oktaAccountOwners,
+    availableHqStates,
   };
 }
 
@@ -4171,6 +4187,61 @@ export function getParentCompanyFinderStats(): {
     needsProcessing: row.needsProcessing || 0,
     australianParent: row.australianParent || 0,
     globalParent: row.globalParent || 0,
+  };
+}
+
+// HQ State assignment helpers
+
+export function getAccountsForHqStateAssignment(filters: {
+  unassignedOnly?: boolean;
+  limit?: number;
+}): Account[] {
+  const db = getDb();
+  let query = 'SELECT * FROM accounts WHERE research_status = \'completed\'';
+  const params: any[] = [];
+
+  if (filters.unassignedOnly) {
+    query += ' AND hq_state IS NULL';
+  }
+
+  query += ' ORDER BY id';
+
+  if (filters.limit) {
+    query += ' LIMIT ?';
+    params.push(filters.limit);
+  }
+
+  return db.prepare(query).all(...params) as Account[];
+}
+
+export function updateAccountHqState(id: number, hqState: string | null): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE accounts
+    SET hq_state = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(hqState, id);
+}
+
+export function getHqStateStats(): {
+  totalCompleted: number;
+  alreadyAssigned: number;
+  needsAssignment: number;
+} {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) as totalCompleted,
+      COUNT(CASE WHEN hq_state IS NOT NULL THEN 1 END) as alreadyAssigned,
+      COUNT(CASE WHEN hq_state IS NULL THEN 1 END) as needsAssignment
+    FROM accounts
+    WHERE research_status = 'completed'
+  `).get() as any;
+  return {
+    totalCompleted: row.totalCompleted || 0,
+    alreadyAssigned: row.alreadyAssigned || 0,
+    needsAssignment: row.needsAssignment || 0,
   };
 }
 

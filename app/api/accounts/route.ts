@@ -13,6 +13,7 @@ export async function GET(request: Request) {
       accountOwner: searchParams.get('accountOwner') || undefined,
       oktaAccountOwner: searchParams.get('oktaAccountOwner') || undefined,
       includeGlobalParent: searchParams.get('includeGlobalParent') === 'true',
+      hqState: searchParams.get('hqState') || undefined,
       sortBy: searchParams.get('sortBy') || undefined,
       limit: parseInt(searchParams.get('limit') || '100'),
       offset: parseInt(searchParams.get('offset') || '0'),
@@ -112,6 +113,7 @@ export async function GET(request: Request) {
       filters: {
         availableAccountOwners: filterMetadata.accountOwners,
         availableOktaAccountOwners: filterMetadata.oktaAccountOwners,
+        availableHqStates: filterMetadata.availableHqStates,
       },
     });
   } catch (error) {

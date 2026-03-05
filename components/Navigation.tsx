@@ -31,6 +31,7 @@ const toolLinks = [
   { href: '/employee-counts/jobs', label: 'Employee Counts', activePath: '/employee-counts' },
   { href: '/summarize-activities', label: 'Summarize Activities' },
   { href: '/parent-company', label: 'Parent Company Finder' },
+  { href: '/hq-state', label: 'HQ State Assignment', activePath: '/hq-state' },
   { href: '/test', label: 'System Diagnostics' },
 ];
 

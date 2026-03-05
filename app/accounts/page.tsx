@@ -37,6 +37,7 @@ const DEFAULT_FILTERS: FilterState = {
   oktaTier: '',
   accountOwner: '',
   oktaAccountOwner: '',
+  hqState: '',
   showGlobalParent: false,
   sortBy: '',
 };
@@ -52,6 +53,7 @@ function AccountsPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [accountOwners, setAccountOwners] = useState<string[]>([]);
   const [oktaAccountOwners, setOktaAccountOwners] = useState<string[]>([]);
+  const [hqStates, setHqStates] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 
   // Pagination state
@@ -145,6 +147,9 @@ function AccountsPageContent() {
       }
       if (data.filters?.availableOktaAccountOwners) {
         setOktaAccountOwners(data.filters.availableOktaAccountOwners);
+      }
+      if (data.filters?.availableHqStates) {
+        setHqStates(data.filters.availableHqStates);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load accounts');
@@ -348,6 +353,11 @@ function AccountsPageContent() {
       active.push({ key: 'oktaAccountOwner', label: 'Okta Owner', value: ownerVal });
     }
 
+    if (filters.hqState) {
+      const stateLabel = filters.hqState === 'unassigned' ? 'Unassigned' : filters.hqState;
+      active.push({ key: 'hqState', label: 'HQ State', value: stateLabel });
+    }
+
     if (filters.status) {
       const statusLabels: Record<string, string> = {
         pending: 'Pending',
@@ -436,6 +446,7 @@ function AccountsPageContent() {
         onFiltersChange={handleFiltersChange}
         auth0AccountOwners={accountOwners}
         oktaAccountOwners={oktaAccountOwners}
+        hqStates={hqStates}
       />
 
       {/* Active Filter Chips */}

@@ -52,6 +52,8 @@ export function migrateDatabase(db: Database.Database) {
     // Parent company fields
     { name: 'parent_company', type: 'TEXT' },
     { name: 'parent_company_region', type: 'TEXT', constraint: "CHECK(parent_company_region IN ('australia', 'global', NULL))" },
+    // HQ State assignment
+    { name: 'hq_state', type: 'TEXT' },
   ];
 
   // Get existing columns
@@ -88,7 +90,8 @@ export function migrateDatabase(db: Database.Database) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_triage_okta_tier ON accounts(triage_okta_tier)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_patch ON accounts(okta_patch)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_parent_company_region ON accounts(parent_company_region)');
-    console.log('✓ Added indexes for tier, priority_score, okta_processed_at, okta_tier, okta_patch, triage tiers, and parent_company_region');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_hq_state ON accounts(hq_state)');
+    console.log('✓ Added indexes for tier, priority_score, okta_processed_at, okta_tier, okta_patch, triage tiers, parent_company_region, and hq_state');
   } catch (error) {
     console.error('Failed to add indexes:', error);
   }

@@ -9,6 +9,7 @@ export interface FilterState {
   oktaTier: string;          // Okta tier
   accountOwner: string;      // Auth0 account owner
   oktaAccountOwner: string;  // Okta account owner
+  hqState: string;           // HQ state/region filter
   showGlobalParent: boolean; // show accounts with global parent companies
   sortBy: string;            // not exposed in UI, kept for default sort
 }
@@ -18,6 +19,7 @@ interface SearchBarProps {
   onFiltersChange: (filters: FilterState) => void;
   auth0AccountOwners: string[];
   oktaAccountOwners: string[];
+  hqStates: string[];
 }
 
 const selectClass = "w-full px-4 py-2 bg-white border border-gray-300 text-gray-900 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50";
@@ -25,7 +27,7 @@ const inputClass = "w-full px-4 py-2 bg-white border border-gray-300 text-gray-9
 
 const TIERS = ['A', 'B', 'C', 'unassigned'];
 
-export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners, oktaAccountOwners }: SearchBarProps) {
+export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners, oktaAccountOwners, hqStates }: SearchBarProps) {
   const [localSearch, setLocalSearch] = useState(filters.search);
   const searchTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
@@ -168,6 +170,29 @@ export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners
             {oktaAccountOwners.map((owner) => (
               <option key={owner} value={owner}>
                 {owner}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* HQ State filter row */}
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-7 gap-4">
+        <div>
+          <label htmlFor="hqState" className="block text-sm font-medium text-gray-600 mb-2">
+            HQ State
+          </label>
+          <select
+            id="hqState"
+            value={filters.hqState}
+            onChange={(e) => handleFilterChange('hqState', e.target.value)}
+            className={selectClass}
+          >
+            <option value="">All States</option>
+            <option value="unassigned">Unassigned</option>
+            {hqStates.map((state) => (
+              <option key={state} value={state}>
+                {state}
               </option>
             ))}
           </select>
