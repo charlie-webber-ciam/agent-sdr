@@ -16,7 +16,7 @@ const openai = new OpenAI({
 // Set the OpenAI client for the agents SDK
 setDefaultOpenAIClient(openai);
 
-const EMAIL_WRITER_MODEL = process.env.EMAIL_WRITER_MODEL || 'claude-4-6-sonnet';
+const EMAIL_WRITER_MODEL = process.env.EMAIL_WRITER_MODEL || 'claude-4-6-opus';
 
 export interface EmailRequest {
   recipientName: string;
