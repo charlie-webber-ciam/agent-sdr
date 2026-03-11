@@ -6,7 +6,7 @@
  */
 
 import pLimit from 'p-limit';
-import { writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { stringify } from 'csv-stringify/sync';
 import {
@@ -19,10 +19,7 @@ import {
 } from './db';
 import { validateCompany, isDuplicateDomain, CompanyInput } from './preprocess-agent';
 import { PROCESSING_CONFIG } from './config';
-
-interface CompanyToValidate extends CompanyInput {
-  index: number;
-}
+import { logWorkerError, sleep } from './worker-error-utils';
 
 const activeJobs = new Set<number>();
 
@@ -63,6 +60,7 @@ export async function processPreprocessingJob(
     let processedCount = 0;
     let removedCount = 0;
     let failedCount = 0;
+    let wasCancelled = false;
 
     // Create concurrency limiter
     const limit = pLimit(concurrency);
@@ -74,7 +72,7 @@ export async function processPreprocessingJob(
       const currentJob = getPreprocessingJob(jobId);
       if (currentJob?.paused === 1) {
         console.log(`\n⏸️  Job ${jobId} is paused. Waiting...`);
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Check every 3 seconds
+        await sleep(3000); // Check every 3 seconds
         i -= batchSize; // Stay at same batch
         continue;
       }
@@ -82,6 +80,7 @@ export async function processPreprocessingJob(
       // Check if job was cancelled
       if (currentJob?.status === 'failed') {
         console.log(`\n❌ Job ${jobId} was cancelled`);
+        wasCancelled = true;
         break;
       }
 
@@ -145,7 +144,10 @@ export async function processPreprocessingJob(
             processedCount++;
             return { success: true };
           } catch (error) {
-            console.error(`[${companyIndex + 1}/${companies.length}] Failed to validate ${company.company_name}:`, error);
+            const errorMessage = logWorkerError(
+              `[${companyIndex + 1}/${companies.length}] Failed to validate ${company.company_name}`,
+              error
+            );
 
             // Store failed result
             createPreprocessingResult({
@@ -154,7 +156,7 @@ export async function processPreprocessingJob(
               original_domain: company.domain || null,
               original_industry: company.industry,
               should_include: false,
-              validation_notes: `Validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              validation_notes: `Validation error: ${errorMessage}`,
             });
 
             failedCount++;
@@ -177,8 +179,13 @@ export async function processPreprocessingJob(
 
       // Small delay between batches
       if (i + batchSize < companies.length) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await sleep(500);
       }
+    }
+
+    if (wasCancelled) {
+      console.log(`Preprocessing job ${jobId} cancelled. Processed: ${processedCount}, Removed: ${removedCount}, Failed: ${failedCount}`);
+      return;
     }
 
     // Generate CSV file
@@ -193,12 +200,12 @@ export async function processPreprocessingJob(
     console.log(`✅ Preprocessing job ${jobId} completed`);
     console.log(`   Total processed: ${processedCount}`);
     console.log(`   Valid accounts: ${validCount}`);
-    console.log(`   Removed: ${removedCount} (${((removedCount / processedCount) * 100).toFixed(1)}%)`);
+    console.log(`   Removed: ${removedCount} (${processedCount > 0 ? ((removedCount / processedCount) * 100).toFixed(1) : '0.0'}%)`);
     console.log(`   Failed: ${failedCount}`);
     console.log(`   Output file: ${outputFilename}`);
     console.log(`${'='.repeat(60)}\n`);
   } catch (error) {
-    console.error(`\n❌ Preprocessing job ${jobId} failed:`, error);
+    logWorkerError(`Preprocessing job ${jobId} failed`, error);
     updatePreprocessingJobStatus(jobId, 'failed');
     throw error;
   } finally {
@@ -231,7 +238,6 @@ async function generateCleanedCSV(jobId: number): Promise<string> {
   const filepath = join(process.cwd(), 'data', 'preprocessed', filename);
 
   // Ensure directory exists
-  const { mkdirSync, existsSync } = require('fs');
   const dirPath = join(process.cwd(), 'data', 'preprocessed');
   if (!existsSync(dirPath)) {
     mkdirSync(dirPath, { recursive: true });

@@ -23,11 +23,12 @@ const PATCH_OPTIONS: { value: OktaPatch; label: string }[] = [
 ];
 
 const toolLinks = [
+  { href: '/email-writer', label: 'Email Writer' },
   { href: '/quick-research', label: 'Quick Research' },
   { href: '/upload', label: 'Upload CSV' },
   { href: '/import-opportunities', label: 'Import Opportunities' },
   { href: '/import-activities', label: 'Import Activities' },
-  { href: '/ql-import', label: 'QL Import' },
+  { href: '/ql-import', label: 'Bulk HVT Writing' },
   { href: '/employee-counts/jobs', label: 'Employee Counts', activePath: '/employee-counts' },
   { href: '/summarize-activities', label: 'Summarize Activities' },
   { href: '/parent-company', label: 'Parent Company Finder' },

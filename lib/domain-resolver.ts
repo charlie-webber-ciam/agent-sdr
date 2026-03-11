@@ -53,7 +53,7 @@ export function isPlaceholderDomain(domain: string): boolean {
  */
 export function extractBaseDomain(domain: string): string {
   // Strip protocol, path, query string
-  let d = domain
+  const d = domain
     .toLowerCase()
     .replace(/^https?:\/\//, '')
     .replace(/^www\./, '')

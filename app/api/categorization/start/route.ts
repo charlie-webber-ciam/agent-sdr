@@ -1,5 +1,13 @@
 import { NextResponse } from 'next/server';
 import { processCategorizationJob } from '@/lib/categorization-processor';
+import { getCategorizationJob } from '@/lib/db';
+import {
+  assertProcessAction,
+  parseJobId,
+  parseJsonBody,
+  processActionErrorResponse,
+  runInBackground,
+} from '@/lib/process-action-utils';
 
 /**
  * POST /api/categorization/start
@@ -11,19 +19,13 @@ import { processCategorizationJob } from '@/lib/categorization-processor';
  */
 export async function POST(request: Request) {
   try {
-    const { jobId } = await request.json();
+    const body = await parseJsonBody<{ jobId?: unknown }>(request);
+    const jobId = parseJobId(body.jobId);
+    const job = getCategorizationJob(jobId);
+    assertProcessAction(job, 404, 'Categorization job not found');
+    assertProcessAction(job.status === 'pending', 409, `Job is ${job.status}. Only pending jobs can be started.`);
 
-    if (!jobId) {
-      return NextResponse.json(
-        { error: 'Job ID is required' },
-        { status: 400 }
-      );
-    }
-
-    // Start processing in the background
-    processCategorizationJob(jobId).catch(error => {
-      console.error(`Background categorization processing failed for job ${jobId}:`, error);
-    });
+    runInBackground(`categorization/start job ${jobId}`, () => processCategorizationJob(jobId));
 
     return NextResponse.json({
       success: true,
@@ -32,13 +34,10 @@ export async function POST(request: Request) {
     });
 
   } catch (error) {
-    console.error('Failed to start categorization job:', error);
-    return NextResponse.json(
-      {
-        error: 'Failed to start categorization job',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
+    return processActionErrorResponse(
+      'Failed to start categorization job',
+      error,
+      'Failed to start categorization job'
     );
   }
 }

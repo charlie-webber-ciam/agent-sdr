@@ -4,9 +4,9 @@ import {
   updateCategorizationJobStatus,
   updateCategorizationJobProgress,
   updateAccountMetadata,
-  getAccount,
 } from './db';
 import { analyzeAccountData } from './categorizer';
+import { logWorkerError, parseFilters, sleep } from './worker-error-utils';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -43,7 +43,9 @@ export async function processCategorizationJob(jobId: number): Promise<void> {
     updateCategorizationJobStatus(jobId, 'processing');
 
     // Parse filters
-    const filters = job.filters ? JSON.parse(job.filters) : {};
+    const filters = parseFilters(job.filters, `Categorization job ${jobId} filters`) as Parameters<
+      typeof getAccountsForCategorization
+    >[0];
 
     // Get accounts to categorize
     const accounts = getAccountsForCategorization(filters);
@@ -58,8 +60,16 @@ export async function processCategorizationJob(jobId: number): Promise<void> {
 
     let processedCount = 0;
     let failedCount = 0;
+    let wasCancelled = false;
 
     for (const account of accounts) {
+      const currentJob = getCategorizationJob(jobId);
+      if (currentJob?.status === 'failed') {
+        console.log(`Categorization job ${jobId} was cancelled`);
+        wasCancelled = true;
+        break;
+      }
+
       console.log(`Categorizing account ${account.id}: ${account.company_name}`);
 
       // Update job to show current account
@@ -88,10 +98,10 @@ export async function processCategorizationJob(jobId: number): Promise<void> {
         updateCategorizationJobProgress(jobId, processedCount, failedCount);
 
         // Add a small delay between accounts to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await sleep(500);
 
       } catch (error) {
-        console.error(`Failed to categorize ${account.company_name}:`, error);
+        logWorkerError(`Failed to categorize ${account.company_name}`, error);
         failedCount++;
 
         // Update job progress
@@ -101,12 +111,17 @@ export async function processCategorizationJob(jobId: number): Promise<void> {
       }
     }
 
+    if (wasCancelled) {
+      console.log(`Categorization job ${jobId} cancelled. Processed: ${processedCount}, Failed: ${failedCount}`);
+      return;
+    }
+
     // Mark job as completed
     updateCategorizationJobStatus(jobId, 'completed');
     console.log(`Categorization job ${jobId} completed. Processed: ${processedCount}, Failed: ${failedCount}`);
 
   } catch (error) {
-    console.error(`Categorization job ${jobId} failed:`, error);
+    logWorkerError(`Categorization job ${jobId} failed`, error);
     updateCategorizationJobStatus(jobId, 'failed');
   } finally {
     activeJobs.delete(jobId);

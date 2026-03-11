@@ -2,7 +2,6 @@
 
 import { useState, use } from 'react';
 import { useRouter } from 'next/navigation';
-import Navigation from '@/components/Navigation';
 import { Spinner } from '@/components/Spinner';
 import { useJobPolling } from '@/lib/hooks/useJobPolling';
 import { downloadFile } from '@/lib/utils';
@@ -134,7 +133,6 @@ export default function PreprocessProgressPage({
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-        <Navigation />
         <div className="container mx-auto px-4 py-8">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6">
             <p className="text-red-800">{error}</p>
@@ -147,7 +145,6 @@ export default function PreprocessProgressPage({
   if (!job) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-        <Navigation />
         <div className="container mx-auto px-4 py-8">
           <div className="text-center">
             <Spinner className="h-12 w-12 text-blue-600 mx-auto" />
@@ -164,8 +161,6 @@ export default function PreprocessProgressPage({
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <Navigation />
-
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         {/* Header */}
         <div className="text-center mb-8">

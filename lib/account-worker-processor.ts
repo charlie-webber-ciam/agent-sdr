@@ -12,6 +12,7 @@ import { mapAccountProspects } from './prospect-mapper-agent';
 import { generateEmail } from './email-writer-agent';
 import { assessContactReadiness } from './prospect-contact-readiness';
 import { buildWeightedOpportunityContext } from './opportunity-context';
+import { logWorkerError, safeErrorCleanup, sleep } from './worker-error-utils';
 
 const activeJobs = new Set<number>();
 
@@ -62,7 +63,7 @@ export async function processAccountWorkingJob(jobId: number): Promise<void> {
         researchSummary
       );
     } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = logWorkerError(`Account working job ${jobId} mapping failed`, error);
       updateAccountWorkingJob(jobId, {
         status: 'failed',
         error_log: `Mapping failed: ${errMsg}`,
@@ -131,8 +132,11 @@ export async function processAccountWorkingJob(jobId: number): Promise<void> {
           seniority_level: mapped.seniority_level,
           contact_readiness: readiness,
         });
-      } catch {
-        // non-critical
+      } catch (error) {
+        logWorkerError(
+          `Account working job ${jobId} failed to score readiness for prospect ${mapped.first_name} ${mapped.last_name}`,
+          error
+        );
       }
 
       createdProspectIds.push(prospect.id);
@@ -190,8 +194,7 @@ export async function processAccountWorkingJob(jobId: number): Promise<void> {
           current_step: `Email generated for ${prospectName} (${emailsGenerated}/${createdProspectIds.length})`,
         });
       } catch (error) {
-        const errMsg = error instanceof Error ? error.message : String(error);
-        console.error(`Failed to generate email for ${prospectName}:`, errMsg);
+        const errMsg = logWorkerError(`Failed to generate email for ${prospectName}`, error);
         emailsFailed++;
         errorMessages.push(`[${prospectName}] ${errMsg}`);
         updateAccountWorkingJob(jobId, {
@@ -201,7 +204,7 @@ export async function processAccountWorkingJob(jobId: number): Promise<void> {
       }
 
       // Small delay between email generations to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await sleep(500);
     }
 
     updateAccountWorkingJob(jobId, {
@@ -213,17 +216,14 @@ export async function processAccountWorkingJob(jobId: number): Promise<void> {
 
     console.log(`Account working job ${jobId} completed. Prospects: ${prospectsCreated} created, ${prospectsSkipped} skipped. Emails: ${emailsGenerated} generated, ${emailsFailed} failed.`);
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    console.error(`Account working job ${jobId} failed:`, errMsg);
-    try {
+    const errMsg = logWorkerError(`Account working job ${jobId} failed`, error);
+    safeErrorCleanup(`Account working job ${jobId}`, () => {
       updateAccountWorkingJob(jobId, {
         status: 'failed',
         error_log: `[FATAL] ${errMsg}`,
         completed_at: new Date().toISOString(),
       });
-    } catch {
-      // ignore db errors during error handling
-    }
+    });
   } finally {
     activeJobs.delete(jobId);
   }

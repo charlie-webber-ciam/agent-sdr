@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getAccount, createAccountWorkingJob } from '@/lib/db';
 import { processMapBuilderJob } from '@/lib/prospect-map-builder-processor';
+import {
+  assertProcessAction,
+  parseJobId,
+  processActionErrorResponse,
+  runInBackground,
+} from '@/lib/process-action-utils';
 
 export async function POST(
   request: Request,
@@ -8,18 +14,12 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const accountId = parseInt(id);
-
-    if (isNaN(accountId)) {
-      return NextResponse.json({ error: 'Invalid account ID' }, { status: 400 });
-    }
+    const accountId = parseJobId(id, 'account ID');
 
     const account = getAccount(accountId);
-    if (!account) {
-      return NextResponse.json({ error: 'Account not found' }, { status: 404 });
-    }
+    assertProcessAction(account, 404, 'Account not found');
 
-    const body = await request.json().catch(() => ({}));
+    const body = await request.json().catch(() => ({} as { userContext?: unknown }));
     const userContext = typeof body.userContext === 'string' ? body.userContext.trim() : '';
 
     const jobId = createAccountWorkingJob({
@@ -28,17 +28,10 @@ export async function POST(
       user_context: userContext || undefined,
     });
 
-    // Fire background processor (don't await)
-    processMapBuilderJob(jobId).catch(err => {
-      console.error(`Background map builder job ${jobId} error:`, err);
-    });
+    runInBackground(`prospect-map/build job ${jobId}`, () => processMapBuilderJob(jobId));
 
     return NextResponse.json({ jobId });
   } catch (error) {
-    console.error('Failed to create map builder job:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to create job' },
-      { status: 500 }
-    );
+    return processActionErrorResponse('Failed to create map builder job', error, 'Failed to create job');
   }
 }

@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getAccount, createAccountWorkingJob, getAccountWorkingJobs } from '@/lib/db';
 import { processAccountWorkingJob } from '@/lib/account-worker-processor';
+import {
+  assertProcessAction,
+  parseJobId,
+  parseJsonBody,
+  processActionErrorResponse,
+  runInBackground,
+} from '@/lib/process-action-utils';
 
 export async function POST(
   request: Request,
@@ -8,38 +15,26 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const accountId = parseInt(id);
-
-    if (isNaN(accountId)) {
-      return NextResponse.json({ error: 'Invalid account ID' }, { status: 400 });
-    }
+    const accountId = parseJobId(id, 'account ID');
 
     const account = getAccount(accountId);
-    if (!account) {
-      return NextResponse.json({ error: 'Account not found' }, { status: 404 });
-    }
+    assertProcessAction(account, 404, 'Account not found');
 
-    const body = await request.json();
+    const body = await parseJsonBody<{ user_context?: unknown; research_context?: unknown }>(request);
     const { user_context, research_context } = body;
+    const safeResearchContext = research_context === 'okta' ? 'okta' : 'auth0';
 
     const jobId = createAccountWorkingJob({
       account_id: accountId,
-      user_context: user_context || undefined,
-      research_context: research_context || 'auth0',
+      user_context: typeof user_context === 'string' ? user_context : undefined,
+      research_context: safeResearchContext,
     });
 
-    // Fire background processor (don't await)
-    processAccountWorkingJob(jobId).catch(err => {
-      console.error(`Background account working job ${jobId} error:`, err);
-    });
+    runInBackground(`account working/start job ${jobId}`, () => processAccountWorkingJob(jobId));
 
     return NextResponse.json({ jobId });
   } catch (error) {
-    console.error('Failed to create account working job:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to create job' },
-      { status: 500 }
-    );
+    return processActionErrorResponse('Failed to create account working job', error, 'Failed to create job');
   }
 }
 
@@ -49,19 +44,11 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const accountId = parseInt(id);
-
-    if (isNaN(accountId)) {
-      return NextResponse.json({ error: 'Invalid account ID' }, { status: 400 });
-    }
+    const accountId = parseJobId(id, 'account ID');
 
     const jobs = getAccountWorkingJobs(accountId);
     return NextResponse.json({ jobs });
   } catch (error) {
-    console.error('Failed to list account working jobs:', error);
-    return NextResponse.json(
-      { error: 'Failed to list jobs' },
-      { status: 500 }
-    );
+    return processActionErrorResponse('Failed to list account working jobs', error, 'Failed to list jobs');
   }
 }

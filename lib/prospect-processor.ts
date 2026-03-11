@@ -10,6 +10,7 @@ import {
 import { classifyProspect } from './prospect-classifier';
 import { enrichProspect } from './prospect-enricher';
 import { assessContactReadiness } from './prospect-contact-readiness';
+import { logWorkerError, parseFilters } from './worker-error-utils';
 
 const CONCURRENCY = 10;
 
@@ -50,7 +51,9 @@ export async function processProspectJob(jobId: number): Promise<void> {
     console.log(`Starting prospect processing job ${jobId}: ${job.name} (${job.job_subtype}), concurrency: ${CONCURRENCY}`);
     updateProspectProcessingJobStatus(jobId, 'processing');
 
-    const filters = job.filters ? JSON.parse(job.filters) : {};
+    const filters = parseFilters(job.filters, `Prospect processing job ${jobId} filters`) as Parameters<
+      typeof getProspectsForProcessing
+    >[0];
     const prospects = getProspectsForProcessing(filters);
 
     if (prospects.length === 0) {
@@ -106,8 +109,7 @@ export async function processProspectJob(jobId: number): Promise<void> {
 
           processedCount++;
         } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error);
-          console.error(`Failed to process prospect ${name}:`, errMsg);
+          const errMsg = logWorkerError(`Failed to process prospect ${name}`, error);
           failedCount++;
           appendProspectProcessingJobError(jobId, `[${name}] ${errMsg}`);
         }
@@ -121,8 +123,7 @@ export async function processProspectJob(jobId: number): Promise<void> {
     updateProspectProcessingJobStatus(jobId, 'completed');
     console.log(`Prospect processing job ${jobId} completed. Processed: ${processedCount}, Failed: ${failedCount}`);
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    console.error(`Prospect processing job ${jobId} failed:`, errMsg);
+    const errMsg = logWorkerError(`Prospect processing job ${jobId} failed`, error);
     appendProspectProcessingJobError(jobId, `[JOB FATAL] ${errMsg}`);
     updateProspectProcessingJobStatus(jobId, 'failed');
   } finally {

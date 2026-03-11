@@ -6,10 +6,15 @@ import {
   updateAccountJobId,
 } from '@/lib/db';
 import { processJob } from '@/lib/processor';
+import {
+  parseJsonBody,
+  processActionErrorResponse,
+  runInBackground,
+} from '@/lib/process-action-utils';
 
 export async function POST(request: Request) {
   try {
-    const { accountIds } = await request.json();
+    const { accountIds } = await parseJsonBody<{ accountIds?: number[] }>(request);
 
     if (!accountIds || !Array.isArray(accountIds) || accountIds.length === 0) {
       return NextResponse.json(
@@ -50,9 +55,7 @@ export async function POST(request: Request) {
     const resetCount = resetAccountsToPending(accountIds);
 
     // Start processing in background (don't await)
-    processJob(jobId).catch(error => {
-      console.error(`Background processing failed for job ${jobId}:`, error);
-    });
+    runInBackground(`accounts/reprocess job ${jobId}`, () => processJob(jobId));
 
     return NextResponse.json({
       success: true,
@@ -61,10 +64,6 @@ export async function POST(request: Request) {
       resetCount,
     });
   } catch (error) {
-    console.error('Failed to reprocess accounts:', error);
-    return NextResponse.json(
-      { error: 'Failed to reprocess accounts' },
-      { status: 500 }
-    );
+    return processActionErrorResponse('Failed to reprocess accounts', error, 'Failed to reprocess accounts');
   }
 }

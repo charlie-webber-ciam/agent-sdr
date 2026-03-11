@@ -21,8 +21,8 @@ import { researchCompanyDual, ResearchMode } from './dual-researcher';
 import { analyzeAccountData } from './categorizer';
 import { analyzeOktaAccountData, OktaPatch } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
-import { logDetailedError } from './error-logger';
 import { buildOpportunityContext } from './opportunity-context';
+import { logWorkerError, sleep } from './worker-error-utils';
 
 export interface AccountProcessingResult {
   accountId: number;
@@ -116,7 +116,7 @@ export async function processAccountWithRetry(
             `[Account ${account.id}] ✓ Auth0 categorization: Tier ${suggestions.tier} (Priority: ${suggestions.priorityScore})`
           );
         } catch (categorizationError) {
-          logDetailedError(`[Account ${account.id}] Auth0 categorization failed for ${account.company_name}`, categorizationError);
+          logWorkerError(`[Account ${account.id}] Auth0 categorization failed for ${account.company_name}`, categorizationError);
           // Continue even if categorization fails - research is still valuable
         }
       }
@@ -154,7 +154,7 @@ export async function processAccountWithRetry(
             `[Account ${account.id}] ✓ Okta categorization: Tier ${oktaSuggestions.tier} (Priority: ${oktaSuggestions.priorityScore})`
           );
         } catch (categorizationError) {
-          logDetailedError(`[Account ${account.id}] Okta categorization failed for ${account.company_name}`, categorizationError);
+          logWorkerError(`[Account ${account.id}] Okta categorization failed for ${account.company_name}`, categorizationError);
           // Continue even if categorization fails - research is still valuable
         }
       }
@@ -190,20 +190,23 @@ export async function processAccountWithRetry(
         console.warn(
           `[Account ${account.id}] Rate limit hit for ${account.company_name}. Retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`
         );
-        logDetailedError(`[Account ${account.id}] Rate limit error details for ${account.company_name} (attempt ${attempt + 1})`, error);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        logWorkerError(`[Account ${account.id}] Rate limit error details for ${account.company_name} (attempt ${attempt + 1})`, error);
+        await sleep(delay);
         continue;
       } else if (attempt < maxRetries) {
         // Regular retry with shorter delay
         console.warn(
           `[Account ${account.id}] Error processing ${account.company_name}. Retrying in ${retryDelay}ms... (attempt ${attempt + 1}/${maxRetries})`
         );
-        logDetailedError(`[Account ${account.id}] Retry error details for ${account.company_name} (attempt ${attempt + 1})`, error);
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        logWorkerError(`[Account ${account.id}] Retry error details for ${account.company_name} (attempt ${attempt + 1})`, error);
+        await sleep(retryDelay);
         continue;
       } else {
         // Max retries exceeded
-        logDetailedError(`[Account ${account.id}] FINAL FAILURE for ${account.company_name} after ${maxRetries + 1} attempts (domain: ${account.domain || 'none'}, industry: ${account.industry})`, lastError);
+        logWorkerError(
+          `[Account ${account.id}] FINAL FAILURE for ${account.company_name} after ${maxRetries + 1} attempts (domain: ${account.domain || 'none'}, industry: ${account.industry})`,
+          lastError
+        );
         break;
       }
     }

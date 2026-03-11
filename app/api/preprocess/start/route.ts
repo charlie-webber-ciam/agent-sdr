@@ -1,36 +1,48 @@
 import { NextResponse } from 'next/server';
 import { processPreprocessingJob } from '@/lib/preprocess-processor';
 import { PROCESSING_CONFIG } from '@/lib/config';
+import { getPreprocessingJob } from '@/lib/db';
+import {
+  assertProcessAction,
+  parseJobId,
+  parseJsonBody,
+  processActionErrorResponse,
+  runInBackground,
+} from '@/lib/process-action-utils';
+import type { CompanyInput } from '@/lib/preprocess-agent';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await parseJsonBody<{
+      jobId?: unknown;
+      companies?: unknown;
+      concurrency?: unknown;
+    }>(request);
     const { jobId, companies, concurrency } = body;
-
-    if (!jobId) {
-      return NextResponse.json({ error: 'Job ID is required' }, { status: 400 });
-    }
-
-    if (!companies || !Array.isArray(companies)) {
-      return NextResponse.json(
-        { error: 'Companies array is required' },
-        { status: 400 }
-      );
-    }
+    const parsedJobId = parseJobId(jobId);
+    assertProcessAction(Array.isArray(companies), 400, 'Companies array is required');
+    const typedCompanies = companies as CompanyInput[];
+    const job = getPreprocessingJob(parsedJobId);
+    assertProcessAction(job, 404, 'Preprocessing job not found');
+    assertProcessAction(job.status === 'pending', 409, `Job is ${job.status}. Only pending jobs can be started.`);
 
     // Validate concurrency
-    const selectedConcurrency = concurrency
-      ? Math.min(Math.max(parseInt(concurrency, 10), 1), 10)
-      : Math.min(PROCESSING_CONFIG.concurrency, 10);
+    let selectedConcurrency = Math.min(PROCESSING_CONFIG.concurrency, 10);
+    if (concurrency !== undefined) {
+      const parsedConcurrency =
+        typeof concurrency === 'number' ? concurrency : parseInt(String(concurrency), 10);
+      assertProcessAction(Number.isInteger(parsedConcurrency), 400, 'Concurrency must be an integer');
+      selectedConcurrency = Math.min(Math.max(parsedConcurrency, 1), 10);
+    }
 
-    console.log(`Starting preprocessing for job ${jobId}:`);
-    console.log(`  Companies: ${companies.length}`);
+    console.log(`Starting preprocessing for job ${parsedJobId}:`);
+    console.log(`  Companies: ${typedCompanies.length}`);
     console.log(`  Concurrency: ${selectedConcurrency}`);
 
-    // Start processing in background
-    processPreprocessingJob(jobId, companies, selectedConcurrency).catch(error => {
-      console.error(`Background preprocessing failed for job ${jobId}:`, error);
-    });
+    runInBackground(
+      `preprocess/start job ${parsedJobId}`,
+      () => processPreprocessingJob(parsedJobId, typedCompanies, selectedConcurrency)
+    );
 
     return NextResponse.json({
       success: true,
@@ -38,10 +50,6 @@ export async function POST(request: Request) {
       concurrency: selectedConcurrency,
     });
   } catch (error) {
-    console.error('Failed to start preprocessing:', error);
-    return NextResponse.json(
-      { error: 'Failed to start preprocessing' },
-      { status: 500 }
-    );
+    return processActionErrorResponse('Failed to start preprocessing', error, 'Failed to start preprocessing');
   }
 }

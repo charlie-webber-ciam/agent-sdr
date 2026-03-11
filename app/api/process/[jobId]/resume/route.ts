@@ -1,18 +1,25 @@
 import { NextResponse } from 'next/server';
-import { resumeProcessingJob } from '@/lib/db';
+import { getJob, resumeProcessingJob } from '@/lib/db';
 import { isJobActive, processJob } from '@/lib/processor';
+import {
+  assertProcessAction,
+  parseJobId,
+  processActionErrorResponse,
+  runInBackground,
+} from '@/lib/process-action-utils';
 
 export async function POST(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
     const { jobId } = await params;
-    const jobIdNum = parseInt(jobId, 10);
+    const jobIdNum = parseJobId(jobId);
 
-    if (isNaN(jobIdNum)) {
-      return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 });
-    }
+    const job = getJob(jobIdNum);
+    assertProcessAction(job, 404, 'Job not found');
+    assertProcessAction(job.status === 'processing', 409, `Job is ${job.status}. Only processing jobs can be resumed.`);
+    assertProcessAction(!(job.paused !== 1 && isJobActive(jobIdNum)), 409, 'Job is already running');
 
     resumeProcessingJob(jobIdNum);
     console.log(`Job ${jobIdNum} resumed`);
@@ -21,14 +28,11 @@ export async function POST(
     // re-launch it so the job actually continues.
     if (!isJobActive(jobIdNum)) {
       console.log(`Job ${jobIdNum} has no active processing loop — re-launching`);
-      processJob(jobIdNum).catch(error => {
-        console.error(`Background processing failed for resumed job ${jobIdNum}:`, error);
-      });
+      runInBackground(`process/resume job ${jobIdNum}`, () => processJob(jobIdNum));
     }
 
     return NextResponse.json({ success: true, message: 'Job resumed' });
   } catch (error) {
-    console.error('Failed to resume job:', error);
-    return NextResponse.json({ error: 'Failed to resume job' }, { status: 500 });
+    return processActionErrorResponse('Failed to resume job', error, 'Failed to resume job');
   }
 }

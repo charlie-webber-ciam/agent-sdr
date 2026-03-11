@@ -8,10 +8,20 @@ import {
 } from '@/lib/db';
 import { processJob } from '@/lib/processor';
 import { processCategorizationJob } from '@/lib/categorization-processor';
+import {
+  parseJsonBody,
+  processActionErrorResponse,
+  runInBackground,
+} from '@/lib/process-action-utils';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await parseJsonBody<{
+      action?: string;
+      statuses?: string[];
+      industry?: string;
+      limit?: number;
+    }>(request);
     const {
       action,
       statuses = ['failed'],
@@ -65,9 +75,7 @@ export async function POST(request: Request) {
       });
 
       // Fire and forget
-      processJob(newJobId).catch((error) => {
-        console.error(`Background retry research failed for job ${newJobId}:`, error);
-      });
+      runInBackground(`reprocess/research job ${newJobId}`, () => processJob(newJobId));
 
       return NextResponse.json({
         success: true,
@@ -82,9 +90,7 @@ export async function POST(request: Request) {
       const accountIds = accounts.map(a => a.id);
       const jobId = createCategorizationJob(name, accounts.length, { accountIds });
 
-      processCategorizationJob(jobId).catch((error) => {
-        console.error(`Background retry categorization failed for job ${jobId}:`, error);
-      });
+      runInBackground(`reprocess/categorization job ${jobId}`, () => processCategorizationJob(jobId));
 
       return NextResponse.json({
         success: true,
@@ -95,10 +101,10 @@ export async function POST(request: Request) {
       });
     }
   } catch (error) {
-    console.error('Error retrying failed/pending accounts:', error);
-    return NextResponse.json(
-      { error: 'Failed to retry accounts' },
-      { status: 500 }
+    return processActionErrorResponse(
+      'Error retrying failed/pending accounts',
+      error,
+      'Failed to retry accounts'
     );
   }
 }

@@ -13,11 +13,19 @@ function ProspectGhostNode({ data }: NodeProps) {
     collapsedCount?: number;
     hasChildren?: boolean;
     onToggleCollapse?: () => void;
+    isFocused?: boolean;
+    isSearchMatch?: boolean;
   };
 
   return (
     <div
-      className="relative bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg shadow-sm opacity-80 hover:opacity-100 hover:border-gray-400 transition-all group"
+      className={`relative bg-gray-50 border-2 border-dashed rounded-lg shadow-sm opacity-80 hover:opacity-100 transition-all group ${
+        d.isFocused
+          ? 'border-blue-500 ring-2 ring-blue-200'
+          : d.isSearchMatch
+            ? 'border-sky-300 ring-1 ring-sky-200'
+            : 'border-gray-300 hover:border-gray-400'
+      }`}
       style={{ width: 200, minHeight: 70 }}
     >
       <Handle type="target" position={Position.Top} className="!bg-gray-300 !w-2 !h-2" />

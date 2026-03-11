@@ -10,6 +10,7 @@ interface StoredEmail {
   id: number;
   subject: string;
   body: string;
+  key_insights: string | null;
   status: string;
   email_type: string;
   created_at: string;
@@ -41,6 +42,23 @@ const STATUS_OPTIONS = [
   { value: 'warm', label: 'Warm' },
   { value: 'cold', label: 'Cold' },
 ];
+
+function parseKeyInsights(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((item): item is string => typeof item === 'string')
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+  } catch {
+    // Fall through to legacy plain-text format.
+  }
+  const trimmed = raw.trim();
+  return trimmed ? [trimmed] : [];
+}
 
 export default function ProspectDetailModal({ prospect, accountId, allProspects, onClose, onSave, onWriteEmail, onViewExisting }: Props) {
   const isCreate = !prospect;
@@ -245,7 +263,9 @@ export default function ProspectDetailModal({ prospect, accountId, allProspects,
                 Generated Emails ({storedEmails.length})
               </h4>
               <div className="space-y-2">
-                {storedEmails.map(email => (
+                {storedEmails.map(email => {
+                  const keyInsights = parseKeyInsights(email.key_insights);
+                  return (
                   <div key={email.id} className="bg-white rounded-lg border border-gray-200 p-3">
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
@@ -285,8 +305,21 @@ export default function ProspectDetailModal({ prospect, accountId, allProspects,
                     <div className="text-xs text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap max-h-24 overflow-y-auto">
                       {email.body}
                     </div>
+                    {keyInsights.length > 0 && (
+                      <details className="mt-2">
+                        <summary className="text-xs font-medium text-gray-600 cursor-pointer hover:text-gray-800">
+                          Key Insights ({keyInsights.length})
+                        </summary>
+                        <ul className="mt-2 list-disc list-inside space-y-1 text-xs text-gray-700 bg-blue-50 border border-blue-100 rounded-md p-2.5">
+                          {keyInsights.map((insight, index) => (
+                            <li key={`${email.id}-insight-${index}`}>{insight}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           )}

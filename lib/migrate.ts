@@ -183,6 +183,19 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Failed to add paused column to processing_jobs:', error);
   }
 
+  // Add archived column to processing_jobs
+  try {
+    const processingJobsCols = db.prepare('PRAGMA table_info(processing_jobs)').all() as any[];
+    const hasArchived = processingJobsCols.some((col: any) => col.name === 'archived');
+    if (!hasArchived) {
+      db.exec('ALTER TABLE processing_jobs ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+      console.log('✓ Added archived column to processing_jobs');
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_jobs_archived ON processing_jobs(archived)');
+  } catch (error) {
+    console.error('Failed to add archived column/index to processing_jobs:', error);
+  }
+
   // Add account_tags table if it doesn't exist
   try {
     db.exec(`
@@ -291,6 +304,46 @@ export function migrateDatabase(db: Database.Database) {
     }
   } catch (error) {
     console.error('Failed to add mobile column to prospects:', error);
+  }
+
+  // Add chat_threads and chat_messages tables if they don't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_threads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        context_key TEXT NOT NULL UNIQUE,
+        context_account_id INTEGER,
+        context_prospect_id INTEGER,
+        perspective TEXT NOT NULL DEFAULT 'auth0',
+        title TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (context_account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+        FOREIGN KEY (context_prospect_id) REFERENCES prospects(id) ON DELETE SET NULL
+      )
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content_markdown TEXT,
+        content_json TEXT,
+        tool_name TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
+      )
+    `);
+
+    db.exec('CREATE INDEX IF NOT EXISTS idx_chat_threads_context_account ON chat_threads(context_account_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_chat_threads_context_prospect ON chat_threads(context_prospect_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_chat_threads_updated_at ON chat_threads(updated_at DESC)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at)');
+    console.log('✓ Ensured chat_threads and chat_messages tables exist');
+  } catch (error) {
+    console.error('Failed to create chat tables:', error);
   }
 
   // Add prospect_import_jobs table if it doesn't exist

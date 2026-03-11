@@ -1,29 +1,32 @@
 import { NextResponse } from 'next/server';
-import { deleteProcessingJob } from '@/lib/db';
+import { deleteProcessingJob, getJob } from '@/lib/db';
+import { isJobActive } from '@/lib/processor';
+import {
+  assertProcessAction,
+  parseJobId,
+  processActionErrorResponse,
+} from '@/lib/process-action-utils';
 
 export async function DELETE(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
     const { jobId } = await params;
-    const jobIdNum = parseInt(jobId, 10);
+    const jobIdNum = parseJobId(jobId);
 
-    if (isNaN(jobIdNum)) {
-      return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 });
-    }
+    const job = getJob(jobIdNum);
+    assertProcessAction(job, 404, 'Job not found');
+    assertProcessAction(job.status !== 'processing', 409, 'Processing jobs cannot be deleted');
+    assertProcessAction(!isJobActive(jobIdNum), 409, 'Job still has an active processing loop');
 
     const success = deleteProcessingJob(jobIdNum);
-
-    if (!success) {
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-    }
+    assertProcessAction(success, 500, 'Failed to delete job');
 
     console.log(`Job ${jobIdNum} deleted`);
 
     return NextResponse.json({ success: true, message: 'Job deleted' });
   } catch (error) {
-    console.error('Failed to delete job:', error);
-    return NextResponse.json({ error: 'Failed to delete job' }, { status: 500 });
+    return processActionErrorResponse('Failed to delete job', error, 'Failed to delete job');
   }
 }

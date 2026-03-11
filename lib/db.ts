@@ -13,7 +13,7 @@ if (!existsSync(dataDir)) {
 const DB_PATH = join(dataDir, 'accounts.db');
 
 // Bump this version whenever migrations change to force re-run in dev mode
-const MIGRATION_VERSION = 6;
+const MIGRATION_VERSION = 8;
 
 // Use globalThis to survive HMR in Next.js dev mode
 const globalDb = globalThis as unknown as {
@@ -149,6 +149,7 @@ export interface ProcessingJob {
   processed_count: number;
   failed_count: number;
   status: 'pending' | 'processing' | 'completed' | 'failed';
+  archived: number; // SQLite boolean (0/1)
   current_account_id: number | null;
   paused: number; // SQLite boolean (0/1)
   created_at: string;
@@ -518,13 +519,20 @@ export function getJob(id: number): ProcessingJob | undefined {
   return stmt.get(id) as ProcessingJob | undefined;
 }
 
-export function getAllJobs(limit: number = 10): ProcessingJob[] {
+export function getAllJobs(limit: number = 10, includeArchived: boolean = false): ProcessingJob[] {
   const db = getDb();
-  const stmt = db.prepare(`
-    SELECT * FROM processing_jobs
-    ORDER BY created_at DESC
-    LIMIT ?
-  `);
+  const stmt = includeArchived
+    ? db.prepare(`
+      SELECT * FROM processing_jobs
+      ORDER BY created_at DESC
+      LIMIT ?
+    `)
+    : db.prepare(`
+      SELECT * FROM processing_jobs
+      WHERE archived = 0
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
   return stmt.all(limit) as ProcessingJob[];
 }
 
@@ -1684,6 +1692,26 @@ export function deleteProcessingJob(jobId: number): boolean {
   }
 }
 
+export function archiveProcessingJob(jobId: number): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE processing_jobs
+    SET archived = 1,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(jobId);
+}
+
+export function unarchiveProcessingJob(jobId: number): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE processing_jobs
+    SET archived = 0,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(jobId);
+}
+
 // Pause/Resume/Cancel operations for preprocessing jobs
 
 export function pausePreprocessingJob(jobId: number): void {
@@ -2359,6 +2387,162 @@ export function deleteAccountNote(noteId: number): boolean {
   const db = getDb();
   const result = db.prepare('DELETE FROM account_notes WHERE id = ?').run(noteId);
   return result.changes > 0;
+}
+
+// ─── Chat Threads / Messages ────────────────────────────────────────────────
+
+export type ChatPerspective = 'auth0' | 'okta';
+export type ChatRole = 'user' | 'assistant' | 'tool';
+
+export interface ChatThread {
+  id: number;
+  context_key: string;
+  context_account_id: number | null;
+  context_prospect_id: number | null;
+  perspective: ChatPerspective;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  thread_id: number;
+  role: ChatRole;
+  content_markdown: string | null;
+  content_json: string | null;
+  tool_name: string | null;
+  created_at: string;
+}
+
+export function buildChatContextKey(input: {
+  accountId?: number | null;
+  prospectId?: number | null;
+  perspective: ChatPerspective;
+}): string {
+  const accountPart = input.accountId ?? 'none';
+  const prospectPart = input.prospectId ?? 'none';
+  return `${input.perspective}:${accountPart}:${prospectPart}`;
+}
+
+export function getChatThread(id: number): ChatThread | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM chat_threads WHERE id = ?').get(id) as ChatThread | undefined;
+}
+
+export function getChatThreadByContext(input: {
+  accountId?: number | null;
+  prospectId?: number | null;
+  perspective: ChatPerspective;
+}): ChatThread | undefined {
+  const db = getDb();
+  const contextKey = buildChatContextKey(input);
+  return db.prepare('SELECT * FROM chat_threads WHERE context_key = ?').get(contextKey) as ChatThread | undefined;
+}
+
+export function getOrCreateChatThread(input: {
+  accountId?: number | null;
+  prospectId?: number | null;
+  perspective: ChatPerspective;
+  title?: string | null;
+}): ChatThread {
+  const existing = getChatThreadByContext(input);
+  if (existing) return existing;
+
+  const db = getDb();
+  const contextKey = buildChatContextKey(input);
+  const stmt = db.prepare(`
+    INSERT INTO chat_threads (context_key, context_account_id, context_prospect_id, perspective, title)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    contextKey,
+    input.accountId ?? null,
+    input.prospectId ?? null,
+    input.perspective,
+    input.title ?? null
+  );
+
+  return db.prepare('SELECT * FROM chat_threads WHERE id = ?').get(result.lastInsertRowid) as ChatThread;
+}
+
+export function listChatThreads(filters?: {
+  accountId?: number | null;
+  prospectId?: number | null;
+  perspective?: ChatPerspective;
+  limit?: number;
+}): ChatThread[] {
+  const db = getDb();
+  let query = 'SELECT * FROM chat_threads WHERE 1=1';
+  const params: any[] = [];
+
+  if (filters?.accountId !== undefined) {
+    query += filters.accountId === null ? ' AND context_account_id IS NULL' : ' AND context_account_id = ?';
+    if (filters.accountId !== null) params.push(filters.accountId);
+  }
+
+  if (filters?.prospectId !== undefined) {
+    query += filters.prospectId === null ? ' AND context_prospect_id IS NULL' : ' AND context_prospect_id = ?';
+    if (filters.prospectId !== null) params.push(filters.prospectId);
+  }
+
+  if (filters?.perspective) {
+    query += ' AND perspective = ?';
+    params.push(filters.perspective);
+  }
+
+  query += ' ORDER BY updated_at DESC LIMIT ?';
+  params.push(filters?.limit ?? 20);
+
+  return db.prepare(query).all(...params) as ChatThread[];
+}
+
+export function getChatMessages(threadId: number, limit: number = 200): ChatMessage[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT * FROM chat_messages
+    WHERE thread_id = ?
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).all(threadId, limit) as ChatMessage[];
+}
+
+export function createChatMessage(data: {
+  threadId: number;
+  role: ChatRole;
+  contentMarkdown?: string | null;
+  contentJson?: string | null;
+  toolName?: string | null;
+}): ChatMessage {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO chat_messages (thread_id, role, content_markdown, content_json, tool_name)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.threadId,
+    data.role,
+    data.contentMarkdown ?? null,
+    data.contentJson ?? null,
+    data.toolName ?? null
+  );
+
+  db.prepare(`
+    UPDATE chat_threads
+    SET updated_at = datetime('now')
+    WHERE id = ?
+  `).run(data.threadId);
+
+  return db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid) as ChatMessage;
+}
+
+export function updateChatThreadTitle(threadId: number, title: string | null): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE chat_threads
+    SET title = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(title, threadId);
 }
 
 // ─── Prospects ──────────────────────────────────────────────────────────────

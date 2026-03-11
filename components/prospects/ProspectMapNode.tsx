@@ -38,11 +38,19 @@ function ProspectMapNode({ data }: NodeProps) {
     collapsedCount?: number;
     hasChildren?: boolean;
     onToggleCollapse?: () => void;
+    isFocused?: boolean;
+    isSearchMatch?: boolean;
   };
 
   return (
     <div
-      className="relative bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group"
+      className={`relative bg-white border rounded-lg shadow-sm transition-all cursor-pointer group ${
+        d.isFocused
+          ? 'border-blue-500 ring-2 ring-blue-200 shadow-md'
+          : d.isSearchMatch
+            ? 'border-sky-300 ring-1 ring-sky-200 shadow-sm'
+            : 'border-gray-200 hover:shadow-md hover:border-blue-300'
+      }`}
       style={{
         width: 220,
         minHeight: 80,

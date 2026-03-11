@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import Navigation from '@/components/Navigation';
 
 export default function PreprocessPage() {
   const router = useRouter();
@@ -93,8 +92,6 @@ export default function PreprocessPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <Navigation />
-
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         {/* Header */}
         <div className="text-center mb-8">

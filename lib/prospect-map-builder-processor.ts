@@ -10,6 +10,7 @@ import {
 import { analyzeProspectHierarchy } from './prospect-map-builder-agent';
 import { buildWeightedOpportunityContext } from './opportunity-context';
 import dagre from '@dagrejs/dagre';
+import { logWorkerError, safeErrorCleanup } from './worker-error-utils';
 
 const activeJobs = new Set<number>();
 
@@ -142,17 +143,14 @@ export async function processMapBuilderJob(jobId: number): Promise<void> {
 
     console.log(`Map builder job ${jobId} completed. Hierarchy updates: ${stats.hierarchyUpdates}`);
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    console.error(`Map builder job ${jobId} failed:`, errMsg);
-    try {
+    const errMsg = logWorkerError(`Map builder job ${jobId} failed`, error);
+    safeErrorCleanup(`Map builder job ${jobId}`, () => {
       updateAccountWorkingJob(jobId, {
         status: 'failed',
         error_log: `[FATAL] ${errMsg}`,
         completed_at: new Date().toISOString(),
       });
-    } catch {
-      // ignore db errors during error handling
-    }
+    });
   } finally {
     activeJobs.delete(jobId);
   }

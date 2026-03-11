@@ -12,11 +12,11 @@ import {
   updateTriageJobStatus,
   updateTriageJobProgress,
   updateAccountTriage,
-  Account,
 } from './db';
-import { triageCompany, TriageResult } from './triage-agent';
+import { triageCompany } from './triage-agent';
 import { PROCESSING_CONFIG } from './config';
 import type { OktaPatch } from './okta-categorizer';
+import { logWorkerError, sleep } from './worker-error-utils';
 
 const activeJobs = new Set<number>();
 
@@ -49,6 +49,10 @@ export async function processTriageJob(
     if (!job) {
       throw new Error(`Triage job ${jobId} not found`);
     }
+    if (job.status !== 'pending') {
+      console.log(`Triage job ${jobId} is not pending (status: ${job.status})`);
+      return;
+    }
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`Starting TRIAGE for job ${jobId}`);
@@ -70,6 +74,7 @@ export async function processTriageJob(
 
     let processedCount = 0;
     let failedCount = 0;
+    let wasCancelled = false;
 
     // Create concurrency limiter
     const limit = pLimit(concurrency);
@@ -81,7 +86,7 @@ export async function processTriageJob(
       const currentJob = getTriageJob(jobId);
       if (currentJob?.paused === 1) {
         console.log(`\n  Job ${jobId} is paused. Waiting...`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await sleep(3000);
         i -= batchSize; // Stay at same batch
         continue;
       }
@@ -89,6 +94,7 @@ export async function processTriageJob(
       // Check if job was cancelled
       if (currentJob?.status === 'failed') {
         console.log(`\n  Job ${jobId} was cancelled`);
+        wasCancelled = true;
         break;
       }
 
@@ -132,7 +138,10 @@ export async function processTriageJob(
             );
             return { success: true };
           } catch (error) {
-            console.error(`[${accountIndex + 1}/${accounts.length}] Failed to triage ${account.company_name}:`, error);
+            logWorkerError(
+              `[${accountIndex + 1}/${accounts.length}] Failed to triage ${account.company_name}`,
+              error
+            );
             failedCount++;
             processedCount++;
             return { success: false };
@@ -152,8 +161,13 @@ export async function processTriageJob(
 
       // Small delay between batches
       if (i + batchSize < accounts.length) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await sleep(500);
       }
+    }
+
+    if (wasCancelled) {
+      console.log(`Triage job ${jobId} cancelled. Processed: ${processedCount}, Failed: ${failedCount}`);
+      return;
     }
 
     // Mark job as completed
@@ -165,7 +179,7 @@ export async function processTriageJob(
     console.log(`   Failed: ${failedCount}`);
     console.log(`${'='.repeat(60)}\n`);
   } catch (error) {
-    console.error(`\nTriage job ${jobId} failed:`, error);
+    logWorkerError(`Triage job ${jobId} failed`, error);
     updateTriageJobStatus(jobId, 'failed');
     throw error;
   } finally {

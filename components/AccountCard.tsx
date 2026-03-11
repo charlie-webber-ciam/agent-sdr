@@ -2,8 +2,14 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
+import { UserRound } from 'lucide-react';
+
 import { usePerspective } from '@/lib/perspective-context';
-import { formatDomain, capitalize } from '@/lib/utils';
+import { formatDomain, capitalize, cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardFooter } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface AccountCardProps {
   account: {
@@ -28,6 +34,27 @@ interface AccountCardProps {
   onSelectionChange?: (id: number, selected: boolean) => void;
 }
 
+function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+  switch (status) {
+    case 'completed':
+      return 'default';
+    case 'processing':
+      return 'secondary';
+    case 'failed':
+      return 'destructive';
+    default:
+      return 'outline';
+  }
+}
+
+function tierBadgeClass(tier: 'A' | 'B' | 'C' | 'DQ' | null | undefined): string {
+  if (tier === 'A') return 'border-emerald-300 bg-emerald-100 text-emerald-800';
+  if (tier === 'B') return 'border-blue-300 bg-blue-100 text-blue-800';
+  if (tier === 'C') return 'border-slate-300 bg-slate-100 text-slate-800';
+  if (tier === 'DQ') return 'border-red-300 bg-red-100 text-red-800';
+  return '';
+}
+
 function AccountCardInner({
   account,
   selectable = false,
@@ -37,26 +64,10 @@ function AccountCardInner({
   const router = useRouter();
   const { perspective } = usePerspective();
 
-  // Perspective-aware computed values
   const displayTier = perspective === 'okta' ? account.oktaTier : account.tier;
   const displaySkus = perspective === 'okta' ? account.oktaSkus : account.auth0Skus;
   const displayPriority = perspective === 'okta' ? account.oktaPriorityScore : account.priorityScore;
   const displayOwner = perspective === 'okta' ? account.oktaAccountOwner : account.auth0AccountOwner;
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return 'bg-green-100 text-green-800 border border-green-300';
-      case 'processing':
-        return 'bg-blue-100 text-blue-800 border border-blue-300';
-      case 'failed':
-        return 'bg-red-100 text-red-800 border border-red-300';
-      case 'pending':
-        return 'bg-gray-100 text-gray-600 border border-gray-300';
-      default:
-        return 'bg-gray-100 text-gray-600 border border-gray-300';
-    }
-  };
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Not processed';
@@ -78,138 +89,106 @@ function AccountCardInner({
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
     if (diffDays < 30) {
-      return { color: 'bg-green-500', textColor: 'text-green-400', label: `${diffDays}d ago`, level: 'fresh' };
+      return { color: 'bg-green-500', label: `${diffDays}d ago` };
     } else if (diffDays < 60) {
-      return { color: 'bg-yellow-500', textColor: 'text-yellow-400', label: `${diffDays}d ago`, level: 'aging' };
-    } else {
-      return { color: 'bg-red-500', textColor: 'text-red-400', label: `${diffDays}d ago`, level: 'stale' };
+      return { color: 'bg-yellow-500', label: `${diffDays}d ago` };
     }
+
+    return { color: 'bg-red-500', label: `${diffDays}d ago` };
   };
 
   const stalenessInfo = getStalenessInfo(account.processedAt);
-
-  const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    if (onSelectionChange) {
-      onSelectionChange(account.id, e.target.checked);
-    }
-  };
 
   const handleCardClick = () => {
     router.push(`/accounts/${account.id}`);
   };
 
-  const tierBorder = displayTier === 'A' ? 'border-l-green-500' :
-                     displayTier === 'B' ? 'border-l-blue-500' :
-                     displayTier === 'DQ' ? 'border-l-red-400' :
-                     displayTier === 'C' ? 'border-l-gray-500' : 'border-l-transparent';
+  const tierAccent =
+    displayTier === 'A'
+      ? 'border-l-green-500'
+      : displayTier === 'B'
+        ? 'border-l-blue-500'
+        : displayTier === 'DQ'
+          ? 'border-l-red-400'
+          : displayTier === 'C'
+            ? 'border-l-slate-400'
+            : 'border-l-transparent';
 
   return (
-    <div
+    <Card
       onClick={handleCardClick}
-      className={`bg-white rounded-xl border border-gray-200 hover:border-gray-300 transition-all p-6 border-l-2 ${tierBorder} ${
-        selected
-          ? 'border-blue-500/50 bg-blue-50'
-          : ''
-      } cursor-pointer hover:shadow-lg hover:scale-[1.005]`}
-    >
-      {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        {selectable && (
-          <div className="flex items-start mr-3">
-            <input
-              type="checkbox"
-              checked={selected}
-              onChange={handleCheckboxChange}
-              onClick={(e) => e.stopPropagation()}
-              className="w-5 h-5 mt-1 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
-            />
-          </div>
-        )}
-        <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900 mb-1">
-            {account.companyName}
-          </h3>
-          <p className="text-sm text-gray-500">
-            {formatDomain(account.domain)} · {account.industry}
-          </p>
-          {displayOwner && (
-            <p className={`text-xs mt-1 flex items-center gap-1 ${perspective === 'okta' ? 'text-purple-600' : 'text-blue-600'}`}>
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              {displayOwner}
-            </p>
-          )}
-
-          {/* Tier and SKU Badges */}
-          <div className="flex flex-wrap gap-2 mt-2">
-            {displayTier && (
-              <span className={`badge ${
-                displayTier === 'A' ? 'tier-a' :
-                displayTier === 'B' ? 'tier-b' :
-                displayTier === 'DQ' ? 'tier-c' :
-                'tier-c'
-              }`}>
-                {displayTier === 'DQ' ? 'DQ' : `Tier ${displayTier}`}
-              </span>
-            )}
-            {displaySkus && displaySkus.map(sku => (
-              <span key={sku} className="badge sku">
-                {sku}
-              </span>
-            ))}
-            {displayPriority !== null && displayPriority !== undefined && displayPriority >= 75 && (
-              <span className="badge priority-high">
-                {displayPriority}/100
-              </span>
-            )}
-          </div>
-        </div>
-        <span
-          className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
-            account.status
-          )}`}
-        >
-          {capitalize(account.status)}
-        </span>
-      </div>
-
-      {/* Summary */}
-      {account.researchSummary && (
-        <div className="mb-3">
-          <p className="text-sm text-gray-500 line-clamp-3">
-            {account.researchSummary}
-          </p>
-        </div>
+      className={cn(
+        'cursor-pointer border-l-4 transition hover:shadow-md',
+        tierAccent,
+        selected && 'border-blue-500 bg-blue-50/70'
       )}
-
-      {/* Footer */}
-      <div className="flex items-center justify-between text-sm text-gray-500 pt-3 border-t border-gray-200">
-        <div className="flex items-center gap-2">
-          {stalenessInfo && (
-            <span className={`inline-block w-2 h-2 rounded-full ${stalenessInfo.color}`} title={`Research ${stalenessInfo.level}`}></span>
+    >
+      <CardContent className="p-5">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          {selectable && (
+            <div onClick={(e) => e.stopPropagation()} className="pt-0.5">
+              <Checkbox
+                checked={selected}
+                onCheckedChange={(checked) => onSelectionChange?.(account.id, checked === true)}
+                aria-label={`Select ${account.companyName}`}
+              />
+            </div>
           )}
+
+          <div className="min-w-0 flex-1">
+            <h3 className="mb-1 truncate text-lg font-semibold text-foreground">{account.companyName}</h3>
+            <p className="text-sm text-muted-foreground">{formatDomain(account.domain)} · {account.industry}</p>
+
+            {displayOwner && (
+              <p className={cn('mt-1 flex items-center gap-1 text-xs', perspective === 'okta' ? 'text-purple-700' : 'text-blue-700')}>
+                <UserRound className="h-3.5 w-3.5" />
+                {displayOwner}
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {displayTier && (
+                <Badge variant="outline" className={cn('font-semibold', tierBadgeClass(displayTier))}>
+                  {displayTier === 'DQ' ? 'DQ' : `Tier ${displayTier}`}
+                </Badge>
+              )}
+              {displaySkus?.map((sku) => (
+                <Badge key={sku} variant="secondary">
+                  {sku}
+                </Badge>
+              ))}
+              {displayPriority !== null && displayPriority !== undefined && displayPriority >= 75 && (
+                <Badge variant="destructive">{displayPriority}/100</Badge>
+              )}
+            </div>
+          </div>
+
+          <Badge variant={statusVariant(account.status)}>{capitalize(account.status)}</Badge>
+        </div>
+
+        {account.researchSummary && (
+          <p className="line-clamp-3 text-sm text-muted-foreground">{account.researchSummary}</p>
+        )}
+      </CardContent>
+
+      <CardFooter className="flex items-center justify-between border-t px-5 py-3 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2">
+          {stalenessInfo && <span className={cn('inline-block h-2 w-2 rounded-full', stalenessInfo.color)} />}
           <span>{stalenessInfo ? stalenessInfo.label : formatDate(account.processedAt)}</span>
         </div>
-        {!selectable && (
-          <span className="text-blue-400 font-medium hover:text-blue-300">
-            View Details →
-          </span>
-        )}
-        {selectable && (
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              router.push(`/accounts/${account.id}`);
-            }}
-            className="text-blue-400 font-medium hover:text-blue-300 cursor-pointer"
-          >
-            View Details →
-          </span>
-        )}
-      </div>
-    </div>
+
+        <Button
+          variant="link"
+          className="h-auto p-0 text-sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/accounts/${account.id}`);
+          }}
+        >
+          View Details
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }
 

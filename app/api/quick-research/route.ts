@@ -5,6 +5,8 @@ import {
   updateAccountStatus,
   updateAccountAuth0Research,
   updateAccountOktaResearch,
+  updateJobStatus,
+  updateJobProgress,
   getAccount,
   updateAccountMetadata,
   updateOktaAccountMetadata,
@@ -74,6 +76,9 @@ async function performResearch(
   oktaPatch?: OktaPatch
 ) {
   try {
+    // Mark the quick research job as actively processing this account
+    updateJobStatus(jobId, 'processing', accountId);
+
     // Update status to processing
     updateAccountStatus(accountId, 'processing');
 
@@ -196,6 +201,11 @@ async function performResearch(
       companyName,
       message: `Done: ${companyName}`,
     });
+
+    // Keep processing_jobs in sync so queue/progress views can finalize correctly
+    updateJobProgress(jobId, 1, 0);
+    updateJobStatus(jobId, 'completed');
+
     insertJobEvent(jobId, 'processing', 'job_complete', {
       message: `Research complete for ${companyName}`,
     });
@@ -203,6 +213,8 @@ async function performResearch(
     console.error(`Research failed for account ${accountId}:`, error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     updateAccountStatus(accountId, 'failed', errorMessage);
+    updateJobProgress(jobId, 0, 1);
+    updateJobStatus(jobId, 'failed');
     insertJobEvent(jobId, 'processing', 'account_failed', {
       accountId,
       companyName,

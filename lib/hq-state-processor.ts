@@ -6,6 +6,7 @@ import {
   updateAccountHqState,
 } from './db';
 import { assignHqStates } from './hq-state-agent';
+import { logWorkerError, parseFilters, sleep } from './worker-error-utils';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -40,12 +41,15 @@ export async function processHqStateJob(jobId: number): Promise<void> {
     updateCategorizationJobStatus(jobId, 'processing');
 
     // Parse filters
-    const filters = job.filters ? JSON.parse(job.filters) : {};
+    const filters = parseFilters(job.filters, `HQ state job ${jobId} filters`);
+    const unassignedOnly =
+      typeof filters.unassignedOnly === 'boolean' ? filters.unassignedOnly : true;
+    const limit = typeof filters.limit === 'number' ? filters.limit : undefined;
 
     // Get accounts to process
     const accounts = getAccountsForHqStateAssignment({
-      unassignedOnly: filters.unassignedOnly ?? true,
-      limit: filters.limit,
+      unassignedOnly,
+      limit,
     });
 
     if (accounts.length === 0) {
@@ -58,10 +62,18 @@ export async function processHqStateJob(jobId: number): Promise<void> {
 
     let processedCount = 0;
     let failedCount = 0;
+    let wasCancelled = false;
 
     // Process in batches of 50
     const BATCH_SIZE = 50;
     for (let i = 0; i < accounts.length; i += BATCH_SIZE) {
+      const currentJob = getCategorizationJob(jobId);
+      if (currentJob?.status === 'failed') {
+        console.log(`HQ state job ${jobId} was cancelled`);
+        wasCancelled = true;
+        break;
+      }
+
       const batch = accounts.slice(i, i + BATCH_SIZE);
 
       // Update job to show current account (first in batch)
@@ -86,7 +98,7 @@ export async function processHqStateJob(jobId: number): Promise<void> {
         processedCount += batch.length;
         console.log(`✓ Batch ${Math.floor(i / BATCH_SIZE) + 1}: processed ${batch.length} accounts`);
       } catch (error) {
-        console.error(`Batch failed for HQ state job ${jobId}:`, error);
+        logWorkerError(`Batch failed for HQ state job ${jobId}`, error);
         failedCount += batch.length;
       }
 
@@ -95,8 +107,13 @@ export async function processHqStateJob(jobId: number): Promise<void> {
 
       // Small delay between batches
       if (i + BATCH_SIZE < accounts.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await sleep(200);
       }
+    }
+
+    if (wasCancelled) {
+      console.log(`HQ state job ${jobId} cancelled. Processed: ${processedCount}, Failed: ${failedCount}`);
+      return;
     }
 
     // Mark job as completed
@@ -104,7 +121,7 @@ export async function processHqStateJob(jobId: number): Promise<void> {
     console.log(`HQ state job ${jobId} completed. Processed: ${processedCount}, Failed: ${failedCount}`);
 
   } catch (error) {
-    console.error(`HQ state job ${jobId} failed:`, error);
+    logWorkerError(`HQ state job ${jobId} failed`, error);
     updateCategorizationJobStatus(jobId, 'failed');
   } finally {
     activeJobs.delete(jobId);

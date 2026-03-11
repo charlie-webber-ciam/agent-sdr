@@ -17,6 +17,8 @@
  *  13. Account Status
  */
 
+import { parse as parseCsv } from 'csv-parse/sync';
+
 export interface ParsedLead {
   rowNumber: number;
   sfdcAccountId: string | null;  // 15-digit
@@ -42,8 +44,57 @@ const ID_15 = /^[a-zA-Z0-9]{15}$/;
 const ID_18 = /^[a-zA-Z0-9]{18}$/;
 const ROW_NUMBER = /^\d+$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_IN_TEXT_RE = /([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i;
+const DATE_TIME_RE = /\b\d{1,2}\/\d{1,2}\/\d{4}\b/;
+const OWNER_COUNT_RE = /^([A-Za-z][A-Za-z\s.'-]+)\((\d+)\)$/;
+const PAREN_NUMBER_RE = /^\(\d+\)$/;
+const HEADER_PATTERNS = [
+  /^total records/i,
+  /^lead owner\b/i,
+  /^mapped sdr\b/i,
+  /^sorted by\b/i,
+  /^company \/ account$/i,
+  /^email$/i,
+  /^most recent routed date\/time$/i,
+  /^most recent lead source detail$/i,
+  /^lead source$/i,
+  /^lead status$/i,
+  /^subtotal\b/i,
+  /^select row for drill down/i,
+  /^select all rows for drill down/i,
+];
 
 export function parseQlText(rawText: string): ParseResult {
+  if (looksLikeCsv(rawText)) {
+    const csvFirst = parseCsvLeadReportText(rawText);
+    if (csvFirst.leads.length > 0) {
+      return csvFirst;
+    }
+  }
+
+  const classic = parseClassicRowBlockText(rawText);
+  const grouped = parseGroupedOwnerReportText(rawText);
+  const csv = parseCsvLeadReportText(rawText);
+
+  const candidates = [classic, grouped, csv];
+  let best = candidates[0];
+  for (const candidate of candidates.slice(1)) {
+    if (candidate.leads.length > best.leads.length) {
+      best = candidate;
+    }
+  }
+
+  if (best.leads.length > 0) {
+    return best;
+  }
+
+  return {
+    leads: [],
+    parseErrors: [...classic.parseErrors, ...grouped.parseErrors, ...csv.parseErrors],
+  };
+}
+
+function parseClassicRowBlockText(rawText: string): ParseResult {
   const leads: ParsedLead[] = [];
   const parseErrors: string[] = [];
 
@@ -103,6 +154,151 @@ export function parseQlText(rawText: string): ParseResult {
   return { leads, parseErrors };
 }
 
+function parseGroupedOwnerReportText(rawText: string): ParseResult {
+  const allLines = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const leads: ParsedLead[] = [];
+  const parseErrors: string[] = [];
+
+  let currentOwner = '';
+  let rowNumber = 1;
+
+  for (let i = 0; i < allLines.length; i++) {
+    const line = allLines[i].trim();
+    if (!line) continue;
+
+    const ownerMatch = line.match(OWNER_COUNT_RE);
+    if (
+      ownerMatch &&
+      !line.toLowerCase().startsWith('subtotal') &&
+      !isLikelyCompanyName(ownerMatch[1])
+    ) {
+      currentOwner = ownerMatch[1].trim();
+      continue;
+    }
+
+    const email = extractEmailFromLine(line);
+    if (!email) continue;
+
+    const company = findPreviousCompanyLine(allLines, i);
+    if (!company) {
+      parseErrors.push(`Email ${email}: unable to determine company/account, skipped`);
+      continue;
+    }
+
+    const metadata = collectNextMetadataLines(allLines, i + 1);
+    const parsedName = splitNameFromEmail(email);
+    const campaignName = metadata.campaignOrDetail || '';
+    const leadSource = metadata.leadSource || '';
+    const leadStatus = metadata.leadStatus || '';
+
+    leads.push({
+      rowNumber,
+      sfdcAccountId: null,
+      sfdcContactId: '',
+      firstName: parsedName.firstName || 'Unknown',
+      lastName: parsedName.lastName || 'Unknown',
+      campaignName,
+      memberStatus: leadStatus,
+      auth0Owner: currentOwner,
+      company,
+      title: '',
+      phone: null,
+      email,
+      accountStatus: leadSource || null,
+    });
+
+    rowNumber++;
+  }
+
+  if (leads.length === 0) {
+    parseErrors.push('No leads detected in grouped owner report format');
+  }
+
+  return { leads, parseErrors };
+}
+
+function parseCsvLeadReportText(rawText: string): ParseResult {
+  const leads: ParsedLead[] = [];
+  const parseErrors: string[] = [];
+
+  if (!looksLikeCsv(rawText)) {
+    return { leads, parseErrors };
+  }
+
+  try {
+    const rows = parseCsv(rawText, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      relax_column_count: true,
+      bom: true,
+    }) as Array<Record<string, string>>;
+
+    let rowNumber = 1;
+    for (const row of rows) {
+      const firstNameRaw = getCsvField(row, ['first name']);
+      const lastNameRaw = getCsvField(row, ['last name']);
+      const titleRaw = getCsvField(row, ['title']);
+      const companyRaw = getCsvField(row, ['company / account', 'company/account', 'company']);
+      const emailRaw = getCsvField(row, ['email']);
+      const campaignDetail = getCsvField(row, ['most recent lead source detail']);
+      const leadSource = getCsvField(row, ['lead source']);
+      const leadStatus = getCsvField(row, ['lead status']);
+      const leadOwner = getCsvField(row, ['lead owner']);
+      const mappedSdr = getCsvField(row, ['mapped sdr']);
+      const routedDate = getCsvField(row, ['most recent routed date/time']);
+
+      const email = extractEmailFromLine(emailRaw);
+      if (!companyRaw && !email) continue;
+
+      let firstName = firstNameRaw;
+      let lastName = lastNameRaw;
+      if (!firstName && !lastName && email) {
+        const fromEmail = splitNameFromEmail(email);
+        firstName = fromEmail.firstName;
+        lastName = fromEmail.lastName;
+      }
+
+      if (!companyRaw) {
+        parseErrors.push(`CSV row ${rowNumber}: missing Company / Account, skipped`);
+        rowNumber++;
+        continue;
+      }
+
+      if (!firstName) firstName = 'Unknown';
+      if (!lastName) lastName = 'Unknown';
+
+      const accountStatusParts: string[] = [];
+      if (leadSource) accountStatusParts.push(`Lead Source: ${leadSource}`);
+      if (routedDate) accountStatusParts.push(`Routed: ${routedDate}`);
+      if (mappedSdr) accountStatusParts.push(`Mapped SDR: ${mappedSdr}`);
+
+      leads.push({
+        rowNumber,
+        sfdcAccountId: null,
+        sfdcContactId: '',
+        firstName,
+        lastName,
+        campaignName: campaignDetail || '',
+        memberStatus: leadStatus || '',
+        auth0Owner: leadOwner || '',
+        company: companyRaw,
+        title: titleRaw || '',
+        phone: null,
+        email,
+        accountStatus: accountStatusParts.length > 0 ? accountStatusParts.join(' | ') : null,
+      });
+
+      rowNumber++;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    parseErrors.push(`CSV parse failed: ${message}`);
+  }
+
+  return { leads, parseErrors };
+}
+
 function parseBlock(rowNumber: number, lines: string[]): ParsedLead {
   let cursor = 0;
 
@@ -152,8 +348,9 @@ function parseBlock(rowNumber: number, lines: string[]): ParsedLead {
   // Classify remaining lines
   const unclassified: string[] = [];
   for (const line of remaining) {
-    if (EMAIL_RE.test(line)) {
-      email = line;
+    const extractedEmail = extractEmailFromLine(line);
+    if (extractedEmail) {
+      email = extractedEmail;
     } else if (isPhoneLike(line)) {
       phone = line;
     } else {
@@ -183,8 +380,135 @@ function parseBlock(rowNumber: number, lines: string[]): ParsedLead {
   };
 }
 
+function findPreviousCompanyLine(allLines: string[], emailIndex: number): string | null {
+  const start = Math.max(0, emailIndex - 14);
+  for (let i = emailIndex - 1; i >= start; i--) {
+    const line = allLines[i].trim();
+    if (!line) continue;
+    if (extractEmailFromLine(line)) continue;
+    if (DATE_TIME_RE.test(line)) continue;
+    if (PAREN_NUMBER_RE.test(line)) continue;
+    if (isReportHeaderOrNoise(line)) continue;
+    return line;
+  }
+  return null;
+}
+
+function collectNextMetadataLines(allLines: string[], startIndex: number): {
+  campaignOrDetail: string | null;
+  leadSource: string | null;
+  leadStatus: string | null;
+} {
+  const values: string[] = [];
+
+  for (let i = startIndex; i < allLines.length && values.length < 5; i++) {
+    const line = allLines[i].trim();
+    if (!line) continue;
+    if (extractEmailFromLine(line)) break;
+    if (line.match(OWNER_COUNT_RE) && !line.toLowerCase().startsWith('subtotal')) break;
+    if (line.toLowerCase().startsWith('subtotal')) break;
+    if (isReportHeaderOrNoise(line)) continue;
+    values.push(line);
+  }
+
+  let dateIndex = values.findIndex(v => DATE_TIME_RE.test(v));
+  if (dateIndex < 0) dateIndex = -1;
+
+  const campaignOrDetail =
+    dateIndex >= 0 ? values[dateIndex + 1] || null : values[0] || null;
+  const leadSource =
+    dateIndex >= 0 ? values[dateIndex + 2] || null : values[1] || null;
+  const leadStatus =
+    dateIndex >= 0 ? values[dateIndex + 3] || null : values[2] || null;
+
+  return { campaignOrDetail, leadSource, leadStatus };
+}
+
+function splitNameFromEmail(email: string): { firstName: string; lastName: string } {
+  const localPart = email.split('@')[0];
+  const normalized = localPart.replace(/[._-]+/g, ' ').trim();
+  const parts = normalized.split(/\s+/).filter(Boolean);
+
+  if (parts.length === 0) return { firstName: '', lastName: '' };
+  if (parts.length === 1) {
+    return {
+      firstName: toTitleCase(parts[0]),
+      lastName: '',
+    };
+  }
+  return {
+    firstName: toTitleCase(parts[0]),
+    lastName: toTitleCase(parts[parts.length - 1]),
+  };
+}
+
+function toTitleCase(value: string): string {
+  if (!value) return '';
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function isReportHeaderOrNoise(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  return HEADER_PATTERNS.some(pattern => pattern.test(trimmed));
+}
+
+function isLikelyCompanyName(value: string): boolean {
+  const lower = value.trim().toLowerCase();
+  if (!lower) return false;
+  return (
+    lower.includes('inc') ||
+    lower.includes('ltd') ||
+    lower.includes('pty') ||
+    lower.includes('corp') ||
+    lower.includes('limited') ||
+    lower.includes('group')
+  );
+}
+
 function isPhoneLike(s: string): boolean {
   // Strip common phone chars and check if mostly digits
   const digits = s.replace(/[\s\-\(\)\+\.]/g, '');
   return digits.length >= 7 && /^\d+$/.test(digits);
+}
+
+function extractEmailFromLine(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  if (EMAIL_RE.test(trimmed)) return trimmed.toLowerCase();
+  const match = trimmed.match(EMAIL_IN_TEXT_RE);
+  return match ? match[1].toLowerCase() : null;
+}
+
+function looksLikeCsv(rawText: string): boolean {
+  const firstLine = rawText.split(/\r?\n/, 1)[0]?.toLowerCase() || '';
+  if (!firstLine.includes(',')) return false;
+  return (
+    firstLine.includes('company / account') ||
+    (firstLine.includes('first name') && firstLine.includes('email'))
+  );
+}
+
+function normalizeHeaderKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getCsvField(row: Record<string, string>, aliases: string[]): string {
+  const normalized = new Map<string, string>();
+  for (const [key, value] of Object.entries(row)) {
+    normalized.set(normalizeHeaderKey(key), (value || '').trim());
+  }
+  for (const alias of aliases) {
+    const value = normalized.get(normalizeHeaderKey(alias));
+    if (value !== undefined) return value.trim();
+  }
+  return '';
 }

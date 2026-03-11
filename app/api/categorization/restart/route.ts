@@ -6,19 +6,23 @@ import {
   getAccountsForCategorization,
 } from '@/lib/db';
 import { processCategorizationJob } from '@/lib/categorization-processor';
+import { parseFilters } from '@/lib/worker-error-utils';
+import {
+  assertProcessAction,
+  parseJobId,
+  parseJsonBody,
+  processActionErrorResponse,
+  runInBackground,
+} from '@/lib/process-action-utils';
 
 export async function POST(request: Request) {
   try {
-    const { jobId, cancelOnly } = await request.json();
-
-    if (!jobId) {
-      return NextResponse.json({ error: 'Job ID is required' }, { status: 400 });
-    }
+    const body = await parseJsonBody<{ jobId?: unknown; cancelOnly?: unknown }>(request);
+    const jobId = parseJobId(body.jobId);
+    const cancelOnly = Boolean(body.cancelOnly);
 
     const oldJob = getCategorizationJob(jobId);
-    if (!oldJob) {
-      return NextResponse.json({ error: 'Categorization job not found' }, { status: 404 });
-    }
+    assertProcessAction(oldJob, 404, 'Categorization job not found');
 
     // Mark the old job as failed
     updateCategorizationJobStatus(jobId, 'failed');
@@ -28,13 +32,15 @@ export async function POST(request: Request) {
     }
 
     // Parse the original filters to create a new job with the same scope
-    const filters = oldJob.filters ? JSON.parse(oldJob.filters) : {};
+    const filters = parseFilters(oldJob.filters, `Categorization restart job ${jobId} filters`);
 
     // Ensure we target uncategorized accounts (ones left over from the interrupted job)
     filters.uncategorizedOnly = true;
 
     // Get accounts that match the filters
-    const accounts = getAccountsForCategorization(filters);
+    const accounts = getAccountsForCategorization(
+      filters as Parameters<typeof getAccountsForCategorization>[0]
+    );
 
     if (accounts.length === 0) {
       return NextResponse.json({
@@ -52,9 +58,7 @@ export async function POST(request: Request) {
     );
 
     // Start processing in background
-    processCategorizationJob(newJobId).catch((error) => {
-      console.error(`Background categorization restart failed for job ${newJobId}:`, error);
-    });
+    runInBackground(`categorization/restart job ${newJobId}`, () => processCategorizationJob(newJobId));
 
     return NextResponse.json({
       success: true,
@@ -62,10 +66,10 @@ export async function POST(request: Request) {
       accountCount: accounts.length,
     });
   } catch (error) {
-    console.error('Failed to restart categorization job:', error);
-    return NextResponse.json(
-      { error: 'Failed to restart categorization job' },
-      { status: 500 }
+    return processActionErrorResponse(
+      'Failed to restart categorization job',
+      error,
+      'Failed to restart categorization job'
     );
   }
 }

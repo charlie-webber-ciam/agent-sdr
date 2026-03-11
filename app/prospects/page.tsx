@@ -9,7 +9,22 @@ import ProspectSlideOver from '@/components/prospects/ProspectSlideOver';
 import ProspectDataQualityBar from '@/components/prospects/ProspectDataQualityBar';
 import ProspectSmartListBuilder from '@/components/prospects/ProspectSmartListBuilder';
 import BulkActionBar from '@/components/prospects/BulkActionBar';
-import { downloadFile } from '@/lib/utils';
+import { cn, downloadFile } from '@/lib/utils';
+import { usePageChatContext } from '@/lib/page-chat-context';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface ProspectRow {
   id: number;
@@ -42,26 +57,27 @@ interface ProspectRow {
   sfdc_id?: string | null;
 }
 
-const ROLE_BADGES: Record<string, { bg: string; text: string; label: string }> = {
-  decision_maker: { bg: 'bg-green-100', text: 'text-green-800', label: 'Decision Maker' },
-  champion: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Champion' },
-  influencer: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'Influencer' },
-  blocker: { bg: 'bg-red-100', text: 'text-red-800', label: 'Blocker' },
-  end_user: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'End User' },
-  unknown: { bg: 'bg-gray-100', text: 'text-gray-500', label: 'Unknown' },
+const ROLE_BADGES: Record<string, { className: string; label: string }> = {
+  decision_maker: { className: 'border-emerald-200 bg-emerald-100 text-emerald-800', label: 'Decision Maker' },
+  champion: { className: 'border-blue-200 bg-blue-100 text-blue-800', label: 'Champion' },
+  influencer: { className: 'border-violet-200 bg-violet-100 text-violet-800', label: 'Influencer' },
+  blocker: { className: 'border-red-200 bg-red-100 text-red-800', label: 'Blocker' },
+  end_user: { className: 'border-slate-200 bg-slate-100 text-slate-700', label: 'End User' },
+  unknown: { className: 'border-slate-200 bg-slate-100 text-slate-500', label: 'Unknown' },
 };
 
-const STATUS_BADGES: Record<string, { bg: string; text: string }> = {
-  new: { bg: 'bg-gray-100', text: 'text-gray-700' },
-  engaged: { bg: 'bg-blue-100', text: 'text-blue-800' },
-  warm: { bg: 'bg-orange-100', text: 'text-orange-800' },
-  cold: { bg: 'bg-cyan-100', text: 'text-cyan-800' },
+const STATUS_BADGES: Record<string, string> = {
+  new: 'border-slate-200 bg-slate-100 text-slate-700',
+  engaged: 'border-blue-200 bg-blue-100 text-blue-800',
+  warm: 'border-orange-200 bg-orange-100 text-orange-800',
+  cold: 'border-cyan-200 bg-cyan-100 text-cyan-800',
 };
 
 type PageTab = 'table' | 'lists' | 'build';
 
 export default function ProspectsPage() {
   const router = useRouter();
+  const { setActiveProspect, clearActiveProspect } = usePageChatContext();
   const [prospects, setProspects] = useState<ProspectRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -100,6 +116,21 @@ export default function ProspectsPage() {
   useEffect(() => {
     fetchProspects();
   }, [fetchProspects]);
+
+  useEffect(() => {
+    if (!selectedProspectId) {
+      clearActiveProspect();
+      return;
+    }
+
+    const selectedProspect = prospects.find((prospect) => prospect.id === selectedProspectId);
+    if (!selectedProspect) {
+      clearActiveProspect();
+      return;
+    }
+
+    setActiveProspect(selectedProspect.id, selectedProspect.account_id);
+  }, [selectedProspectId, prospects, setActiveProspect, clearActiveProspect]);
 
   const handleFiltersChange = (newFilters: Record<string, string>) => {
     setFilters(newFilters);
@@ -172,6 +203,7 @@ export default function ProspectsPage() {
 
   const allSelected = prospects.length > 0 && prospects.every(p => selectedIds.has(p.id));
   const someSelected = prospects.some(p => selectedIds.has(p.id)) && !allSelected;
+  const selectAllState = allSelected ? true : someSelected ? 'indeterminate' : false;
 
   const handleSelectAll = () => {
     if (allSelected) {
@@ -194,58 +226,49 @@ export default function ProspectsPage() {
   const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <main className="min-h-screen p-8 max-w-7xl mx-auto">
+    <main className="mx-auto max-w-7xl">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Prospects</h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <h1 className="text-3xl font-bold">Prospects</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             {total} prospect{total !== 1 ? 's' : ''} across all accounts
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button
+          <Button
             onClick={exportCsv}
             disabled={total === 0}
-            className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            variant="outline"
           >
             Export CSV
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => router.push('/prospects/process')}
-            className="px-4 py-2 text-sm font-medium text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-50 transition-colors"
+            variant="outline"
           >
             AI Process
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => router.push('/prospects/import')}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
           >
             Import from Salesforce
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 mb-6 w-fit">
-        {([
-          { key: 'table', label: 'All Prospects' },
-          { key: 'lists', label: 'Lists' },
-          { key: 'build', label: 'Build List' },
-        ] as const).map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
-              activeTab === key
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as PageTab)}
+        className="mb-6 w-fit"
+      >
+        <TabsList>
+          <TabsTrigger value="table">All Prospects</TabsTrigger>
+          <TabsTrigger value="lists">Lists</TabsTrigger>
+          <TabsTrigger value="build">Build List</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {activeTab === 'lists' ? (
         <ProspectListManager key={listManagerKeyRef.current} />
@@ -283,218 +306,192 @@ export default function ProspectsPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <Card>
+        <CardContent className="p-0">
         {loading ? (
           <div className="p-4 space-y-2">
             {Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />
+              <Skeleton key={i} className="h-12 w-full" />
             ))}
           </div>
         ) : prospects.length === 0 ? (
           <div className="text-center py-12">
-            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="mx-auto h-12 w-12 text-muted-foreground/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
-            <h3 className="mt-2 text-sm font-semibold text-gray-900">No prospects found</h3>
-            <p className="mt-1 text-sm text-gray-500">
+            <h3 className="mt-2 text-sm font-semibold">No prospects found</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
               {Object.keys(filters).length > 0 ? 'Try adjusting your filters' : 'Import prospects from Salesforce to get started'}
             </p>
             {Object.keys(filters).length > 0 && (
-              <button onClick={clearAllFilters} className="mt-3 text-sm text-blue-600 hover:text-blue-800">Clear filters</button>
+              <Button variant="link" onClick={clearAllFilters} className="mt-3 h-auto p-0 text-sm">
+                Clear filters
+              </Button>
             )}
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200 bg-gray-50">
-                    <th className="px-3 py-3 w-8">
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        ref={el => { if (el) el.indeterminate = someSelected; }}
-                        onChange={handleSelectAll}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                      />
-                    </th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Name</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Title</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Company</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Acct Tier</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Value Tier</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Seniority</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Calls</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Data</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Role</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Status</th>
-                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">SFDC</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {prospects.map((p, idx) => {
-                    const roleBadge = p.role_type ? ROLE_BADGES[p.role_type] : null;
-                    const statusBadge = STATUS_BADGES[p.relationship_status] || STATUS_BADGES.new;
-                    const isSelected = selectedIds.has(p.id);
-                    const isActive = selectedProspectId === p.id;
-                    return (
-                      <tr
-                        key={p.id}
-                        className={`cursor-pointer transition-colors ${
-                          isActive
-                            ? 'bg-blue-50 ring-1 ring-inset ring-blue-200'
-                            : isSelected
-                            ? 'bg-blue-50/50'
-                            : 'hover:bg-gray-50'
-                        }`}
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/30 hover:bg-muted/30">
+                  <TableHead className="w-10 px-3">
+                    <Checkbox
+                      checked={selectAllState}
+                      onCheckedChange={() => handleSelectAll()}
+                      aria-label="Select all prospects"
+                    />
+                  </TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">Name</TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">Title</TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">Company</TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">Acct Tier</TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">Value Tier</TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">Seniority</TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">Calls</TableHead>
+                  <TableHead className="px-3 text-[11px] uppercase tracking-wide">Data</TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">Role</TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">Status</TableHead>
+                  <TableHead className="px-4 text-[11px] uppercase tracking-wide">SFDC</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {prospects.map((p, idx) => {
+                  const roleBadge = p.role_type ? ROLE_BADGES[p.role_type] : null;
+                  const statusBadgeClass = STATUS_BADGES[p.relationship_status] || STATUS_BADGES.new;
+                  const isSelected = selectedIds.has(p.id);
+                  const isActive = selectedProspectId === p.id;
+                  return (
+                    <TableRow
+                      key={p.id}
+                      onClick={() => setSelectedProspectId(p.id)}
+                      className={cn(
+                        'cursor-pointer',
+                        isActive && 'bg-primary/10 ring-1 ring-inset ring-primary/30 hover:bg-primary/10',
+                        !isActive && isSelected && 'bg-primary/5 hover:bg-primary/10'
+                      )}
+                    >
+                      <TableCell
+                        className="px-3 py-2"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRowSelect(p.id, idx, e.shiftKey);
+                        }}
                       >
-                        <td
-                          className="px-3 py-2"
-                          onClick={e => { e.stopPropagation(); handleRowSelect(p.id, idx, e.shiftKey); }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}}
-                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                          />
-                        </td>
-                        <td
-                          className="px-4 py-3 text-sm font-medium text-gray-900 whitespace-nowrap"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          {p.first_name} {p.last_name}
-                        </td>
-                        <td
-                          className="px-4 py-3 text-sm text-gray-600 max-w-[200px] truncate"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          {p.title || <span className="text-gray-300">-</span>}
-                        </td>
-                        <td
-                          className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          {p.company_name}
-                        </td>
-                        <td
-                          className="px-4 py-3"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          {p.account_tier && (
-                            <span className={`inline-block px-2 py-0.5 text-xs font-semibold rounded-full ${
-                              p.account_tier === 'A' ? 'bg-green-100 text-green-800' :
-                              p.account_tier === 'B' ? 'bg-blue-100 text-blue-800' :
-                              'bg-gray-100 text-gray-700'
-                            }`}>
-                              {p.account_tier}
-                            </span>
-                          )}
-                        </td>
-                        <td
-                          className="px-4 py-3"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          <ProspectTierBadge tier={p.value_tier} />
-                        </td>
-                        <td
-                          className="px-4 py-3 text-xs text-gray-500 capitalize whitespace-nowrap"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          {p.seniority_level ? p.seniority_level.replace(/_/g, ' ') : <span className="text-gray-300">-</span>}
-                        </td>
-                        <td
-                          className="px-4 py-3 text-sm text-gray-600"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          {p.call_count > 0 ? (
-                            <span className="text-xs">
-                              {p.call_count}
-                              {p.connect_count > 0 && <span className="text-green-600 ml-1">({p.connect_count}c)</span>}
-                            </span>
-                          ) : <span className="text-gray-300">-</span>}
-                        </td>
-                        <td
-                          className="px-3 py-2"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          <div className="flex gap-1">
-                            <div className={`w-2 h-2 rounded-full ${p.email ? 'bg-blue-400' : 'bg-gray-200'}`} title="Email" />
-                            <div className={`w-2 h-2 rounded-full ${p.phone ? 'bg-green-400' : 'bg-gray-200'}`} title="Phone" />
-                            <div className={`w-2 h-2 rounded-full ${p.mobile ? 'bg-teal-400' : 'bg-gray-200'}`} title="Mobile" />
-                            <div className={`w-2 h-2 rounded-full ${p.linkedin_url ? 'bg-indigo-400' : 'bg-gray-200'}`} title="LinkedIn" />
-                          </div>
-                        </td>
-                        <td
-                          className="px-4 py-3"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          {roleBadge ? (
-                            <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${roleBadge.bg} ${roleBadge.text}`}>
-                              {roleBadge.label}
-                            </span>
-                          ) : (
-                            <span className="text-gray-300 text-sm">-</span>
-                          )}
-                        </td>
-                        <td
-                          className="px-4 py-3"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full capitalize ${statusBadge.bg} ${statusBadge.text}`}>
-                            {p.relationship_status}
+                        <Checkbox checked={isSelected} onCheckedChange={() => {}} aria-label={`Select ${p.first_name} ${p.last_name}`} />
+                      </TableCell>
+                      <TableCell className="px-4 py-3 whitespace-nowrap font-medium">
+                        {p.first_name} {p.last_name}
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate px-4 py-3 text-muted-foreground">
+                        {p.title || <span className="text-muted-foreground/50">-</span>}
+                      </TableCell>
+                      <TableCell className="px-4 py-3 whitespace-nowrap text-muted-foreground">
+                        {p.company_name}
+                      </TableCell>
+                      <TableCell className="px-4 py-3">
+                        {p.account_tier ? (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              'font-semibold',
+                              p.account_tier === 'A' && 'border-emerald-200 bg-emerald-100 text-emerald-800',
+                              p.account_tier === 'B' && 'border-blue-200 bg-blue-100 text-blue-800',
+                              p.account_tier === 'C' && 'border-slate-200 bg-slate-100 text-slate-700'
+                            )}
+                          >
+                            {p.account_tier}
+                          </Badge>
+                        ) : (
+                          <span className="text-sm text-muted-foreground/50">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="px-4 py-3">
+                        <ProspectTierBadge tier={p.value_tier} />
+                      </TableCell>
+                      <TableCell className="px-4 py-3 text-xs capitalize text-muted-foreground whitespace-nowrap">
+                        {p.seniority_level ? p.seniority_level.replace(/_/g, ' ') : <span className="text-muted-foreground/50">-</span>}
+                      </TableCell>
+                      <TableCell className="px-4 py-3 text-sm text-muted-foreground">
+                        {p.call_count > 0 ? (
+                          <span className="text-xs">
+                            {p.call_count}
+                            {p.connect_count > 0 && <span className="ml-1 text-emerald-700">({p.connect_count}c)</span>}
                           </span>
-                        </td>
-                        <td
-                          className="px-4 py-3"
-                          onClick={() => setSelectedProspectId(p.id)}
-                        >
-                          {p.sfdc_id ? (
-                            <a
-                              href={`https://okta.lightning.force.com/lightning/r/${p.sfdc_id}/view`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={e => e.stopPropagation()}
-                              className="text-xs font-medium text-orange-600 hover:text-orange-700 hover:underline"
-                            >
-                              SF
-                            </a>
-                          ) : (
-                            <span className="text-gray-300 text-sm">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        ) : (
+                          <span className="text-muted-foreground/50">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="px-3 py-2">
+                        <div className="flex gap-1">
+                          <div className={cn('h-2 w-2 rounded-full', p.email ? 'bg-blue-500' : 'bg-muted')} title="Email" />
+                          <div className={cn('h-2 w-2 rounded-full', p.phone ? 'bg-emerald-500' : 'bg-muted')} title="Phone" />
+                          <div className={cn('h-2 w-2 rounded-full', p.mobile ? 'bg-teal-500' : 'bg-muted')} title="Mobile" />
+                          <div className={cn('h-2 w-2 rounded-full', p.linkedin_url ? 'bg-indigo-500' : 'bg-muted')} title="LinkedIn" />
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-4 py-3">
+                        {roleBadge ? (
+                          <Badge variant="outline" className={roleBadge.className}>
+                            {roleBadge.label}
+                          </Badge>
+                        ) : (
+                          <span className="text-sm text-muted-foreground/50">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="px-4 py-3">
+                        <Badge variant="outline" className={cn('capitalize', statusBadgeClass)}>
+                          {p.relationship_status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="px-4 py-3">
+                        {p.sfdc_id ? (
+                          <a
+                            href={`https://okta.lightning.force.com/lightning/r/${p.sfdc_id}/view`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs font-medium text-orange-600 hover:text-orange-700 hover:underline"
+                          >
+                            SF
+                          </a>
+                        ) : (
+                          <span className="text-sm text-muted-foreground/50">-</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
 
             {/* Pagination */}
-            <div className="border-t border-gray-200 px-4 py-3 flex items-center justify-between bg-gray-50">
-              <p className="text-sm text-gray-500">
+            <div className="flex items-center justify-between border-t border-border bg-muted/30 px-4 py-3">
+              <p className="text-sm text-muted-foreground">
                 Showing {startIdx}-{endIdx} of {total}
               </p>
               <div className="flex gap-2">
-                <button
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={() => setPage(p => Math.max(0, p - 1))}
                   disabled={page === 0}
-                  className="px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Previous
-                </button>
-                <button
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={() => setPage(p => p + 1)}
                   disabled={page >= totalPages - 1}
-                  className="px-3 py-1.5 text-sm font-medium border border-gray-300 rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Next
-                </button>
+                </Button>
               </div>
             </div>
           </>
         )}
-      </div>
+        </CardContent>
+      </Card>
       </>
       )}
 

@@ -13,6 +13,7 @@ import {
   updateEmployeeCountJobProgress,
   createEmployeeCountResult,
 } from './db';
+import { logWorkerError, sleep } from './worker-error-utils';
 
 // Track active processors to prevent concurrent runs
 const activeProcessors = new Set<number>();
@@ -96,8 +97,7 @@ export async function processEmployeeCountBatch(
             updateEmployeeCountJobProgress(jobId, processedCount, failedCount);
           } catch (error) {
             failedCount++;
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            console.error(`  ✗ Error processing ${account.account_name}:`, error);
+            const errorMessage = logWorkerError(`Error processing employee count for ${account.account_name}`, error);
 
             // Save error result
             createEmployeeCountResult({
@@ -120,7 +120,7 @@ export async function processEmployeeCountBatch(
       // Add delay between batches to respect rate limits
       if (i + CONCURRENCY < accounts.length) {
         console.log(`Waiting ${BATCH_DELAY_MS}ms before next batch...`);
-        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+        await sleep(BATCH_DELAY_MS);
       }
     }
 
@@ -128,7 +128,7 @@ export async function processEmployeeCountBatch(
     updateEmployeeCountJobStatus(jobId, 'completed', null, `employee-counts-${jobId}.csv`);
     console.log(`\n✓ Job ${jobId} completed: ${processedCount} successful, ${failedCount} failed`);
   } catch (error) {
-    console.error(`Fatal error processing job ${jobId}:`, error);
+    logWorkerError(`Fatal error processing employee count job ${jobId}`, error);
     updateEmployeeCountJobStatus(jobId, 'failed');
   } finally {
     activeProcessors.delete(jobId);
@@ -141,6 +141,6 @@ export async function processEmployeeCountBatch(
 export function startEmployeeCountJob(jobId: number, accounts: EmployeeCountInput[]): void {
   // Run in background without blocking
   processEmployeeCountBatch(jobId, accounts).catch(error => {
-    console.error(`Background processing error for job ${jobId}:`, error);
+    logWorkerError(`Background processing error for employee count job ${jobId}`, error);
   });
 }

@@ -55,6 +55,23 @@ const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
   salesforce_import: { label: 'Salesforce', color: 'bg-blue-100 text-blue-700' },
 };
 
+function parseKeyInsights(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((item): item is string => typeof item === 'string')
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+  } catch {
+    // Fall through to legacy plain-text format.
+  }
+  const trimmed = raw.trim();
+  return trimmed ? [trimmed] : [];
+}
+
 export default function AccountWorkingView({
   accountId, prospects, researchContext, onSelectProspect, onWriteEmail, onRerunMapping, onEmailSaved, emailRefreshKey,
 }: Props) {
@@ -436,7 +453,9 @@ export default function AccountWorkingView({
                       </button>
                     </div>
                   ) : (
-                    prospectEmails.map(email => (
+                    prospectEmails.map(email => {
+                      const keyInsights = parseKeyInsights(email.key_insights);
+                      return (
                       <div key={email.id} className="bg-white rounded-lg border border-gray-200 p-3">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
@@ -479,6 +498,18 @@ export default function AccountWorkingView({
                         <div className="bg-gray-50 rounded p-3 text-sm text-gray-700 whitespace-pre-wrap mb-2">
                           {email.body}
                         </div>
+                        {keyInsights.length > 0 && (
+                          <details className="mb-2">
+                            <summary className="text-xs font-medium text-gray-600 cursor-pointer hover:text-gray-800">
+                              Key Insights ({keyInsights.length})
+                            </summary>
+                            <ul className="mt-2 list-disc list-inside space-y-1 text-xs text-gray-700 bg-blue-50 border border-blue-100 rounded-md p-2.5">
+                              {keyInsights.map((insight, index) => (
+                                <li key={`${email.id}-insight-${index}`}>{insight}</li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
 
                         {email.status === 'draft' && (
                           <div className="flex gap-2 pt-1">
@@ -497,7 +528,8 @@ export default function AccountWorkingView({
                           </div>
                         )}
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               )}

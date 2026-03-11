@@ -763,8 +763,7 @@ Mix real people and personas as needed to reach exactly 5 entries. For real indi
       onStep?.(label, completedSteps, TOTAL_STEPS);
     };
 
-    const [iamResult, workforceResult, securityResult, newsResult, techResult, ecosystemResult] =
-      await Promise.all([
+    const settledResults = await Promise.allSettled([
         runWithRetry(iamAgent, iamPrompt).then(r => { trackStep('IAM Discovery'); return r; }),
         runWithRetry(workforceAgent, workforcePrompt).then(r => { trackStep('Workforce & IT'); return r; }),
         runWithRetry(securityAgent, securityPrompt).then(r => { trackStep('Security & Compliance'); return r; }),
@@ -773,10 +772,30 @@ Mix real people and personas as needed to reach exactly 5 entries. For real indi
         runWithRetry(ecosystemAgent, ecosystemPrompt).then(r => { trackStep('Okta Ecosystem'); return r; }),
       ]);
 
+    // Extract results, using a fallback for any failed agents
+    const fallbackResult = { finalOutput: 'Research agent failed — no data available for this section.' as string | undefined };
+    const extractResult = (settled: PromiseSettledResult<Awaited<ReturnType<typeof runWithRetry>>>, label: string) => {
+      if (settled.status === 'fulfilled') return settled.value;
+      console.error(`[Okta SDR] ${label} agent failed for ${company.company_name}:`, settled.reason);
+      return fallbackResult;
+    };
+
+    const iamResult = extractResult(settledResults[0], 'IAM Discovery');
+    const workforceResult = extractResult(settledResults[1], 'Workforce & IT');
+    const securityResult = extractResult(settledResults[2], 'Security & Compliance');
+    const newsResult = extractResult(settledResults[3], 'News & Funding');
+    const techResult = extractResult(settledResults[4], 'Tech Transformation');
+    const ecosystemResult = extractResult(settledResults[5], 'Okta Ecosystem');
+
     console.log(`[Okta SDR] Phase 1 complete. Running prospects discovery...`);
 
     // ─── Phase 2: Prospects (can run independently) ────────────────────────────
-    const prospectsResult = await runWithRetry(prospectsAgent, prospectsPrompt);
+    let prospectsResult = fallbackResult;
+    try {
+      prospectsResult = await runWithRetry(prospectsAgent, prospectsPrompt);
+    } catch (prospectsError) {
+      console.error(`[Okta SDR] Prospects agent failed for ${company.company_name}:`, prospectsError);
+    }
     trackStep('Prospects');
 
     console.log(`[Okta SDR] Phase 2 complete. Generating executive summary...`);
@@ -845,7 +864,12 @@ ${ecosystemResult.finalOutput || 'No information found'}
 - Include specific Okta value propositions for this account`;
 
     trackStep('Executive Summary');
-    const summaryResult = await runWithRetry(summaryAgent, summaryPrompt);
+    let summaryResult = fallbackResult;
+    try {
+      summaryResult = await runWithRetry(summaryAgent, summaryPrompt);
+    } catch (summaryError) {
+      console.error(`[Okta SDR] Summary agent failed for ${company.company_name}:`, summaryError);
+    }
 
     console.log(`[Okta SDR] Phase 3 complete. Parsing results...`);
 

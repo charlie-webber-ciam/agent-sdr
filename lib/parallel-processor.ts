@@ -20,7 +20,7 @@ import { processAccountWithRetry, AccountProcessingResult } from './account-work
 import { ResearchMode } from './dual-researcher';
 import { OktaPatch } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
-import { logDetailedError } from './error-logger';
+import { logWorkerError, sleep } from './worker-error-utils';
 
 export async function processJobParallel(
   jobId: number,
@@ -51,6 +51,7 @@ export async function processJobParallel(
 
     let processedCount = 0;
     let failedCount = 0;
+    let wasCancelled = false;
 
     // Create concurrency limiter
     const limit = pLimit(concurrency);
@@ -61,13 +62,14 @@ export async function processJobParallel(
       const currentJob = getJob(jobId);
       if (currentJob?.paused === 1) {
         console.log(`\n⏸️  Job ${jobId} is paused. Waiting...`);
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Check every 3 seconds
+        await sleep(3000); // Check every 3 seconds
         continue;
       }
 
       // Check if job was cancelled
       if (currentJob?.status === 'failed') {
         console.log(`\n❌ Job ${jobId} was cancelled`);
+        wasCancelled = true;
         break;
       }
 
@@ -100,7 +102,7 @@ export async function processJobParallel(
           }
         } else {
           // Promise was rejected (shouldn't happen with our error handling, but just in case)
-          logDetailedError(`[Job ${jobId}] Unexpected promise rejection for account at batch index ${index}`, result.reason);
+          logWorkerError(`[Job ${jobId}] Unexpected promise rejection for account at batch index ${index}`, result.reason);
           failedCount++;
         }
       });
@@ -116,8 +118,13 @@ export async function processJobParallel(
 
       // Small delay between batches to avoid overwhelming the API
       if (accounts.length >= concurrency) {
-        await new Promise(resolve => setTimeout(resolve, PROCESSING_CONFIG.accountDelay));
+        await sleep(PROCESSING_CONFIG.accountDelay);
       }
+    }
+
+    if (wasCancelled) {
+      console.log(`Job ${jobId} cancelled. Processed: ${processedCount}, Failed: ${failedCount}`);
+      return;
     }
 
     // Mark job as completed
@@ -131,7 +138,7 @@ export async function processJobParallel(
     console.log(`   Success Rate: ${((processedCount / job.total_accounts) * 100).toFixed(1)}%`);
     console.log(`${'='.repeat(60)}\n`);
   } catch (error) {
-    logDetailedError(`[Parallel Processor] Job ${jobId} failed completely`, error);
+    logWorkerError(`[Parallel Processor] Job ${jobId} failed completely`, error);
     updateJobStatus(jobId, 'failed');
     throw error;
   }

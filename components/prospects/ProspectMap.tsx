@@ -41,6 +41,20 @@ interface ProspectMapProps {
   onRefresh: () => void;
 }
 
+interface PositionPayload {
+  prospectId?: number;
+  ghostKey?: string;
+  x: number;
+  y: number;
+  nodeType: string;
+}
+
+interface PositionSnapshot {
+  x: number;
+  y: number;
+  nodeType: string;
+}
+
 const BUILD_STEP_LABELS: Record<string, string> = {
   analyzing: 'Analyzing hierarchy...',
 };
@@ -62,9 +76,15 @@ export default function ProspectMap({
 
   // AI Hierarchy state
   const [isBuildingMap, setIsBuildingMap] = useState(false);
-  const [buildJobId, setBuildJobId] = useState<number | null>(null);
   const [buildStep, setBuildStep] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const savedPositionRef = useRef<Map<string, PositionSnapshot>>(new Map());
+
+  const positionKeyFromPayload = useCallback((position: PositionPayload): string | null => {
+    if (position.prospectId) return `p_${position.prospectId}`;
+    if (position.ghostKey) return `g_${position.ghostKey}`;
+    return null;
+  }, []);
 
   const fetchMapData = useCallback(async () => {
     try {
@@ -72,6 +92,21 @@ export default function ProspectMap({
       if (!res.ok) throw new Error('Failed to load map data');
       const data = await res.json();
       setMapData(data);
+      const snapshot = new Map<string, PositionSnapshot>();
+      for (const position of data.positions as MapData['positions']) {
+        const key = position.prospect_id
+          ? `p_${position.prospect_id}`
+          : position.ghost_key
+            ? `g_${position.ghost_key}`
+            : null;
+        if (!key) continue;
+        snapshot.set(key, {
+          x: position.x,
+          y: position.y,
+          nodeType: key.startsWith('g_') ? 'ghost' : 'structured',
+        });
+      }
+      savedPositionRef.current = snapshot;
       setError(null);
     } catch (err) {
       console.error('Error loading map data:', err);
@@ -121,7 +156,6 @@ export default function ProspectMap({
       }
 
       const { jobId } = await res.json();
-      setBuildJobId(jobId);
 
       pollRef.current = setInterval(async () => {
         try {
@@ -147,7 +181,6 @@ export default function ProspectMap({
             setRefreshKey(k => k + 1);
             setTimeout(() => {
               setIsBuildingMap(false);
-              setBuildJobId(null);
               setBuildStep(null);
               setPendingAutoLayout(false);
             }, 2000);
@@ -157,7 +190,6 @@ export default function ProspectMap({
             setBuildStep('Failed');
             setTimeout(() => {
               setIsBuildingMap(false);
-              setBuildJobId(null);
               setBuildStep(null);
             }, 3000);
           }
@@ -178,22 +210,39 @@ export default function ProspectMap({
     setRefreshKey(k => k + 1);
   }, [fetchMapData, onRefresh]);
 
-  const handleSavePositions = useCallback(async (
-    positions: Array<{ prospectId?: number; ghostKey?: string; x: number; y: number; nodeType: string }>
-  ) => {
+  const handleSavePositions = useCallback(async (positions: PositionPayload[]) => {
+    const changedPositions = positions.filter(position => {
+      const key = positionKeyFromPayload(position);
+      if (!key) return false;
+      const prev = savedPositionRef.current.get(key);
+      const unchanged = prev
+        && Math.abs(prev.x - position.x) < 0.01
+        && Math.abs(prev.y - position.y) < 0.01
+        && prev.nodeType === position.nodeType;
+      if (unchanged) return false;
+      savedPositionRef.current.set(key, {
+        x: position.x,
+        y: position.y,
+        nodeType: position.nodeType,
+      });
+      return true;
+    });
+
+    if (changedPositions.length === 0) return;
+
     setIsSaving(true);
     try {
       await fetch(`/api/accounts/${accountId}/prospect-map/positions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ positions }),
+        body: JSON.stringify({ positions: changedPositions }),
       });
     } catch (err) {
       console.error('Error saving positions:', err);
     } finally {
       setIsSaving(false);
     }
-  }, [accountId]);
+  }, [accountId, positionKeyFromPayload]);
 
   const handleCreateEdge = useCallback(async (source: string, target: string) => {
     const parseNodeId = (id: string) => {

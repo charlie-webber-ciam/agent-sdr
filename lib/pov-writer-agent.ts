@@ -222,7 +222,7 @@ function buildPrompt(request: PovRequest, accountContext: string): string {
 }
 
 function parseAgentResponse(response: string, expectedType: 'email' | 'document'): PovResult {
-  let clean = response
+  const clean = response
     .replace(/```json\s*/g, '')
     .replace(/```\s*/g, '');
 

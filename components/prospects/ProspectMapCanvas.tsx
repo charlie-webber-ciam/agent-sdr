@@ -13,7 +13,8 @@ import {
   type Edge,
   type NodeChange,
   type EdgeChange,
-  MarkerType,
+  type Viewport,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import dagre from '@dagrejs/dagre';
 import '@xyflow/react/dist/style.css';
@@ -74,6 +75,28 @@ interface ProspectMapCanvasProps {
   autoLayoutOnMount?: boolean;
 }
 
+interface TreeData {
+  childrenMap: Map<string, string[]>;
+  parentMap: Map<string, string>;
+  rootNodeIds: string[];
+  depthMap: Map<string, number>;
+  descendantCountMap: Map<string, number>;
+}
+
+interface MapUiPrefs {
+  showGhostNodes: boolean;
+  showReportsToEdges: boolean;
+  showCustomEdges: boolean;
+}
+
+interface PositionPayload {
+  prospectId?: number;
+  ghostKey?: string;
+  x: number;
+  y: number;
+  nodeType: string;
+}
+
 const SENIORITY_ORDER: Record<string, number> = {
   c_suite: 0,
   vp: 1,
@@ -92,10 +115,91 @@ const edgeTypes = {
   customEdge: CustomEdge,
 };
 
-function nodeId(prospect?: { id: number } | null, ghostKey?: string | null): string {
-  if (prospect) return `p_${prospect.id}`;
-  if (ghostKey) return `g_${ghostKey}`;
-  return '';
+const COLLAPSED_STATE_STORAGE_PREFIX = 'sdr-prospect-map-collapsed';
+const MAP_UI_PREFS_STORAGE_PREFIX = 'sdr-prospect-map-ui-prefs';
+const VIEWPORT_STORAGE_PREFIX = 'sdr-prospect-map-viewport';
+
+const DEFAULT_MAP_UI_PREFS: MapUiPrefs = {
+  showGhostNodes: true,
+  showReportsToEdges: true,
+  showCustomEdges: true,
+};
+
+function getCollapsedStateStorageKey(accountId: number): string {
+  return `${COLLAPSED_STATE_STORAGE_PREFIX}:${accountId}`;
+}
+
+function getMapUiPrefsStorageKey(accountId: number): string {
+  return `${MAP_UI_PREFS_STORAGE_PREFIX}:${accountId}`;
+}
+
+function getViewportStorageKey(accountId: number): string {
+  return `${VIEWPORT_STORAGE_PREFIX}:${accountId}`;
+}
+
+function getAutoCollapsedNodeIds(nodeIds: string[], treeData: TreeData): Set<string> {
+  const collapsed = new Set<string>();
+  for (const id of nodeIds) {
+    const depth = treeData.depthMap.get(id) ?? 0;
+    const childCount = (treeData.childrenMap.get(id) ?? []).length;
+    const hasDesc = (treeData.descendantCountMap.get(id) ?? 0) > 0;
+    if ((depth > 3 && hasDesc) || childCount > 6) collapsed.add(id);
+  }
+  return collapsed;
+}
+
+function readCollapsedStateFromStorage(storageKey: string, validNodeIds: Set<string>): Set<string> | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const filtered = parsed.filter((id): id is string => typeof id === 'string' && validNodeIds.has(id));
+    return new Set(filtered);
+  } catch {
+    return null;
+  }
+}
+
+function readMapUiPrefsFromStorage(storageKey: string): MapUiPrefs | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<MapUiPrefs> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      showGhostNodes: typeof parsed.showGhostNodes === 'boolean' ? parsed.showGhostNodes : true,
+      showReportsToEdges: typeof parsed.showReportsToEdges === 'boolean' ? parsed.showReportsToEdges : true,
+      showCustomEdges: typeof parsed.showCustomEdges === 'boolean' ? parsed.showCustomEdges : true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readViewportFromStorage(storageKey: string): Viewport | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Viewport> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (
+      !Number.isFinite(parsed.x) ||
+      !Number.isFinite(parsed.y) ||
+      !Number.isFinite(parsed.zoom)
+    ) {
+      return null;
+    }
+    const x = Number(parsed.x);
+    const y = Number(parsed.y);
+    const zoom = Number(parsed.zoom);
+    return { x, y, zoom };
+  } catch {
+    return null;
+  }
 }
 
 function getDefaultPositions(prospects: Prospect[], ghostProspects: GhostProspect[]) {
@@ -128,6 +232,56 @@ function getDefaultPositions(prospects: Prospect[], ghostProspects: GhostProspec
   return positions;
 }
 
+function toPositionPayload(node: Node): PositionPayload | null {
+  if (node.id.startsWith('p_')) {
+    const prospectId = Number.parseInt(node.id.slice(2), 10);
+    if (Number.isNaN(prospectId)) return null;
+    return {
+      prospectId,
+      x: node.position.x,
+      y: node.position.y,
+      nodeType: 'structured',
+    };
+  }
+
+  if (node.id.startsWith('g_')) {
+    const ghostKey = node.id.slice(2);
+    if (!ghostKey) return null;
+    return {
+      ghostKey,
+      x: node.position.x,
+      y: node.position.y,
+      nodeType: 'ghost',
+    };
+  }
+
+  return null;
+}
+
+function serializeNodePositions(
+  nodes: Node[],
+  options?: { includeHidden?: boolean; onlyNodeIds?: Set<string> }
+): PositionPayload[] {
+  const includeHidden = options?.includeHidden ?? false;
+  const onlyNodeIds = options?.onlyNodeIds;
+  const payload: PositionPayload[] = [];
+
+  for (const node of nodes) {
+    if (!includeHidden && node.hidden) continue;
+    if (onlyNodeIds && !onlyNodeIds.has(node.id)) continue;
+    const entry = toPositionPayload(node);
+    if (entry) payload.push(entry);
+  }
+
+  return payload;
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return target.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
+}
+
 export default function ProspectMapCanvas({
   prospects,
   ghostProspects,
@@ -152,7 +306,48 @@ export default function ProspectMapCanvas({
   autoLayoutOnMount,
 }: ProspectMapCanvasProps) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoLayoutRef = useRef<(() => void) | null>(null);
+  const reactFlowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
+  const viewportRestoredRef = useRef(false);
+
+  const collapsedStateStorageKey = useMemo(() => getCollapsedStateStorageKey(accountId), [accountId]);
+  const mapUiPrefsStorageKey = useMemo(() => getMapUiPrefsStorageKey(accountId), [accountId]);
+  const viewportStorageKey = useMemo(() => getViewportStorageKey(accountId), [accountId]);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0);
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [uiPrefs, setUiPrefs] = useState<MapUiPrefs>(() => {
+    return readMapUiPrefsFromStorage(mapUiPrefsStorageKey) ?? DEFAULT_MAP_UI_PREFS;
+  });
+
+  const savedViewport = useMemo(() => readViewportFromStorage(viewportStorageKey), [viewportStorageKey]);
+
+  useEffect(() => {
+    setUiPrefs(readMapUiPrefsFromStorage(mapUiPrefsStorageKey) ?? DEFAULT_MAP_UI_PREFS);
+  }, [mapUiPrefsStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(mapUiPrefsStorageKey, JSON.stringify(uiPrefs));
+    } catch {
+      // Ignore localStorage errors.
+    }
+  }, [mapUiPrefsStorageKey, uiPrefs]);
+
+  useEffect(() => {
+    viewportRestoredRef.current = false;
+  }, [viewportStorageKey]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
+    };
+  }, []);
 
   // Build position lookup
   const positionLookup = useMemo(() => {
@@ -166,9 +361,16 @@ export default function ProspectMapCanvas({
 
   const hasPositions = positions.length > 0;
   const defaultPositions = useMemo(
-    () => hasPositions ? {} : getDefaultPositions(prospects, ghostProspects),
+    () => (hasPositions ? {} : getDefaultPositions(prospects, ghostProspects)),
     [hasPositions, prospects, ghostProspects]
   );
+
+  const allNodeIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const p of prospects) ids.push(`p_${p.id}`);
+    for (const g of ghostProspects) ids.push(`g_${g.ghostKey}`);
+    return ids;
+  }, [prospects, ghostProspects]);
 
   // Build initial nodes
   const initialNodes: Node[] = useMemo(() => {
@@ -251,7 +453,7 @@ export default function ProspectMapCanvas({
   }, [prospects, mapEdges, onUpdateEdgeLabel]);
 
   // Build hierarchy data for collapse/expand
-  const treeData = useMemo(() => {
+  const treeData = useMemo<TreeData>(() => {
     const childrenMap = new Map<string, string[]>();
     const parentMap = new Map<string, string>();
 
@@ -262,71 +464,131 @@ export default function ProspectMapCanvas({
       parentMap.set(edge.target, edge.source);
     }
 
-    const allNodeIds = new Set(initialNodes.map(n => n.id));
-    const rootNodeIds = [...allNodeIds].filter(id => !parentMap.has(id));
+    const rootNodeIds = allNodeIds.filter(id => !parentMap.has(id));
 
     // BFS for depths
     const depthMap = new Map<string, number>();
     const queue = rootNodeIds.map(id => ({ id, depth: 0 }));
     while (queue.length > 0) {
-      const { id, depth } = queue.shift()!;
-      if (depthMap.has(id)) continue;
-      depthMap.set(id, depth);
-      for (const childId of (childrenMap.get(id) ?? []))
-        queue.push({ id: childId, depth: depth + 1 });
+      const current = queue.shift();
+      if (!current) break;
+      if (depthMap.has(current.id)) continue;
+      depthMap.set(current.id, current.depth);
+      for (const childId of childrenMap.get(current.id) ?? []) {
+        queue.push({ id: childId, depth: current.depth + 1 });
+      }
     }
-    for (const n of initialNodes)
-      if (!depthMap.has(n.id)) depthMap.set(n.id, 0);
+    for (const id of allNodeIds) {
+      if (!depthMap.has(id)) depthMap.set(id, 0);
+    }
 
     // Descendant counts (with cycle guard)
     function countDesc(id: string, visited = new Set<string>()): number {
       if (visited.has(id)) return 0;
       visited.add(id);
-      const ch = childrenMap.get(id) ?? [];
-      return ch.length + ch.reduce((s, c) => s + countDesc(c, visited), 0);
+      const children = childrenMap.get(id) ?? [];
+      return children.length + children.reduce((sum, childId) => sum + countDesc(childId, visited), 0);
     }
+
     const descendantCountMap = new Map<string, number>();
-    for (const n of initialNodes) descendantCountMap.set(n.id, countDesc(n.id));
+    for (const id of allNodeIds) descendantCountMap.set(id, countDesc(id));
 
     return { childrenMap, parentMap, rootNodeIds, depthMap, descendantCountMap };
-  }, [initialNodes, initialEdges]);
+  }, [allNodeIds, initialEdges]);
 
-  // Collapsed state — auto-collapse nodes matching criteria on mount
+  const collapsibleNodeIds = useMemo(
+    () => allNodeIds.filter(id => (treeData.childrenMap.get(id) ?? []).length > 0),
+    [allNodeIds, treeData]
+  );
+
+  const autoCollapsedNodes = useMemo(
+    () => getAutoCollapsedNodeIds(allNodeIds, treeData),
+    [allNodeIds, treeData]
+  );
+
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => {
-    const s = new Set<string>();
-    for (const n of initialNodes) {
-      const depth = treeData.depthMap.get(n.id) ?? 0;
-      const childCount = (treeData.childrenMap.get(n.id) ?? []).length;
-      const hasDesc = (treeData.descendantCountMap.get(n.id) ?? 0) > 0;
-      if ((depth > 3 && hasDesc) || childCount > 6) s.add(n.id);
-    }
-    return s;
+    const validNodeIds = new Set(allNodeIds);
+    const saved = readCollapsedStateFromStorage(collapsedStateStorageKey, validNodeIds);
+    return saved ?? autoCollapsedNodes;
   });
 
-  const handleToggleCollapse = useCallback((nodeId: string) => {
-    setCollapsedNodes(prev => {
-      const next = new Set(prev);
-      next.has(nodeId) ? next.delete(nodeId) : next.add(nodeId);
-      return next;
-    });
-  }, []);
+  // Rehydrate persisted collapse state when account or node set changes.
+  useEffect(() => {
+    const validNodeIds = new Set(allNodeIds);
+    const saved = readCollapsedStateFromStorage(collapsedStateStorageKey, validNodeIds);
+    setCollapsedNodes(saved ?? autoCollapsedNodes);
+  }, [allNodeIds, collapsedStateStorageKey, autoCollapsedNodes]);
 
-  // Compute which nodes are visible based on collapsed state
+  // Persist collapse state per account so expand/collapse choices survive reloads.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(collapsedStateStorageKey, JSON.stringify([...collapsedNodes]));
+    } catch {
+      // Ignore localStorage errors.
+    }
+  }, [collapsedNodes, collapsedStateStorageKey]);
+
+  const searchableNodeText = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const p of prospects) {
+      byId.set(`p_${p.id}`, `${p.first_name} ${p.last_name} ${p.title || ''}`.toLowerCase());
+    }
+    for (const g of ghostProspects) {
+      byId.set(`g_${g.ghostKey}`, `${g.name} ${g.title || ''} ${g.source}`.toLowerCase());
+    }
+    return byId;
+  }, [prospects, ghostProspects]);
+
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  const searchMatchNodeIds = useMemo(() => {
+    if (!normalizedSearchQuery) return [];
+    const matches: string[] = [];
+    for (const [id, text] of searchableNodeText.entries()) {
+      if (text.includes(normalizedSearchQuery)) matches.push(id);
+    }
+    return matches;
+  }, [normalizedSearchQuery, searchableNodeText]);
+
+  const searchMatchSet = useMemo(() => new Set(searchMatchNodeIds), [searchMatchNodeIds]);
+
+  useEffect(() => {
+    if (searchMatchNodeIds.length === 0) {
+      setSearchActiveIndex(0);
+      setFocusedNodeId(null);
+      return;
+    }
+    setSearchActiveIndex(prev => Math.min(prev, searchMatchNodeIds.length - 1));
+  }, [searchMatchNodeIds]);
+
+  // Compute which nodes are visible based on collapsed state + filters
   const visibleNodeIds = useMemo(() => {
     const visible = new Set<string>();
-    function visit(id: string, hidden: boolean) {
-      if (hidden) return;
+
+    function visit(id: string, hiddenByAncestor: boolean) {
+      if (hiddenByAncestor) return;
       visible.add(id);
-      for (const c of (treeData.childrenMap.get(id) ?? []))
-        visit(c, collapsedNodes.has(id));
+      for (const childId of treeData.childrenMap.get(id) ?? []) {
+        visit(childId, collapsedNodes.has(id));
+      }
     }
-    for (const r of treeData.rootNodeIds) visit(r, false);
-    // Orphans always visible
-    for (const n of initialNodes)
-      if (!treeData.parentMap.has(n.id) && !treeData.rootNodeIds.includes(n.id))
-        visible.add(n.id);
+
+    for (const rootId of treeData.rootNodeIds) visit(rootId, false);
+
+    // Orphans or nodes in disconnected cycles should remain visible.
+    for (const id of allNodeIds) {
+      if (!treeData.parentMap.has(id) && !visible.has(id)) visible.add(id);
+    }
+
+    if (!uiPrefs.showGhostNodes) {
+      for (const id of [...visible]) {
+        if (id.startsWith('g_')) visible.delete(id);
+      }
+    }
+
     return visible;
-  }, [collapsedNodes, treeData, initialNodes]);
+  }, [collapsedNodes, treeData, allNodeIds, uiPrefs.showGhostNodes]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -335,40 +597,171 @@ export default function ProspectMapCanvas({
   const edgesRef = useRef(edges);
   edgesRef.current = edges;
 
-  // Debounced position save on drag end
+  const revealNodePath = useCallback((targetNodeId: string) => {
+    setCollapsedNodes(prev => {
+      let parentId = treeData.parentMap.get(targetNodeId);
+      if (!parentId) return prev;
+
+      const next = new Set(prev);
+      while (parentId) {
+        next.delete(parentId);
+        parentId = treeData.parentMap.get(parentId);
+      }
+      return next;
+    });
+  }, [treeData.parentMap]);
+
+  const handleFocusNode = useCallback((nodeId: string) => {
+    if (nodeId.startsWith('g_') && !uiPrefs.showGhostNodes) {
+      setUiPrefs(prev => ({ ...prev, showGhostNodes: true }));
+    }
+
+    revealNodePath(nodeId);
+    setFocusedNodeId(nodeId);
+
+    window.setTimeout(() => {
+      const targetNode = nodesRef.current.find(n => n.id === nodeId && !n.hidden);
+      if (!targetNode || !reactFlowRef.current) return;
+      const width = targetNode.type === 'ghostNode' ? 200 : 220;
+      const height = targetNode.type === 'ghostNode' ? 70 : 80;
+      reactFlowRef.current.setCenter(
+        targetNode.position.x + width / 2,
+        targetNode.position.y + height / 2,
+        { zoom: 1.2, duration: 280 }
+      );
+    }, 80);
+  }, [revealNodePath, uiPrefs.showGhostNodes]);
+
+  const focusSearchMatchAtIndex = useCallback((index: number) => {
+    if (searchMatchNodeIds.length === 0) return;
+    const safeIndex = ((index % searchMatchNodeIds.length) + searchMatchNodeIds.length) % searchMatchNodeIds.length;
+    setSearchActiveIndex(safeIndex);
+    handleFocusNode(searchMatchNodeIds[safeIndex]);
+  }, [searchMatchNodeIds, handleFocusNode]);
+
+  const handleFocusNextMatch = useCallback(() => {
+    focusSearchMatchAtIndex(searchActiveIndex + 1);
+  }, [focusSearchMatchAtIndex, searchActiveIndex]);
+
+  const handleFocusPrevMatch = useCallback(() => {
+    focusSearchMatchAtIndex(searchActiveIndex - 1);
+  }, [focusSearchMatchAtIndex, searchActiveIndex]);
+
+  const handleSearchQueryChange = useCallback((value: string) => {
+    setSearchQuery(value);
+    setSearchActiveIndex(0);
+    if (!value.trim()) setFocusedNodeId(null);
+  }, []);
+
+  const handleToggleCollapse = useCallback((nodeId: string) => {
+    setCollapsedNodes(prev => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  }, []);
+
+  const handleExpandAll = useCallback(() => {
+    setCollapsedNodes(new Set<string>());
+  }, []);
+
+  const handleCollapseAll = useCallback(() => {
+    setCollapsedNodes(new Set(collapsibleNodeIds));
+  }, [collapsibleNodeIds]);
+
+  const handleResetSmartCollapse = useCallback(() => {
+    setCollapsedNodes(new Set(autoCollapsedNodes));
+  }, [autoCollapsedNodes]);
+
+  const handleToggleGhostNodes = useCallback(() => {
+    setUiPrefs(prev => ({ ...prev, showGhostNodes: !prev.showGhostNodes }));
+  }, []);
+
+  const handleToggleReportsToEdges = useCallback(() => {
+    setUiPrefs(prev => ({ ...prev, showReportsToEdges: !prev.showReportsToEdges }));
+  }, []);
+
+  const handleToggleCustomEdges = useCallback(() => {
+    setUiPrefs(prev => ({ ...prev, showCustomEdges: !prev.showCustomEdges }));
+  }, []);
+
+  const handleMoveEnd = useCallback((_: unknown, viewport: Viewport) => {
+    if (typeof window === 'undefined') return;
+    if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
+    viewportSaveTimerRef.current = setTimeout(() => {
+      try {
+        window.localStorage.setItem(viewportStorageKey, JSON.stringify(viewport));
+      } catch {
+        // Ignore localStorage errors.
+      }
+    }, 150);
+  }, [viewportStorageKey]);
+
+  const restoreViewportIfNeeded = useCallback(() => {
+    if (viewportRestoredRef.current) return;
+    if (!reactFlowRef.current) return;
+    viewportRestoredRef.current = true;
+    if (!savedViewport) return;
+    window.setTimeout(() => {
+      reactFlowRef.current?.setViewport(savedViewport, { duration: 0 });
+    }, 40);
+  }, [savedViewport]);
+
+  const handleFlowInit = useCallback((instance: ReactFlowInstance<Node, Edge>) => {
+    reactFlowRef.current = instance;
+    restoreViewportIfNeeded();
+  }, [restoreViewportIfNeeded]);
+
+  useEffect(() => {
+    restoreViewportIfNeeded();
+  }, [restoreViewportIfNeeded]);
+
+  const handleFitVisible = useCallback(() => {
+    reactFlowRef.current?.fitView({
+      includeHiddenNodes: false,
+      duration: 250,
+      padding: 0.2,
+      maxZoom: 1.3,
+    });
+  }, []);
+
+  // Debounced position save on drag end (save only moved nodes)
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     onNodesChange(changes);
 
-    // Only save on position changes (drag end)
-    const hasDrag = changes.some(c => c.type === 'position' && c.dragging === false);
-    if (hasDrag) {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        const positionsToSave = nodesRef.current.filter(n => !n.hidden).map(n => {
-          const isGhost = n.id.startsWith('g_');
-          return {
-            prospectId: isGhost ? undefined : parseInt(n.id.replace('p_', '')),
-            ghostKey: isGhost ? n.id.replace('g_', '') : undefined,
-            x: n.position.x,
-            y: n.position.y,
-            nodeType: isGhost ? 'ghost' : 'structured',
-          };
-        });
-        onSavePositions(positionsToSave);
-      }, 800);
+    const movedNodeIds = new Set<string>();
+    for (const change of changes) {
+      if (change.type === 'position' && change.dragging === false && 'id' in change) {
+        movedNodeIds.add(change.id);
+      }
     }
+
+    if (movedNodeIds.size === 0) return;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const positionsToSave = serializeNodePositions(nodesRef.current, { onlyNodeIds: movedNodeIds });
+      if (positionsToSave.length > 0) onSavePositions(positionsToSave);
+    }, 500);
   }, [onNodesChange, onSavePositions]);
 
   const handleConnect = useCallback((connection: Connection) => {
-    // Create custom edge
-    setEdges((eds) => addEdge({
+    if (!connection.source || !connection.target) return;
+    if (connection.source === connection.target) return;
+
+    const duplicateExists = edgesRef.current.some(
+      edge => edge.type === 'customEdge' && edge.source === connection.source && edge.target === connection.target
+    );
+    if (duplicateExists) return;
+
+    setEdges((currentEdges) => addEdge({
       ...connection,
       type: 'customEdge',
       data: { label: '', onLabelChange: onUpdateEdgeLabel },
-    }, eds));
-    if (connection.source && connection.target) {
-      onCreateEdge(connection.source, connection.target);
-    }
+    }, currentEdges));
+
+    onCreateEdge(connection.source, connection.target);
   }, [setEdges, onCreateEdge, onUpdateEdgeLabel]);
 
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
@@ -382,50 +775,49 @@ export default function ProspectMapCanvas({
 
   // Auto layout with dagre (visible nodes only)
   const handleAutoLayout = useCallback(() => {
-    const visNodes = nodesRef.current.filter(n => !n.hidden);
-    const visEdges = edgesRef.current.filter(e => !e.hidden);
+    const visibleNodes = nodesRef.current.filter(node => !node.hidden);
+    const visibleEdges = edgesRef.current.filter(edge => !edge.hidden);
 
-    const g = new dagre.graphlib.Graph();
-    g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 });
+    const graph = new dagre.graphlib.Graph();
+    graph.setDefaultEdgeLabel(() => ({}));
+    graph.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 });
 
-    visNodes.forEach(node => {
-      g.setNode(node.id, { width: 220, height: 100 });
+    for (const node of visibleNodes) {
+      const width = node.type === 'ghostNode' ? 200 : 220;
+      const height = node.type === 'ghostNode' ? 80 : 100;
+      graph.setNode(node.id, { width, height });
+    }
+
+    for (const edge of visibleEdges) {
+      graph.setEdge(edge.source, edge.target);
+    }
+
+    dagre.layout(graph);
+
+    let laidOutNodes: Node[] = [];
+    setNodes(prev => {
+      laidOutNodes = prev.map(node => {
+        if (node.hidden) return node;
+        const dagreNode = graph.node(node.id);
+        if (!dagreNode) return node;
+        const width = node.type === 'ghostNode' ? 200 : 220;
+        const height = node.type === 'ghostNode' ? 80 : 100;
+        return {
+          ...node,
+          position: {
+            x: dagreNode.x - width / 2,
+            y: dagreNode.y - height / 2,
+          },
+        };
+      });
+      return laidOutNodes;
     });
 
-    visEdges.forEach(edge => {
-      g.setEdge(edge.source, edge.target);
-    });
-
-    dagre.layout(g);
-
-    setNodes(prev => prev.map(node => {
-      if (node.hidden) return node;
-      const dagreNode = g.node(node.id);
-      return dagreNode ? {
-        ...node,
-        position: {
-          x: dagreNode.x - 110,
-          y: dagreNode.y - 50,
-        },
-      } : node;
-    }));
-
-    // Save visible positions
-    const positionsToSave = nodesRef.current.filter(n => !n.hidden).map(n => {
-      const isGhost = n.id.startsWith('g_');
-      return {
-        prospectId: isGhost ? undefined : parseInt(n.id.replace('p_', '')),
-        ghostKey: isGhost ? n.id.replace('g_', '') : undefined,
-        x: n.position.x,
-        y: n.position.y,
-        nodeType: isGhost ? 'ghost' : 'structured',
-      };
-    });
-    onSavePositions(positionsToSave);
+    const positionsToSave = serializeNodePositions(laidOutNodes);
+    if (positionsToSave.length > 0) onSavePositions(positionsToSave);
   }, [setNodes, onSavePositions]);
 
-  // Keep ref in sync so the mount effect gets the latest function
+  // Keep ref in sync so mount effect and keyboard shortcuts get latest function
   autoLayoutRef.current = handleAutoLayout;
 
   // Auto-layout on mount after hierarchy build completes
@@ -439,26 +831,90 @@ export default function ProspectMapCanvas({
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- only on mount
 
-  // Sync hidden state and collapse metadata into ReactFlow nodes & edges
+  // Keyboard shortcuts for frequent map actions.
   useEffect(() => {
-    setNodes(prev => prev.map(n => ({
-      ...n,
-      hidden: !visibleNodeIds.has(n.id),
-      data: {
-        ...n.data,
-        isCollapsed: collapsedNodes.has(n.id),
-        collapsedCount: collapsedNodes.has(n.id)
-          ? (treeData.descendantCountMap.get(n.id) ?? 0) : 0,
-        hasChildren: (treeData.childrenMap.get(n.id) ?? []).length > 0,
-        onToggleCollapse: (treeData.childrenMap.get(n.id) ?? []).length > 0
-          ? () => handleToggleCollapse(n.id) : undefined,
-      },
-    })));
-    setEdges(prev => prev.map(e => ({
-      ...e,
-      hidden: !visibleNodeIds.has(e.source) || !visibleNodeIds.has(e.target),
-    })));
-  }, [visibleNodeIds, collapsedNodes, treeData, setNodes, setEdges, handleToggleCollapse]);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      const key = event.key.toLowerCase();
+      if (key === 'l') {
+        event.preventDefault();
+        handleAutoLayout();
+      } else if (key === 'v') {
+        event.preventDefault();
+        handleFitVisible();
+      } else if (key === 'x') {
+        event.preventDefault();
+        handleExpandAll();
+      } else if (key === 'c') {
+        event.preventDefault();
+        handleCollapseAll();
+      } else if (key === 's') {
+        event.preventDefault();
+        handleResetSmartCollapse();
+      } else if (key === 'g') {
+        event.preventDefault();
+        handleToggleGhostNodes();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    handleAutoLayout,
+    handleFitVisible,
+    handleExpandAll,
+    handleCollapseAll,
+    handleResetSmartCollapse,
+    handleToggleGhostNodes,
+  ]);
+
+  // Sync hidden state and collapse/search metadata into ReactFlow nodes & edges
+  useEffect(() => {
+    setNodes(prev => prev.map(node => {
+      const hasChildren = (treeData.childrenMap.get(node.id) ?? []).length > 0;
+      return {
+        ...node,
+        hidden: !visibleNodeIds.has(node.id),
+        data: {
+          ...node.data,
+          isCollapsed: collapsedNodes.has(node.id),
+          collapsedCount: collapsedNodes.has(node.id)
+            ? (treeData.descendantCountMap.get(node.id) ?? 0)
+            : 0,
+          hasChildren,
+          isFocused: focusedNodeId === node.id,
+          isSearchMatch: searchMatchSet.has(node.id),
+          onToggleCollapse: hasChildren
+            ? () => handleToggleCollapse(node.id)
+            : undefined,
+        },
+      };
+    }));
+
+    setEdges(prev => prev.map(edge => {
+      const hiddenByType =
+        (edge.type === 'reportsToEdge' && !uiPrefs.showReportsToEdges) ||
+        (edge.type === 'customEdge' && !uiPrefs.showCustomEdges);
+
+      return {
+        ...edge,
+        hidden: hiddenByType || !visibleNodeIds.has(edge.source) || !visibleNodeIds.has(edge.target),
+      };
+    }));
+  }, [
+    visibleNodeIds,
+    collapsedNodes,
+    treeData,
+    focusedNodeId,
+    searchMatchSet,
+    uiPrefs.showReportsToEdges,
+    uiPrefs.showCustomEdges,
+    setNodes,
+    setEdges,
+    handleToggleCollapse,
+  ]);
 
   // Re-layout after collapse/expand (skip initial render)
   const isFirstCollapseRender = useRef(true);
@@ -467,38 +923,72 @@ export default function ProspectMapCanvas({
       isFirstCollapseRender.current = false;
       return;
     }
+
     const timer = setTimeout(() => {
-      const visNodes = nodesRef.current.filter(n => !n.hidden);
-      const visEdges = edgesRef.current.filter(e => !e.hidden);
-      const g = new dagre.graphlib.Graph();
-      g.setDefaultEdgeLabel(() => ({}));
-      g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 });
-      visNodes.forEach(n => g.setNode(n.id, { width: 220, height: 100 }));
-      visEdges.forEach(e => g.setEdge(e.source, e.target));
-      dagre.layout(g);
-      setNodes(prev => prev.map(n => {
-        if (n.hidden) return n;
-        const dn = g.node(n.id);
-        return dn ? { ...n, position: { x: dn.x - 110, y: dn.y - 50 } } : n;
-      }));
-      // Save visible positions
-      const positionsToSave = nodesRef.current.filter(n => !n.hidden).map(n => ({
-        prospectId: n.id.startsWith('g_') ? undefined : parseInt(n.id.replace('p_', '')),
-        ghostKey: n.id.startsWith('g_') ? n.id.replace('g_', '') : undefined,
-        x: n.position.x,
-        y: n.position.y,
-        nodeType: n.id.startsWith('g_') ? 'ghost' : 'structured',
-      }));
-      onSavePositions(positionsToSave);
+      const visibleNodes = nodesRef.current.filter(node => !node.hidden);
+      const visibleEdges = edgesRef.current.filter(edge => !edge.hidden);
+
+      const graph = new dagre.graphlib.Graph();
+      graph.setDefaultEdgeLabel(() => ({}));
+      graph.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100 });
+
+      for (const node of visibleNodes) {
+        const width = node.type === 'ghostNode' ? 200 : 220;
+        const height = node.type === 'ghostNode' ? 80 : 100;
+        graph.setNode(node.id, { width, height });
+      }
+
+      for (const edge of visibleEdges) {
+        graph.setEdge(edge.source, edge.target);
+      }
+
+      dagre.layout(graph);
+
+      let laidOutNodes: Node[] = [];
+      setNodes(prev => {
+        laidOutNodes = prev.map(node => {
+          if (node.hidden) return node;
+          const dagreNode = graph.node(node.id);
+          if (!dagreNode) return node;
+          const width = node.type === 'ghostNode' ? 200 : 220;
+          const height = node.type === 'ghostNode' ? 80 : 100;
+          return {
+            ...node,
+            position: {
+              x: dagreNode.x - width / 2,
+              y: dagreNode.y - height / 2,
+            },
+          };
+        });
+        return laidOutNodes;
+      });
+
+      const positionsToSave = serializeNodePositions(laidOutNodes);
+      if (positionsToSave.length > 0) onSavePositions(positionsToSave);
     }, 50);
+
     return () => clearTimeout(timer);
-  }, [collapsedNodes]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [collapsedNodes, onSavePositions, setNodes]);
+
+  const visibleNodeCount = useMemo(
+    () => nodes.reduce((count, node) => count + (node.hidden ? 0 : 1), 0),
+    [nodes]
+  );
+
+  const visibleEdgeCount = useMemo(
+    () => edges.reduce((count, edge) => count + (edge.hidden ? 0 : 1), 0),
+    [edges]
+  );
 
   return (
     <div className="relative w-full h-full">
       <ProspectMapToolbar
         onAutoLayout={handleAutoLayout}
+        onFitVisible={handleFitVisible}
         onAddProspect={onAddProspect}
+        onExpandAll={handleExpandAll}
+        onCollapseAll={handleCollapseAll}
+        onResetSmartCollapse={handleResetSmartCollapse}
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
         isSaving={isSaving}
@@ -506,13 +996,32 @@ export default function ProspectMapCanvas({
         buildStep={buildStep}
         onBuildMap={onBuildMap}
         onImport={onImport}
+        searchQuery={searchQuery}
+        onSearchQueryChange={handleSearchQueryChange}
+        searchMatchCount={searchMatchNodeIds.length}
+        searchActiveIndex={searchActiveIndex}
+        onFocusNextMatch={handleFocusNextMatch}
+        onFocusPrevMatch={handleFocusPrevMatch}
+        showGhostNodes={uiPrefs.showGhostNodes}
+        showReportsToEdges={uiPrefs.showReportsToEdges}
+        showCustomEdges={uiPrefs.showCustomEdges}
+        onToggleGhostNodes={handleToggleGhostNodes}
+        onToggleReportsToEdges={handleToggleReportsToEdges}
+        onToggleCustomEdges={handleToggleCustomEdges}
+        visibleNodeCount={visibleNodeCount}
+        totalNodeCount={nodes.length}
+        visibleEdgeCount={visibleEdgeCount}
+        totalEdgeCount={edges.length}
       />
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
+        onMoveEnd={handleMoveEnd}
+        onInit={handleFlowInit}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView

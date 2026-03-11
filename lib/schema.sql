@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS processing_jobs (
   processed_count INTEGER NOT NULL DEFAULT 0,
   failed_count INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending', -- pending, processing, completed, failed
+  archived INTEGER NOT NULL DEFAULT 0, -- 0 = visible, 1 = archived/hidden from default views
   current_account_id INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -173,6 +174,31 @@ CREATE TABLE IF NOT EXISTS account_notes (
   FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
+-- Chat threads and messages (global assistant)
+CREATE TABLE IF NOT EXISTS chat_threads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  context_key TEXT NOT NULL UNIQUE, -- perspective:accountId|none:prospectId|none
+  context_account_id INTEGER,
+  context_prospect_id INTEGER,
+  perspective TEXT NOT NULL DEFAULT 'auth0', -- auth0|okta
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (context_account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+  FOREIGN KEY (context_prospect_id) REFERENCES prospects(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id INTEGER NOT NULL,
+  role TEXT NOT NULL, -- user|assistant|tool
+  content_markdown TEXT,
+  content_json TEXT,
+  tool_name TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
+);
+
 -- Opportunity import jobs table - tracks Salesforce opportunity CSV import jobs
 CREATE TABLE IF NOT EXISTS opportunity_import_jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,6 +265,7 @@ CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(research_status);
 CREATE INDEX IF NOT EXISTS idx_accounts_job_id ON accounts(job_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_company_name ON accounts(company_name);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON processing_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_archived ON processing_jobs(archived);
 CREATE INDEX IF NOT EXISTS idx_categorization_jobs_status ON categorization_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_preprocessing_jobs_status ON preprocessing_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_preprocessing_results_job_id ON preprocessing_results(job_id);
@@ -246,6 +273,11 @@ CREATE INDEX IF NOT EXISTS idx_preprocessing_results_domain ON preprocessing_res
 CREATE INDEX IF NOT EXISTS idx_account_tags_account_id ON account_tags(account_id);
 CREATE INDEX IF NOT EXISTS idx_section_comments_account_id ON section_comments(account_id);
 CREATE INDEX IF NOT EXISTS idx_account_notes_account_id ON account_notes(account_id);
+CREATE INDEX IF NOT EXISTS idx_chat_threads_context_account ON chat_threads(context_account_id);
+CREATE INDEX IF NOT EXISTS idx_chat_threads_context_prospect ON chat_threads(context_prospect_id);
+CREATE INDEX IF NOT EXISTS idx_chat_threads_updated_at ON chat_threads(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_prospects_account_id ON prospects(account_id);
 CREATE INDEX IF NOT EXISTS idx_prospects_parent_id ON prospects(parent_prospect_id);
 CREATE INDEX IF NOT EXISTS idx_prospects_email ON prospects(email);

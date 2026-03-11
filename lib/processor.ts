@@ -19,9 +19,9 @@ import { analyzeAccountData } from './categorizer';
 import { analyzeOktaAccountData, OktaPatch } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
 import { processJobParallel } from './parallel-processor';
-import { logDetailedError } from './error-logger';
 import { buildOpportunityContext } from './opportunity-context';
 import { buildActivityContext } from './activity-context';
+import { logWorkerError, sleep } from './worker-error-utils';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -70,6 +70,9 @@ export async function processJob(
       console.log(`Using SEQUENTIAL processing mode (research: ${researchType})`);
       await processJobSequential(jobId, researchType, model, oktaPatch);
     }
+  } catch (error) {
+    logWorkerError(`[Job ${jobId}] processJob failed`, error);
+    throw error;
   } finally {
     activeJobs.delete(jobId);
   }
@@ -102,19 +105,21 @@ export async function processJobSequential(
 
   let processedCount = 0;
   let failedCount = 0;
+  let wasCancelled = false;
 
   while (true) {
     // Check if job is paused
     const currentJob = getJob(jobId);
     if (currentJob?.paused === 1) {
       console.log(`Job ${jobId} is paused. Waiting...`);
-      await new Promise(resolve => setTimeout(resolve, 3000)); // Check every 3 seconds
+      await sleep(3000); // Check every 3 seconds
       continue;
     }
 
     // Check if job was cancelled
     if (currentJob?.status === 'failed') {
       console.log(`Job ${jobId} was cancelled`);
+      wasCancelled = true;
       break;
     }
 
@@ -226,7 +231,7 @@ export async function processJobSequential(
             `✓ Auth0 categorization: ${account.company_name} → Tier ${suggestions.tier} (Priority: ${suggestions.priorityScore})`
           );
         } catch (categorizationError) {
-          logDetailedError(`[Job ${jobId}] Auth0 categorization failed for account ${account.id} (${account.company_name})`, categorizationError);
+          logWorkerError(`[Job ${jobId}] Auth0 categorization failed for account ${account.id} (${account.company_name})`, categorizationError);
           // Continue even if categorization fails - the research is still valuable
         }
       }
@@ -264,7 +269,7 @@ export async function processJobSequential(
             `✓ Okta categorization: ${account.company_name} → Tier ${oktaSuggestions.tier} (Priority: ${oktaSuggestions.priorityScore})`
           );
         } catch (categorizationError) {
-          logDetailedError(`[Job ${jobId}] Okta categorization failed for account ${account.id} (${account.company_name})`, categorizationError);
+          logWorkerError(`[Job ${jobId}] Okta categorization failed for account ${account.id} (${account.company_name})`, categorizationError);
           // Continue even if categorization fails - the research is still valuable
         }
       }
@@ -296,7 +301,7 @@ export async function processJobSequential(
           }
         }
       } catch (parentError) {
-        console.error(`Parent company detection failed for ${account.company_name}:`, parentError);
+        logWorkerError(`[Job ${jobId}] Parent company detection failed for account ${account.id} (${account.company_name})`, parentError);
         // Non-fatal: continue processing
       }
 
@@ -323,13 +328,15 @@ export async function processJobSequential(
       updateJobProgress(jobId, processedCount, failedCount);
 
       // Add a small delay between accounts to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sleep(1000);
 
     } catch (error) {
-      logDetailedError(`[Job ${jobId}] Failed to research account ${account.id} (${account.company_name}, domain: ${account.domain || 'none'}, industry: ${account.industry})`, error);
+      const errorMessage = logWorkerError(
+        `[Job ${jobId}] Failed to process account ${account.id} (${account.company_name}, domain: ${account.domain || 'none'}, industry: ${account.industry})`,
+        error
+      );
 
       // Mark account as failed
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       updateAccountStatus(account.id, 'failed', errorMessage);
 
       // Emit account_failed event
@@ -346,6 +353,13 @@ export async function processJobSequential(
 
       // Continue to next account even if this one failed
     }
+  }
+
+  if (wasCancelled) {
+    insertJobEvent(jobId, 'processing', 'job_cancelled', {
+      message: `Job cancelled. Processed: ${processedCount}, Failed: ${failedCount}`,
+    });
+    return;
   }
 
   // Mark job as completed

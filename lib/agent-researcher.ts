@@ -254,20 +254,27 @@ export async function researchCompany(company: CompanyInfo, model?: string, oppo
   try {
     const companyIdentifier = company.domain ? `${company.company_name} (${company.domain})` : company.company_name;
     const TOTAL_STEPS = 7;
+    const fallbackOutput: string | undefined = 'Research agent failed — no data available for this section.';
+
+    // Helper to run a section with error handling so one failure doesn't crash all research
+    const runSection = async (sectionKey: string, stepLabel: string, stepNum: number) => {
+      onStep?.(stepLabel, stepNum, TOTAL_STEPS);
+      try {
+        const result = await run(agent, AUTH0_RESEARCH_SECTIONS[sectionKey].buildPrompt(companyIdentifier, company.company_name, company.industry));
+        return result;
+      } catch (err) {
+        console.error(`[Auth0 SDR] ${stepLabel} agent failed for ${company.company_name}:`, err);
+        return { finalOutput: fallbackOutput };
+      }
+    };
 
     // Research using section definitions
-    onStep?.('Current Auth Solution', 1, TOTAL_STEPS);
-    const authResult = await run(agent, AUTH0_RESEARCH_SECTIONS.current_auth_solution.buildPrompt(companyIdentifier, company.company_name, company.industry));
-    onStep?.('Customer Base', 2, TOTAL_STEPS);
-    const customerResult = await run(agent, AUTH0_RESEARCH_SECTIONS.customer_base_info.buildPrompt(companyIdentifier, company.company_name, company.industry));
-    onStep?.('Security & Compliance', 3, TOTAL_STEPS);
-    const securityResult = await run(agent, AUTH0_RESEARCH_SECTIONS.security_incidents.buildPrompt(companyIdentifier, company.company_name, company.industry));
-    onStep?.('News & Funding', 4, TOTAL_STEPS);
-    const newsResult = await run(agent, AUTH0_RESEARCH_SECTIONS.news_and_funding.buildPrompt(companyIdentifier, company.company_name, company.industry));
-    onStep?.('Tech Transformation', 5, TOTAL_STEPS);
-    const techResult = await run(agent, AUTH0_RESEARCH_SECTIONS.tech_transformation.buildPrompt(companyIdentifier, company.company_name, company.industry));
-    onStep?.('Prospects', 6, TOTAL_STEPS);
-    const prospectsResult = await run(agent, AUTH0_RESEARCH_SECTIONS.prospects.buildPrompt(companyIdentifier, company.company_name, company.industry));
+    const authResult = await runSection('current_auth_solution', 'Current Auth Solution', 1);
+    const customerResult = await runSection('customer_base_info', 'Customer Base', 2);
+    const securityResult = await runSection('security_incidents', 'Security & Compliance', 3);
+    const newsResult = await runSection('news_and_funding', 'News & Funding', 4);
+    const techResult = await runSection('tech_transformation', 'Tech Transformation', 5);
+    const prospectsResult = await runSection('prospects', 'Prospects', 6);
 
     // Generate summary
     const summaryPrompt = `Based on all the research about ${company.company_name}, create a concise 2-3 paragraph executive summary for an Auth0 SDR in the ANZ market.
@@ -293,7 +300,12 @@ export async function researchCompany(company: CompanyInfo, model?: string, oppo
 Provide a compelling, well-formatted summary from an Auth0 ANZ SDR perspective.`;
 
     onStep?.('Executive Summary', 7, TOTAL_STEPS);
-    const summaryResult = await run(agent, summaryPrompt);
+    let summaryResult: { finalOutput: string | undefined } = { finalOutput: fallbackOutput };
+    try {
+      summaryResult = await run(agent, summaryPrompt);
+    } catch (err) {
+      console.error(`[Auth0 SDR] Summary agent failed for ${company.company_name}:`, err);
+    }
 
     // Parse and validate prospects to ensure minimum 5 entries
     let prospectsList = [];

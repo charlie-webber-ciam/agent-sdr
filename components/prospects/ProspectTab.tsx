@@ -7,6 +7,7 @@ import ProspectEmailModal from './ProspectEmailModal';
 import AccountWorkingModal from './AccountWorkingModal';
 import AccountWorkingView from './AccountWorkingView';
 import { usePerspective } from '@/lib/perspective-context';
+import { usePageChatContext } from '@/lib/page-chat-context';
 
 export interface Prospect {
   id: number;
@@ -64,6 +65,7 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
   const [showWorkingModal, setShowWorkingModal] = useState(false);
   const [emailRefreshKey, setEmailRefreshKey] = useState(0);
   const { perspective } = usePerspective();
+  const { setActiveProspect, clearActiveProspect } = usePageChatContext();
 
   const fetchProspects = useCallback(async () => {
     setFetchError(false);
@@ -83,6 +85,15 @@ export default function ProspectTab({ accountId }: { accountId: number }) {
   useEffect(() => {
     fetchProspects();
   }, [fetchProspects]);
+
+  useEffect(() => {
+    const activeProspect = emailingProspect || selectedProspect;
+    if (activeProspect) {
+      setActiveProspect(activeProspect.id, activeProspect.account_id);
+      return;
+    }
+    clearActiveProspect();
+  }, [emailingProspect, selectedProspect, setActiveProspect, clearActiveProspect]);
 
   const filteredProspects = search
     ? prospects.filter(p => {

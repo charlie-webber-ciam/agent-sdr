@@ -1,24 +1,29 @@
 import { NextResponse } from 'next/server';
-import { pauseProcessingJob } from '@/lib/db';
+import { getJob, pauseProcessingJob } from '@/lib/db';
+import {
+  assertProcessAction,
+  parseJobId,
+  processActionErrorResponse,
+} from '@/lib/process-action-utils';
 
 export async function POST(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
     const { jobId } = await params;
-    const jobIdNum = parseInt(jobId, 10);
+    const jobIdNum = parseJobId(jobId);
 
-    if (isNaN(jobIdNum)) {
-      return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 });
-    }
+    const job = getJob(jobIdNum);
+    assertProcessAction(job, 404, 'Job not found');
+    assertProcessAction(job.status === 'processing', 409, `Job is ${job.status}. Only processing jobs can be paused.`);
+    assertProcessAction(job.paused !== 1, 409, 'Job is already paused');
 
     pauseProcessingJob(jobIdNum);
     console.log(`Job ${jobIdNum} paused`);
 
     return NextResponse.json({ success: true, message: 'Job paused' });
   } catch (error) {
-    console.error('Failed to pause job:', error);
-    return NextResponse.json({ error: 'Failed to pause job' }, { status: 500 });
+    return processActionErrorResponse('Failed to pause job', error, 'Failed to pause job');
   }
 }

@@ -16,6 +16,8 @@ const openai = new OpenAI({
 // Set the OpenAI client for the agents SDK
 setDefaultOpenAIClient(openai);
 
+const EMAIL_WRITER_MODEL = process.env.EMAIL_WRITER_MODEL || 'claude-4-6-sonnet';
+
 export interface EmailRequest {
   recipientName: string;
   recipientPersona: string; // e.g., "CTO", "VP Engineering"
@@ -129,7 +131,7 @@ export async function generateEmail(request: EmailRequest): Promise<EmailResult>
 
     const agent = new Agent({
       name: `${contextLabel} Cold Email Writer - Charlie Style`,
-      model: 'claude-4-6-opus',
+      model: EMAIL_WRITER_MODEL,
       instructions: SYSTEM_INSTRUCTIONS,
       tools: [], // No tools needed - using provided context only
     });
@@ -175,7 +177,7 @@ function prepareAccountContext(account: Account, researchContext: 'auth0' | 'okt
         if (suggestions.priority_reasoning) {
           parts.push(`\nPRIORITY REASONING: ${suggestions.priority_reasoning}`);
         }
-      } catch (e) {
+      } catch {
         // Ignore parse errors
       }
     }
@@ -204,7 +206,7 @@ function prepareAccountContext(account: Account, researchContext: 'auth0' | 'okt
         if (Array.isArray(prospects) && prospects.length > 0) {
           parts.push(`\nKEY PROSPECTS:\n${prospects.map((p: any) => `- ${p.name} (${p.title})`).join('\n')}`);
         }
-      } catch (e) {
+      } catch {
         // Ignore parse errors
       }
     }
@@ -244,7 +246,7 @@ function prepareAccountContext(account: Account, researchContext: 'auth0' | 'okt
         if (Array.isArray(prospects) && prospects.length > 0) {
           parts.push(`\nKEY PROSPECTS:\n${prospects.map((p: any) => `- ${p.name} (${p.title})`).join('\n')}`);
         }
-      } catch (e) {
+      } catch {
         // Ignore parse errors
       }
     }

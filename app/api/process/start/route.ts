@@ -2,66 +2,68 @@ import { NextResponse } from 'next/server';
 import { processJob } from '@/lib/processor';
 import { PROCESSING_CONFIG } from '@/lib/config';
 import type { OktaPatch } from '@/lib/okta-categorizer';
+import { getJob } from '@/lib/db';
+import {
+  assertProcessAction,
+  parseJobId,
+  parseJsonBody,
+  processActionErrorResponse,
+  runInBackground,
+  ProcessActionError,
+} from '@/lib/process-action-utils';
 
 const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg', 'pubsec'];
+const VALID_MODES = ['parallel', 'sequential'] as const;
+type ProcessMode = (typeof VALID_MODES)[number];
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = await parseJsonBody<{
+      jobId?: unknown;
+      mode?: unknown;
+      concurrency?: unknown;
+      oktaPatch?: unknown;
+    }>(request);
     const { jobId, mode, concurrency, oktaPatch } = body;
+    const jobIdNum = parseJobId(jobId, 'jobId');
 
-    if (!jobId) {
-      return NextResponse.json(
-        { error: 'Job ID is required' },
-        { status: 400 }
-      );
+    if (mode !== undefined && !VALID_MODES.includes(mode as ProcessMode)) {
+      throw new ProcessActionError(400, `Invalid mode. Must be one of: ${VALID_MODES.join(', ')}`);
     }
 
-    // Validate mode
-    const validModes = ['parallel', 'sequential'];
-    if (mode && !validModes.includes(mode)) {
-      return NextResponse.json(
-        { error: `Invalid mode. Must be one of: ${validModes.join(', ')}` },
-        { status: 400 }
-      );
-    }
-
-    // Validate concurrency
+    let selectedConcurrency = PROCESSING_CONFIG.concurrency;
     if (concurrency !== undefined) {
-      const concurrencyNum = parseInt(concurrency, 10);
-      if (isNaN(concurrencyNum) || concurrencyNum < 1 || concurrencyNum > 10) {
-        return NextResponse.json(
-          { error: 'Concurrency must be between 1 and 10' },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Validate oktaPatch if provided
-    if (oktaPatch && !VALID_PATCHES.includes(oktaPatch)) {
-      return NextResponse.json(
-        { error: `Invalid oktaPatch. Must be one of: ${VALID_PATCHES.join(', ')}` },
-        { status: 400 }
+      const parsedConcurrency =
+        typeof concurrency === 'number' ? concurrency : parseInt(String(concurrency), 10);
+      assertProcessAction(
+        Number.isInteger(parsedConcurrency) && parsedConcurrency >= 1 && parsedConcurrency <= 10,
+        400,
+        'Concurrency must be between 1 and 10'
       );
+      selectedConcurrency = parsedConcurrency;
     }
 
-    // Determine processing mode
-    const selectedMode = mode || (PROCESSING_CONFIG.enableParallel ? 'parallel' : 'sequential');
-    const selectedConcurrency = concurrency || PROCESSING_CONFIG.concurrency;
+    if (oktaPatch !== undefined && (typeof oktaPatch !== 'string' || !VALID_PATCHES.includes(oktaPatch as OktaPatch))) {
+      throw new ProcessActionError(400, `Invalid oktaPatch. Must be one of: ${VALID_PATCHES.join(', ')}`);
+    }
 
-    console.log(`Starting processing for job ${jobId}:`);
+    const job = getJob(jobIdNum);
+    assertProcessAction(job, 404, 'Job not found');
+    assertProcessAction(job.status === 'pending', 409, `Job is ${job.status}. Only pending jobs can be started.`);
+
+    const selectedMode: ProcessMode = (mode as ProcessMode | undefined)
+      || (PROCESSING_CONFIG.enableParallel ? 'parallel' : 'sequential');
+
+    console.log(`Starting processing for job ${jobIdNum}:`);
     console.log(`  Mode: ${selectedMode}`);
     console.log(`  Concurrency: ${selectedConcurrency}`);
     if (oktaPatch) console.log(`  Okta Patch: ${oktaPatch}`);
 
-    // Start processing in background (don't await)
-    processJob(jobId, {
-      mode: selectedMode,
+    runInBackground(`process/start job ${jobIdNum}`, () => processJob(jobIdNum, {
+      mode: selectedMode as 'parallel' | 'sequential',
       concurrency: selectedConcurrency,
       oktaPatch: oktaPatch as OktaPatch | undefined,
-    }).catch(error => {
-      console.error(`Background processing failed for job ${jobId}:`, error);
-    });
+    }));
 
     return NextResponse.json({
       success: true,
@@ -70,10 +72,6 @@ export async function POST(request: Request) {
       concurrency: selectedConcurrency,
     });
   } catch (error) {
-    console.error('Failed to start processing:', error);
-    return NextResponse.json(
-      { error: 'Failed to start processing' },
-      { status: 500 }
-    );
+    return processActionErrorResponse('Failed to start processing', error, 'Failed to start processing');
   }
 }

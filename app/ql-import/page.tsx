@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import ProspectEmailModal from '@/components/prospects/ProspectEmailModal';
 
@@ -59,13 +59,43 @@ interface ProspectEmail {
   updated_at: string;
 }
 
-function countLeadLines(text: string): number {
+interface UnresolvedAccountItem {
+  companyKey: string;
+  companyName: string;
+  leadCount: number;
+  sampleProspects: string[];
+  candidates: Array<{
+    id: number;
+    companyName: string;
+    domain: string | null;
+    industry: string;
+  }>;
+}
+
+function countNonEmptyLines(text: string): number {
   const lines = text.split('\n');
   let count = 0;
   for (const line of lines) {
-    if (/^\d+$/.test(line.trim())) count++;
+    if (line.trim()) count++;
   }
   return count;
+}
+
+function parseKeyInsights(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((item): item is string => typeof item === 'string')
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+  } catch {
+    // Fall through to legacy plain-text format.
+  }
+  const trimmed = raw.trim();
+  return trimmed ? [trimmed] : [];
 }
 
 function getClassificationBadge(status: string): { label: string; cls: string } {
@@ -87,9 +117,14 @@ function getClassificationBadge(status: string): { label: string; cls: string } 
 
 export default function QlImportPage() {
   const [rawText, setRawText] = useState('');
+  const [inputMode, setInputMode] = useState<'paste' | 'upload'>('paste');
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [parserMode, setParserMode] = useState<'deterministic' | 'llm' | null>(null);
+  const [resolutionPrompt, setResolutionPrompt] = useState<UnresolvedAccountItem[] | null>(null);
+  const [resolutionSelections, setResolutionSelections] = useState<Record<string, string>>({});
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
   const [job, setJob] = useState<QlImportJob | null>(null);
   const [recentJobs, setRecentJobs] = useState<QlImportJob[]>([]);
@@ -101,8 +136,9 @@ export default function QlImportPage() {
   const [loadingResults, setLoadingResults] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [emailModalProspect, setEmailModalProspect] = useState<ProspectResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const previewCount = rawText.trim() ? countLeadLines(rawText) : 0;
+  const previewCount = rawText.trim() ? countNonEmptyLines(rawText) : 0;
 
   const selectedProspect = results.find(p => p.id === selectedProspectId) || null;
   const selectedIndex = selectedProspect ? results.indexOf(selectedProspect) : -1;
@@ -169,7 +205,13 @@ export default function QlImportPage() {
     return () => clearInterval(interval);
   }, [activeJobId, fetchRecentJobs, fetchResults]);
 
-  const handleSubmit = async () => {
+  const startImport = async (
+    resolutions?: Array<{
+      companyKey: string;
+      action: 'link' | 'create';
+      accountId?: number;
+    }>
+  ) => {
     if (!rawText.trim()) return;
     setSubmitting(true);
     setError(null);
@@ -182,10 +224,27 @@ export default function QlImportPage() {
       const res = await fetch('/api/ql-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rawText }),
+        body: JSON.stringify({ rawText, resolutions }),
       });
 
       const data = await res.json();
+
+      if (res.status === 409 && data?.needsResolution) {
+        const unresolved = (data.unresolvedAccounts || []) as UnresolvedAccountItem[];
+        const defaults: Record<string, string> = {};
+        for (const item of unresolved) {
+          if (item.candidates.length > 0) {
+            defaults[item.companyKey] = `link:${item.candidates[0].id}`;
+          } else {
+            defaults[item.companyKey] = 'create';
+          }
+        }
+        setResolutionPrompt(unresolved);
+        setResolutionSelections(defaults);
+        setParserMode(data.parserMode === 'llm' ? 'llm' : 'deterministic');
+        if (data.parseErrors) setParseErrors(data.parseErrors);
+        return;
+      }
 
       if (!res.ok) {
         setError(data.error || 'Failed to start import');
@@ -196,8 +255,11 @@ export default function QlImportPage() {
       if (data.parseErrors?.length > 0) {
         setParseErrors(data.parseErrors);
       }
+      setParserMode(data.parserMode === 'llm' ? 'llm' : 'deterministic');
 
       setActiveJobId(data.jobId);
+      setResolutionPrompt(null);
+      setResolutionSelections({});
       setRawText('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error');
@@ -206,9 +268,73 @@ export default function QlImportPage() {
     }
   };
 
+  const handleSubmit = async () => {
+    await startImport();
+  };
+
+  const handleConfirmResolutions = async () => {
+    if (!resolutionPrompt || resolutionPrompt.length === 0) return;
+
+    const resolutions: Array<{
+      companyKey: string;
+      action: 'link' | 'create';
+      accountId?: number;
+    }> = [];
+
+    for (const item of resolutionPrompt) {
+      const selection = resolutionSelections[item.companyKey];
+      if (!selection) {
+        setError(`Please choose an account action for ${item.companyName}`);
+        return;
+      }
+      if (selection === 'create') {
+        resolutions.push({
+          companyKey: item.companyKey,
+          action: 'create',
+        });
+        continue;
+      }
+      if (!selection.startsWith('link:')) {
+        setError(`Invalid account selection for ${item.companyName}`);
+        return;
+      }
+      const accountId = parseInt(selection.replace('link:', ''), 10);
+      if (isNaN(accountId)) {
+        setError(`Invalid linked account for ${item.companyName}`);
+        return;
+      }
+      resolutions.push({
+        companyKey: item.companyKey,
+        action: 'link',
+        accountId,
+      });
+    }
+
+    await startImport(resolutions);
+  };
+
+  const handleReportFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      setRawText(text);
+      setUploadedFileName(file.name);
+      setInputMode('upload');
+      setError(null);
+      setParserMode(null);
+      setParseErrors([]);
+      setResolutionPrompt(null);
+      setResolutionSelections({});
+    } catch {
+      setError('Failed to read uploaded file');
+    }
+  };
+
   const handleLoadJob = (j: QlImportJob) => {
     setActiveJobId(j.id);
     setJob(j);
+    setParserMode(null);
+    setResolutionPrompt(null);
+    setResolutionSelections({});
     setResults([]);
     setProspectEmails({});
     setSelectedProspectId(null);
@@ -293,9 +419,9 @@ export default function QlImportPage() {
   return (
     <main className="min-h-screen p-8 max-w-6xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">QL Import</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Bulk HVT Writing</h1>
         <p className="text-gray-500 text-sm mt-1">
-          Paste spreadsheet QL text to import leads as prospects
+          Paste unstructured prospect text, auto-link accounts, and generate one cold email per prospect
         </p>
       </div>
 
@@ -393,7 +519,16 @@ export default function QlImportPage() {
                 View Prospects
               </Link>
               <button
-                onClick={() => { setActiveJobId(null); setJob(null); setResults([]); setProspectEmails({}); setSelectedProspectId(null); }}
+                onClick={() => {
+                  setActiveJobId(null);
+                  setJob(null);
+                  setResults([]);
+                  setProspectEmails({});
+                  setSelectedProspectId(null);
+                  setParserMode(null);
+                  setResolutionPrompt(null);
+                  setResolutionSelections({});
+                }}
                 className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Import More
@@ -403,7 +538,13 @@ export default function QlImportPage() {
 
           {isFailed && (
             <button
-              onClick={() => { setActiveJobId(null); setJob(null); }}
+              onClick={() => {
+                setActiveJobId(null);
+                setJob(null);
+                setParserMode(null);
+                setResolutionPrompt(null);
+                setResolutionSelections({});
+              }}
               className="mt-4 px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
               Try Again
@@ -416,7 +557,7 @@ export default function QlImportPage() {
       {isComplete && results.length > 0 && (
         <div className="mb-8">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">
-            Import Results ({results.length} prospect{results.length !== 1 ? 's' : ''})
+            Bulk Writing Results ({results.length} prospect{results.length !== 1 ? 's' : ''})
           </h2>
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
@@ -493,27 +634,147 @@ export default function QlImportPage() {
       {!activeJobId && (
         <div className="mb-8">
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-3">
-              <label className="text-sm font-medium text-gray-700">
-                Paste QL text from spreadsheet
-              </label>
+            <div className="flex items-center justify-between mb-3 gap-3">
+              <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden">
+                <button
+                  onClick={() => setInputMode('paste')}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    inputMode === 'paste'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Paste Text
+                </button>
+                <button
+                  onClick={() => setInputMode('upload')}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-gray-200 ${
+                    inputMode === 'upload'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Upload Report
+                </button>
+              </div>
               {previewCount > 0 && (
                 <span className="text-sm text-blue-600 font-medium">
-                  ~{previewCount} lead{previewCount !== 1 ? 's' : ''} detected
+                  {previewCount} non-empty line{previewCount !== 1 ? 's' : ''}
                 </span>
               )}
             </div>
+            {inputMode === 'upload' && (
+              <div className="mb-3 rounded-lg border border-dashed border-gray-300 p-3 bg-gray-50">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-800">Upload lead report (.csv or .txt)</p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {uploadedFileName ? `Loaded: ${uploadedFileName}` : 'Expected columns: First Name, Last Name, Title, Company / Account, Email, Lead Source, Lead Status, Lead Owner'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors whitespace-nowrap"
+                  >
+                    Choose File
+                  </button>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,.txt"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) handleReportFile(file);
+                  }}
+                />
+              </div>
+            )}
+            <label className="text-sm font-medium text-gray-700 block mb-2">
+              {inputMode === 'upload'
+                ? 'Review or edit uploaded report text'
+                : 'Paste bulk prospect text (any report format)'}
+            </label>
             <textarea
               value={rawText}
-              onChange={e => setRawText(e.target.value)}
+              onChange={e => {
+                setRawText(e.target.value);
+                if (inputMode === 'upload' && !uploadedFileName) {
+                  setInputMode('paste');
+                }
+                setParserMode(null);
+                setResolutionPrompt(null);
+                setResolutionSelections({});
+              }}
               rows={16}
-              placeholder={`Paste your QL data here...\n\nExpected format (one block per lead):\n1\n001ABC123456789\n00QDEF456789012345\nJohn\nDoe\nCampaign Name\nSent\nCharlie Webber\nAcme Corp\nVP Engineering\n(555) 123-4567\njohn@acme.com\nCustomer - Active`}
+              placeholder={`Paste your data here...\n\nAccepted examples:\n- Tabular exports with variable columns\n- Raw plain text prospect lists\n- Mixed fields like names, titles, campaign codes, account status, owners\n\nThe system will normalize with an LLM when needed, then parse/link prospects and write emails.`}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y"
             />
+            <p className="mt-2 text-xs text-gray-500">
+              The common Salesforce Lead Owner grouped export and CSV lead report are parsed deterministically first. LLM fallback only runs when deterministic parsing fails.
+            </p>
 
             {error && (
               <div className="mt-3 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm">
                 {error}
+              </div>
+            )}
+
+            {parserMode && (
+              <div className={`mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${
+                parserMode === 'llm'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  : 'bg-gray-50 text-gray-600 border border-gray-200'
+              }`}>
+                Parser used: {parserMode === 'llm' ? 'LLM normalization' : 'Deterministic QL parser'}
+              </div>
+            )}
+
+            {resolutionPrompt && resolutionPrompt.length > 0 && (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <h3 className="text-sm font-semibold text-amber-900">
+                  Link Accounts Before Starting
+                </h3>
+                <p className="text-xs text-amber-700 mt-1">
+                  Some companies were not auto-linked. Choose an existing account or create a new one for each.
+                </p>
+                <div className="mt-3 space-y-3">
+                  {resolutionPrompt.map(item => (
+                    <div key={item.companyKey} className="rounded-md border border-amber-200 bg-white p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-gray-900">{item.companyName}</p>
+                        <span className="text-xs text-gray-500">
+                          {item.leadCount} prospect{item.leadCount !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      {item.sampleProspects.length > 0 && (
+                        <p className="text-xs text-gray-600 mt-1">
+                          {item.sampleProspects.join(', ')}
+                        </p>
+                      )}
+                      <div className="mt-2">
+                        <select
+                          value={resolutionSelections[item.companyKey] || 'create'}
+                          onChange={e =>
+                            setResolutionSelections(prev => ({
+                              ...prev,
+                              [item.companyKey]: e.target.value,
+                            }))
+                          }
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          {item.candidates.map(candidate => (
+                            <option key={candidate.id} value={`link:${candidate.id}`}>
+                              Link: {candidate.companyName} ({candidate.domain || 'no domain'})
+                            </option>
+                          ))}
+                          <option value="create">Create new account: {item.companyName}</option>
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -532,11 +793,15 @@ export default function QlImportPage() {
 
             <div className="mt-4 flex justify-end">
               <button
-                onClick={handleSubmit}
+                onClick={resolutionPrompt ? handleConfirmResolutions : handleSubmit}
                 disabled={submitting || !rawText.trim()}
                 className="px-6 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {submitting ? 'Submitting...' : `Import ${previewCount > 0 ? `~${previewCount} Leads` : 'Leads'}`}
+                {submitting
+                  ? 'Submitting...'
+                  : resolutionPrompt
+                    ? 'Confirm Links & Start Bulk Writing'
+                    : 'Parse, Link & Write Emails'}
               </button>
             </div>
           </div>
@@ -546,7 +811,7 @@ export default function QlImportPage() {
       {/* Recent imports */}
       {recentJobs.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Recent Imports</h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Recent Bulk Writing Jobs</h2>
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <table className="w-full">
               <thead>
@@ -787,7 +1052,9 @@ export default function QlImportPage() {
                   <p className="text-sm text-gray-500">No emails generated for this prospect.</p>
                 ) : selectedEmails.length === 0 ? null : (
                   <div className="space-y-4">
-                    {selectedEmails.map(email => (
+                    {selectedEmails.map(email => {
+                      const keyInsights = parseKeyInsights(email.key_insights);
+                      return (
                       <div key={email.id} className="border border-gray-200 rounded-lg overflow-hidden">
                         {/* Email header */}
                         <div className="bg-gray-50 px-4 py-2.5 flex items-center justify-between border-b border-gray-200">
@@ -842,8 +1109,21 @@ export default function QlImportPage() {
                         <div className="px-4 py-3">
                           <p className="text-sm text-gray-800 whitespace-pre-wrap">{email.body}</p>
                         </div>
+                        {keyInsights.length > 0 && (
+                          <details className="px-4 pb-3">
+                            <summary className="text-xs font-medium text-gray-600 cursor-pointer hover:text-gray-800">
+                              Key Insights ({keyInsights.length})
+                            </summary>
+                            <ul className="mt-2 list-disc list-inside space-y-1 text-xs text-gray-700 bg-blue-50 border border-blue-100 rounded-md p-2.5">
+                              {keyInsights.map((insight, index) => (
+                                <li key={`${email.id}-insight-${index}`}>{insight}</li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

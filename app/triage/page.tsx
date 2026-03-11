@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ChevronRight } from 'lucide-react';
+
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface TriageJobSummary {
   id: number;
@@ -15,12 +20,12 @@ interface TriageJobSummary {
   completedAt: string | null;
 }
 
-const statusColors: Record<string, { bg: string; text: string }> = {
-  pending: { bg: 'bg-yellow-100', text: 'text-yellow-800' },
-  processing: { bg: 'bg-blue-100', text: 'text-blue-800' },
-  completed: { bg: 'bg-green-100', text: 'text-green-800' },
-  failed: { bg: 'bg-red-100', text: 'text-red-800' },
-};
+function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+  if (status === 'completed') return 'default';
+  if (status === 'processing') return 'secondary';
+  if (status === 'failed') return 'destructive';
+  return 'outline';
+}
 
 function formatDate(dateString: string) {
   const d = new Date(dateString);
@@ -62,81 +67,74 @@ export default function TriageListPage() {
       } else {
         router.push(`/triage/progress/${job.id}`);
       }
+    } else if (job.processingJobId) {
+      router.push(`/triage/progress/${job.id}?processingJobId=${job.processingJobId}`);
     } else {
-      if (job.processingJobId) {
-        router.push(`/triage/progress/${job.id}?processingJobId=${job.processingJobId}`);
-      } else {
-        router.push(`/triage/progress/${job.id}`);
-      }
+      router.push(`/triage/progress/${job.id}`);
     }
   };
 
   return (
-    <main className="min-h-screen p-8 max-w-5xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold mb-2">Triage Jobs</h1>
-        <p className="text-gray-600">View all account triage runs and their results</p>
+    <main className="mx-auto max-w-5xl space-y-6">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Triage Jobs</h1>
+        <p className="text-sm text-muted-foreground">View all account triage runs and their results</p>
       </div>
 
       {loading && (
-        <div className="flex items-center justify-center py-12">
-          <div className="text-xl text-gray-600">Loading...</div>
-        </div>
+        <Card>
+          <CardContent className="space-y-3 pt-6">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-14 w-full" />
+            ))}
+          </CardContent>
+        </Card>
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <p className="text-red-700">{error}</p>
-        </div>
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="pt-6 text-destructive">{error}</CardContent>
+        </Card>
       )}
 
       {!loading && !error && jobs.length === 0 && (
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-12 text-center">
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No triage jobs yet</h3>
-          <p className="text-gray-600">
-            Upload accounts and run triage to see results here.
-          </p>
-        </div>
+        <Card>
+          <CardContent className="py-12 text-center">
+            <h3 className="text-lg font-medium text-foreground">No triage jobs yet</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Upload accounts and run triage to see results here.</p>
+          </CardContent>
+        </Card>
       )}
 
       {!loading && !error && jobs.length > 0 && (
-        <div className="bg-white rounded-lg shadow-md divide-y divide-gray-200">
-          {jobs.map((job) => {
-            const colors = statusColors[job.status] || statusColors.pending;
-            const successCount = job.processedCount - job.failedCount;
-            return (
-              <div
-                key={job.id}
-                onClick={() => navigateToJob(job)}
-                className="p-5 hover:bg-gray-50 cursor-pointer transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-1">
-                      <h3 className="font-semibold text-gray-900 truncate">{job.filename}</h3>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors.bg} ${colors.text}`}>
-                        {job.status}
-                      </span>
+        <Card>
+          <CardContent className="divide-y p-0">
+            {jobs.map((job) => {
+              const successCount = job.processedCount - job.failedCount;
+              return (
+                <button
+                  key={job.id}
+                  onClick={() => navigateToJob(job)}
+                  className="flex w-full items-center justify-between gap-4 p-5 text-left transition-colors hover:bg-muted/40"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-center gap-3">
+                      <h3 className="truncate font-semibold text-foreground">{job.filename}</h3>
+                      <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
                     </div>
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
+                    <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                       <span>{job.totalAccounts} accounts</span>
-                      {job.processedCount > 0 && (
-                        <span>{successCount} triaged</span>
-                      )}
-                      {job.failedCount > 0 && (
-                        <span className="text-red-600">{job.failedCount} failed</span>
-                      )}
+                      {job.processedCount > 0 && <span>{successCount} triaged</span>}
+                      {job.failedCount > 0 && <span className="text-destructive">{job.failedCount} failed</span>}
                       <span>{formatDate(job.createdAt)}</span>
                     </div>
                   </div>
-                  <svg className="w-5 h-5 text-gray-400 flex-shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                </button>
+              );
+            })}
+          </CardContent>
+        </Card>
       )}
     </main>
   );

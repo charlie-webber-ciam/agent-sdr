@@ -1,4 +1,5 @@
 import {
+  type Account,
   getQlImportJob,
   updateQlImportJob,
   findAccountByDomainOrName,
@@ -11,10 +12,18 @@ import {
   updateProspect,
   getOpportunitiesByAccount,
 } from './db';
+import pLimit from 'p-limit';
+import { processAccountWithRetry } from './account-worker';
 import { generateEmail } from './email-writer-agent';
 import type { ParsedLead } from './ql-parser';
+import { logWorkerError, safeErrorCleanup, sleep } from './worker-error-utils';
 
 const activeJobs = new Set<number>();
+
+export interface QlImportAccountResolution {
+  accountIdByCompanyKey: Record<string, number>;
+  createdAccountIds?: number[];
+}
 
 export function isQlImportJobActive(jobId: number): boolean {
   return activeJobs.has(jobId);
@@ -37,7 +46,16 @@ function hasActiveOpportunity(accountId: number): boolean {
   );
 }
 
-export async function processQlImportJob(jobId: number, leads: ParsedLead[]): Promise<void> {
+interface LeadPlan {
+  lead: ParsedLead;
+  accountId: number;
+}
+
+export async function processQlImportJob(
+  jobId: number,
+  leads: ParsedLead[],
+  accountResolution?: QlImportAccountResolution
+): Promise<void> {
   if (activeJobs.has(jobId)) {
     console.log(`QL import job ${jobId} is already being processed`);
     return;
@@ -61,53 +79,145 @@ export async function processQlImportJob(jobId: number, leads: ParsedLead[]): Pr
     let prospectsSkipped = 0;
     let emailsGenerated = 0;
     let emailsSkipped = 0;
-    let emailsHeldCustomer = 0;
-    let emailsHeldOpp = 0;
+    const emailsHeldCustomer = 0;
+    const emailsHeldOpp = 0;
     let processedCount = 0;
     const errorMessages: string[] = [];
     const touchedProspectIds: Array<{ id: number; status: string }> = [];
+    const countedAccountIds = new Set<number>();
+    const accountCache = new Map<number, Account>();
+    const accountIdByCompanyKey = accountResolution?.accountIdByCompanyKey || {};
+    const createdAccountIds = new Set<number>(accountResolution?.createdAccountIds || []);
+    const leadPlans: LeadPlan[] = [];
 
+    // ── Phase 1: Resolve accounts for all leads first ──
     for (const lead of leads) {
       const leadLabel = `${lead.firstName} ${lead.lastName} (${lead.company})`;
-
       try {
-        // ── Phase 1: Account match/create ──
         updateQlImportJob(jobId, {
           current_step: `Matching account for ${lead.company}...`,
           processed_count: processedCount,
         });
 
-        let account = findAccountByDomainOrName(null, lead.company);
-        if (account) {
-          accountsMatched++;
-        } else {
+        let account = resolveAccountForLead(lead, accountIdByCompanyKey);
+        if (!account) {
           const accountId = createAccount(lead.company, null, 'Unknown', null, lead.auth0Owner);
           account = getAccount(accountId);
           if (!account) throw new Error(`Failed to create account for ${lead.company}`);
-          accountsCreated++;
+          createdAccountIds.add(account.id);
         }
 
-        // ── Phase 2: Prospect create/dedup ──
+        accountCache.set(account.id, account);
+        leadPlans.push({ lead, accountId: account.id });
+
+        if (!countedAccountIds.has(account.id)) {
+          countedAccountIds.add(account.id);
+          if (createdAccountIds.has(account.id)) {
+            accountsCreated++;
+          } else {
+            accountsMatched++;
+          }
+        }
+      } catch (leadErr) {
+        const errMsg = logWorkerError(`QL import account match failed for ${leadLabel}`, leadErr);
+        errorMessages.push(`[${leadLabel}] ${errMsg}`);
+      }
+    }
+
+    updateQlImportJob(jobId, {
+      accounts_matched: accountsMatched,
+      accounts_created: accountsCreated,
+    });
+
+    const plansForResearchedAccounts: LeadPlan[] = [];
+    const plansNeedingResearch: LeadPlan[] = [];
+
+    for (const plan of leadPlans) {
+      const account = accountCache.get(plan.accountId);
+      if (account?.research_status === 'completed') {
+        plansForResearchedAccounts.push(plan);
+      } else {
+        plansNeedingResearch.push(plan);
+      }
+    }
+
+    const accountsQueuedForResearch = Array.from(countedAccountIds)
+      .filter(accountId => createdAccountIds.has(accountId))
+      .map(accountId => accountCache.get(accountId))
+      .filter((account): account is Account => !!account && account.research_status !== 'completed');
+
+    const researchQueuePromise =
+      accountsQueuedForResearch.length > 0
+        ? runBulkAccountResearch(
+            jobId,
+            accountsQueuedForResearch,
+            accountCache,
+            errorMessages
+          )
+        : Promise.resolve();
+
+    // ── Phase 2: Process prospects on already researched accounts first ──
+    for (const plan of plansForResearchedAccounts) {
+      await processLeadPlan(plan);
+    }
+
+    // ── Phase 3: Wait for queue, then process remaining prospects ──
+    if (plansNeedingResearch.length > 0) {
+      updateQlImportJob(jobId, {
+        current_step: `Waiting for account research queue (${accountsQueuedForResearch.length} account${accountsQueuedForResearch.length === 1 ? '' : 's'})...`,
+      });
+      await researchQueuePromise;
+    }
+
+    for (const plan of plansNeedingResearch) {
+      await processLeadPlan(plan);
+    }
+
+    updateQlImportJob(jobId, {
+      status: 'completed',
+      current_step: null,
+      error_log: errorMessages.length > 0 ? errorMessages.join('\n') : null,
+      prospect_ids: JSON.stringify(touchedProspectIds),
+      completed_at: new Date().toISOString(),
+    });
+
+    console.log(
+      `QL import job ${jobId} completed. Accounts: ${accountsMatched} matched, ${accountsCreated} created. ` +
+      `Prospects: ${prospectsCreated} created, ${prospectsSkipped} skipped. ` +
+      `Emails: ${emailsGenerated} generated, ${emailsSkipped} skipped, ` +
+      `${emailsHeldCustomer} held (customer), ${emailsHeldOpp} held (active opp).`
+    );
+
+    async function processLeadPlan(plan: LeadPlan): Promise<void> {
+      const lead = plan.lead;
+      const leadLabel = `${lead.firstName} ${lead.lastName} (${lead.company})`;
+
+      try {
+        let account = accountCache.get(plan.accountId) || getAccount(plan.accountId);
+        if (!account) {
+          throw new Error(`Account ${plan.accountId} not found while processing lead`);
+        }
+        accountCache.set(account.id, account);
+
+        // ── Prospect create/dedup ──
         updateQlImportJob(jobId, {
           current_step: `Creating prospect ${leadLabel}...`,
           accounts_matched: accountsMatched,
           accounts_created: accountsCreated,
         });
 
-        // Check SFDC ID dedup first
         if (lead.sfdcContactId) {
           const existingBySfdc = findProspectBySfdcId(lead.sfdcContactId);
           if (existingBySfdc) {
             touchedProspectIds.push({ id: existingBySfdc.id, status: 'skipped_dedup' });
             prospectsSkipped++;
-            updateQlImportJob(jobId, { prospects_skipped: prospectsSkipped });
-            processedCount++;
-            updateQlImportJob(jobId, { processed_count: processedCount });
-            continue;
+            updateQlImportJob(jobId, {
+              prospects_skipped: prospectsSkipped,
+            });
+            return;
           }
         }
 
-        // Check email/name dedup
         const existing = findExistingProspectByEmailOrName(
           account.id,
           lead.email || undefined,
@@ -117,7 +227,6 @@ export async function processQlImportJob(jobId: number, leads: ParsedLead[]): Pr
 
         let prospectId: number;
         if (existing) {
-          // If duplicate exists but has no sfdc_id, update it
           if (!existing.sfdc_id && lead.sfdcContactId) {
             updateProspect(existing.id, {
               sfdc_id: lead.sfdcContactId,
@@ -150,30 +259,27 @@ export async function processQlImportJob(jobId: number, leads: ParsedLead[]): Pr
           updateQlImportJob(jobId, { prospects_created: prospectsCreated });
         }
 
-        // ── Phase 3: Classify & conditionally generate email ──
+        // Refresh account after research queue completion if needed.
+        const refreshedAccount = getAccount(account.id);
+        if (refreshedAccount) {
+          account = refreshedAccount;
+          accountCache.set(account.id, account);
+        }
+
         if (account.research_status !== 'completed') {
-          // No research data — hold email
           touchedProspectIds.push({ id: prospectId, status: 'no_research' });
           emailsSkipped++;
           updateQlImportJob(jobId, { emails_skipped: emailsSkipped });
-        } else if (isCustomer(lead.accountStatus)) {
-          // Existing customer — hold for manual decision
-          touchedProspectIds.push({ id: prospectId, status: 'customer' });
-          emailsHeldCustomer++;
-          updateQlImportJob(jobId, { emails_held_customer: emailsHeldCustomer });
-        } else if (hasActiveOpportunity(account.id)) {
-          // Active opportunity — hold for manual decision
-          touchedProspectIds.push({ id: prospectId, status: 'active_opp' });
-          emailsHeldOpp++;
-          updateQlImportJob(jobId, { emails_held_opp: emailsHeldOpp });
         } else {
-          // Net-new/cold prospect — auto-generate email
           updateQlImportJob(jobId, {
             current_step: `Generating email for ${leadLabel}...`,
           });
 
           try {
             const contextParts: string[] = [];
+            const customerAccount = isCustomer(lead.accountStatus);
+            const activeOppAccount = hasActiveOpportunity(account.id);
+
             if (lead.campaignName) {
               contextParts.push(
                 `This prospect was sourced from the "${lead.campaignName}" campaign (status: ${lead.memberStatus || 'unknown'}). Reference the campaign context in the email angle if relevant.`
@@ -182,6 +288,16 @@ export async function processQlImportJob(jobId: number, leads: ParsedLead[]): Pr
             if (lead.accountStatus) {
               contextParts.push(
                 `Account status in Salesforce: "${lead.accountStatus}".`
+              );
+            }
+            if (customerAccount) {
+              contextParts.push(
+                'This is an existing customer account. Do not pitch as net-new. Write a concise cross-sell/expansion style outreach that acknowledges the existing relationship.'
+              );
+            }
+            if (activeOppAccount) {
+              contextParts.push(
+                'There is an active open opportunity on this account. Keep outreach aligned and non-conflicting with an in-flight commercial process.'
               );
             }
             const customContext = contextParts.length > 0 ? contextParts.join(' ') : undefined;
@@ -210,50 +326,82 @@ export async function processQlImportJob(jobId: number, leads: ParsedLead[]): Pr
             emailsGenerated++;
             updateQlImportJob(jobId, { emails_generated: emailsGenerated });
           } catch (emailErr) {
-            const errMsg = emailErr instanceof Error ? emailErr.message : String(emailErr);
+            const errMsg = logWorkerError(`QL import email generation failed for ${leadLabel}`, emailErr);
             errorMessages.push(`[${leadLabel}] Email failed: ${errMsg}`);
             touchedProspectIds.push({ id: prospectId, status: 'no_research' });
           }
 
-          // Small delay between email generations
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await sleep(500);
         }
       } catch (leadErr) {
-        const errMsg = leadErr instanceof Error ? leadErr.message : String(leadErr);
+        const errMsg = logWorkerError(`QL import failed for ${leadLabel}`, leadErr);
         errorMessages.push(`[${leadLabel}] ${errMsg}`);
+      } finally {
+        processedCount++;
+        updateQlImportJob(jobId, { processed_count: processedCount });
       }
-
-      processedCount++;
-      updateQlImportJob(jobId, { processed_count: processedCount });
     }
-
-    updateQlImportJob(jobId, {
-      status: 'completed',
-      current_step: null,
-      error_log: errorMessages.length > 0 ? errorMessages.join('\n') : null,
-      prospect_ids: JSON.stringify(touchedProspectIds),
-      completed_at: new Date().toISOString(),
-    });
-
-    console.log(
-      `QL import job ${jobId} completed. Accounts: ${accountsMatched} matched, ${accountsCreated} created. ` +
-      `Prospects: ${prospectsCreated} created, ${prospectsSkipped} skipped. ` +
-      `Emails: ${emailsGenerated} generated, ${emailsSkipped} skipped, ` +
-      `${emailsHeldCustomer} held (customer), ${emailsHeldOpp} held (active opp).`
-    );
   } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    console.error(`QL import job ${jobId} failed:`, errMsg);
-    try {
+    const errMsg = logWorkerError(`QL import job ${jobId} failed`, error);
+    safeErrorCleanup(`QL import job ${jobId}`, () => {
       updateQlImportJob(jobId, {
         status: 'failed',
         error_log: `[FATAL] ${errMsg}`,
         completed_at: new Date().toISOString(),
       });
-    } catch {
-      // ignore db errors during error handling
-    }
+    });
   } finally {
     activeJobs.delete(jobId);
   }
+}
+
+function resolveAccountForLead(
+  lead: ParsedLead,
+  accountIdByCompanyKey: Record<string, number>
+): Account | undefined {
+  const companyKey = normalizeCompanyKey(lead.company);
+  const mappedId = accountIdByCompanyKey[companyKey];
+  if (mappedId) {
+    const mappedAccount = getAccount(mappedId);
+    if (mappedAccount) return mappedAccount;
+  }
+  return findAccountByDomainOrName(null, lead.company);
+}
+
+function normalizeCompanyKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+async function runBulkAccountResearch(
+  jobId: number,
+  accounts: Account[],
+  accountCache: Map<number, Account>,
+  errorMessages: string[]
+): Promise<void> {
+  if (accounts.length === 0) return;
+
+  const limit = pLimit(20);
+  let completed = 0;
+
+  await Promise.all(
+    accounts.map(account =>
+      limit(async () => {
+        try {
+          await processAccountWithRetry(account, 0, 'both');
+        } catch (error) {
+          const errMsg = logWorkerError(`QL import account research failed for ${account.company_name}`, error);
+          errorMessages.push(`[${account.company_name}] Account research failed: ${errMsg}`);
+        } finally {
+          const refreshed = getAccount(account.id);
+          if (refreshed) {
+            accountCache.set(account.id, refreshed);
+          }
+          completed++;
+          updateQlImportJob(jobId, {
+            current_step: `Research queue: ${completed}/${accounts.length} account${accounts.length === 1 ? '' : 's'} complete...`,
+          });
+        }
+      })
+    )
+  );
 }

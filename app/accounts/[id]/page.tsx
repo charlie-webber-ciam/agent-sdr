@@ -17,7 +17,7 @@ import PrioritySlider from '@/components/PrioritySlider';
 import UseCaseMultiSelect from '@/components/UseCaseMultiSelect';
 import SKUMultiSelect from '@/components/SKUMultiSelect';
 import AIAutoCategorizePanel from '@/components/AIAutoCategorizePanel';
-import { capitalize } from '@/lib/utils';
+import { capitalize, cn, formatDomain } from '@/lib/utils';
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal';
 import EmailWriter from '@/components/EmailWriter';
 import SequenceWriter from '@/components/SequenceWriter';
@@ -26,7 +26,14 @@ import ReportSidebar, { SidebarSection } from '@/components/ReportSidebar';
 import OpportunitiesSection from '@/components/OpportunitiesSection';
 import ActivitiesSection from '@/components/ActivitiesSection';
 import { usePerspective } from '@/lib/perspective-context';
-import { formatDomain } from '@/lib/utils';
+import { usePageChatContext } from '@/lib/page-chat-context';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 
 interface AccountDetail {
   id: number;
@@ -197,6 +204,7 @@ export default function AccountDetailPage({
   const router = useRouter();
   const searchParams = useSearchParams();
   const { perspective, oktaPatch } = usePerspective();
+  const { setActiveProspect, clearActiveProspect } = usePageChatContext();
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -248,6 +256,18 @@ export default function AccountDetailPage({
   const [mapSelectedProspect, setMapSelectedProspect] = useState<Prospect | null>(null);
   const [mapEmailingProspect, setMapEmailingProspect] = useState<Prospect | null>(null);
   const [mapProspects, setMapProspects] = useState<Prospect[]>([]);
+
+  useEffect(() => {
+    const activeMapProspect = mapEmailingProspect || mapSelectedProspect;
+    if (activeMapProspect) {
+      setActiveProspect(activeMapProspect.id, activeMapProspect.account_id);
+      return;
+    }
+
+    if (activeTab === 'map') {
+      clearActiveProspect();
+    }
+  }, [activeTab, mapEmailingProspect, mapSelectedProspect, setActiveProspect, clearActiveProspect]);
 
   // Enrichment state
   const [tags, setTags] = useState<AccountDetail['tags']>([]);
@@ -670,27 +690,32 @@ export default function AccountDetailPage({
 
   if (loading) {
     return (
-      <main className="min-h-screen p-8 max-w-7xl mx-auto">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-xl text-gray-600">Loading...</div>
-        </div>
+      <main className="mx-auto max-w-7xl">
+        <Card>
+          <CardContent className="py-16 text-center text-xl text-muted-foreground">
+            Loading account...
+          </CardContent>
+        </Card>
       </main>
     );
   }
 
   if (error || !account) {
     return (
-      <main className="min-h-screen p-8 max-w-7xl mx-auto">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <h2 className="text-xl font-semibold text-red-800 mb-2">Error</h2>
-          <p className="text-red-700">{error || 'Account not found'}</p>
-          <button
-            onClick={() => router.push('/accounts')}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-          >
-            Back to Accounts
-          </button>
-        </div>
+      <main className="mx-auto max-w-7xl">
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="p-6">
+            <h2 className="mb-2 text-xl font-semibold text-destructive">Error</h2>
+            <p className="text-destructive/90">{error || 'Account not found'}</p>
+            <Button
+              className="mt-4"
+              variant="destructive"
+              onClick={() => router.push('/accounts')}
+            >
+              Back to Accounts
+            </Button>
+          </CardContent>
+        </Card>
       </main>
     );
   }
@@ -711,33 +736,38 @@ export default function AccountDetailPage({
   const hasOktaResearch = !!account.oktaProcessedAt;
 
   return (
-    <main className="min-h-screen p-8 max-w-7xl mx-auto">
+    <main className="mx-auto max-w-7xl">
       {/* Header — full width above the two columns */}
       <div className="mb-8">
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => router.push('/accounts')}
-          className="text-blue-600 hover:text-blue-700 mb-4 flex items-center gap-2 font-medium transition-colors"
+          className="mb-4 gap-2 px-0 text-primary hover:text-primary"
         >
           &larr; Back to Accounts
-        </button>
+        </Button>
 
-        <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-8 border border-gray-200">
+        <Card className="border-border/70 bg-gradient-to-br from-card to-muted/20 shadow-lg">
+          <CardContent className="p-8">
           <div className="flex items-start justify-between mb-4">
             <div className="flex-1">
-              <h1 className="text-4xl font-bold mb-2 text-gray-900">{account.companyName}</h1>
-              <div className="flex items-center gap-3 text-lg text-gray-600 mb-3">
+              <h1 className="mb-2 text-4xl font-bold">{account.companyName}</h1>
+              <div className="mb-3 flex items-center gap-3 text-lg text-muted-foreground">
                 <span className="font-medium">{formatDomain(account.domain)}</span>
                 <span>&bull;</span>
-                <span className="px-3 py-1 bg-gray-100 rounded-full text-sm">{account.industry}</span>
+                <Badge variant="outline" className="rounded-full px-3 py-1 text-xs font-medium">
+                  {account.industry}
+                </Badge>
                 {account.auth0AccountOwner && (
                   <>
                     <span>&bull;</span>
-                    <span className="flex items-center gap-1 text-sm text-blue-600 font-medium">
+                    <Badge variant="outline" className="gap-1 border-primary/30 bg-primary/5 text-primary">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                       </svg>
                       {account.auth0AccountOwner}
-                    </span>
+                    </Badge>
                   </>
                 )}
               </div>
@@ -756,23 +786,27 @@ export default function AccountDetailPage({
                   return (
                     <>
                       {tier && (
-                        <span className={`px-3 py-1 rounded-full text-sm font-semibold border-2 ${
-                          tier === 'A' ? 'bg-green-100 text-green-800 border-green-300' :
-                          tier === 'B' ? 'bg-blue-100 text-blue-800 border-blue-300' :
-                          'bg-gray-100 text-gray-800 border-gray-300'
-                        }`}>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'px-3 py-1 text-sm font-semibold',
+                            tier === 'A' && 'border-emerald-300 bg-emerald-100 text-emerald-800',
+                            tier === 'B' && 'border-blue-300 bg-blue-100 text-blue-800',
+                            tier === 'C' && 'border-slate-300 bg-slate-100 text-slate-800'
+                          )}
+                        >
                           Tier {tier}
-                        </span>
+                        </Badge>
                       )}
                       {skus && skus.map(sku => (
-                        <span key={sku} className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold border-2 border-purple-300">
+                        <Badge key={sku} variant="outline" className="border-violet-300 bg-violet-100 px-3 py-1 text-sm font-semibold text-violet-800">
                           {sku}
-                        </span>
+                        </Badge>
                       ))}
                       {priority !== null && priority >= 7 && (
-                        <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-semibold border-2 border-red-300">
+                        <Badge variant="outline" className="border-red-300 bg-red-100 px-3 py-1 text-sm font-semibold text-red-800">
                           Priority {priority}/10
-                        </span>
+                        </Badge>
                       )}
                     </>
                   );
@@ -780,48 +814,51 @@ export default function AccountDetailPage({
                 {/* Research status badges */}
                 {account.status === 'completed' && (
                   <>
-                    <span className="ml-2 text-gray-300">|</span>
-                    <span className={`px-2 py-0.5 text-xs font-semibold rounded ${
+                    <span className="ml-2 text-muted-foreground/40">|</span>
+                    <Badge variant="outline" className={cn(
                       hasAuth0Research ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'
-                    }`}>
+                    )}>
                       Auth0 {hasAuth0Research ? 'Done' : 'N/A'}
-                    </span>
-                    <span className={`px-2 py-0.5 text-xs font-semibold rounded ${
+                    </Badge>
+                    <Badge variant="outline" className={cn(
                       hasOktaResearch ? 'bg-purple-100 text-purple-700' : 'bg-yellow-100 text-yellow-700'
-                    }`}>
+                    )}>
                       Okta {hasOktaResearch ? 'Done' : 'N/A'}
-                    </span>
+                    </Badge>
                   </>
                 )}
               </div>
             </div>
-            <span
-              className={`px-4 py-2 rounded-full text-sm font-semibold shadow-sm ${
+            <Badge
+              variant="outline"
+              className={cn(
+                'px-4 py-2 text-sm font-semibold shadow-sm',
                 account.status === 'completed'
                   ? 'bg-green-100 text-green-800 border border-green-200'
                   : account.status === 'failed'
                   ? 'bg-red-100 text-red-800 border border-red-200'
                   : 'bg-gray-100 text-gray-800 border border-gray-200'
-              }`}
+              )}
             >
               {capitalize(account.status)}
-            </span>
+            </Badge>
           </div>
 
-          <p className="text-sm text-gray-500 flex items-center gap-2">
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             Processed: {formatDate(account.processedAt)}
             {account.researchModel && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+              <Badge variant="outline" className="text-xs font-medium">
                 {account.researchModel}
-              </span>
+              </Badge>
             )}
           </p>
 
           {account.errorMessage && (
-            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <Card className="mt-4 border-red-200 bg-red-50">
+              <CardContent className="p-4">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <p className="text-red-700 font-semibold flex items-center gap-2">
@@ -833,83 +870,53 @@ export default function AccountDetailPage({
                   <p className="text-red-600 text-sm mt-1 ml-7">{account.errorMessage}</p>
                 </div>
                 {account.status === 'failed' && (
-                  <button
+                  <Button
                     onClick={handleRetry}
                     disabled={isRetrying}
-                    className="ml-4 px-4 py-2 bg-yellow-600 text-white rounded-lg font-semibold hover:bg-yellow-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                    variant="secondary"
+                    className="ml-4 gap-2 bg-yellow-600 text-white hover:bg-yellow-700"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                     {isRetrying ? 'Retrying...' : 'Retry Research'}
-                  </button>
+                  </Button>
                 )}
               </div>
-            </div>
+              </CardContent>
+            </Card>
           )}
-        </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Research / Prospects Tab Bar */}
-      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
-        <button
-          onClick={() => setActiveTab('research')}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-            activeTab === 'research'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-          }`}
-        >
-          Research
-        </button>
-        <button
-          onClick={() => setActiveTab('prospects')}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px flex items-center gap-2 ${
-            activeTab === 'prospects'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-          }`}
-        >
-          Prospects
-          {(account.prospectCount > 0) && (
-            <span className={`px-1.5 py-0.5 text-xs font-semibold rounded-full ${
-              activeTab === 'prospects' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
-            }`}>
-              {account.prospectCount}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab('map')}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-            activeTab === 'map'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-          }`}
-        >
-          Map
-        </button>
-        <button
-          onClick={() => setActiveTab('opportunities')}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-            activeTab === 'opportunities'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-          }`}
-        >
-          Opportunities
-        </button>
-        <button
-          onClick={() => setActiveTab('activities')}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-            activeTab === 'activities'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-          }`}
-        >
-          Activities
-        </button>
-      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as 'research' | 'prospects' | 'map' | 'opportunities' | 'activities')}
+        className="mb-6"
+      >
+        <TabsList className="h-auto w-full justify-start rounded-lg border border-border bg-muted/30 p-1">
+          <TabsTrigger value="research">Research</TabsTrigger>
+          <TabsTrigger value="prospects" className="gap-2">
+            Prospects
+            {account.prospectCount > 0 && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  'px-1.5 py-0 text-[10px]',
+                  activeTab === 'prospects' ? 'border-primary/30 bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground'
+                )}
+              >
+                {account.prospectCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="map">Map</TabsTrigger>
+          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
+          <TabsTrigger value="activities">Activities</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Tab Content */}
       {activeTab === 'prospects' ? (
@@ -969,97 +976,100 @@ export default function AccountDetailPage({
           />
 
           {/* Mobile TOC button */}
-          <button
+          <Button
+            size="icon"
             onClick={() => setShowMobileToc(!showMobileToc)}
-            className="lg:hidden fixed bottom-6 right-6 z-50 w-12 h-12 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-700 transition-colors"
+            className="fixed bottom-6 right-6 z-50 h-12 w-12 rounded-full shadow-lg lg:hidden"
             aria-label="Table of Contents"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
-          </button>
+          </Button>
 
           {/* Mobile TOC slide-over */}
           {showMobileToc && (
             <div className="lg:hidden fixed inset-0 z-40">
               <div className="absolute inset-0 bg-black/30" onClick={() => setShowMobileToc(false)} />
-              <div className="absolute right-0 top-0 bottom-0 w-72 bg-white shadow-2xl p-6 overflow-y-auto">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-gray-900">Navigation</h3>
-                  <button onClick={() => setShowMobileToc(false)} className="text-gray-500 hover:text-gray-700">
+              <div className="absolute right-0 top-0 bottom-0 w-72 overflow-y-auto border-l border-border bg-background p-6 shadow-2xl">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="font-bold">Navigation</h3>
+                  <Button variant="ghost" size="icon" onClick={() => setShowMobileToc(false)}>
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                  </button>
+                  </Button>
                 </div>
-                {/* Research toggle */}
+
                 <div className="mb-4">
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Research</h4>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { setActivePerspective('auth0'); setShowMobileToc(false); }}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium ${
-                        activePerspective === 'auth0' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'
-                      }`}
-                    >
-                      Auth0
-                    </button>
-                    <button
-                      onClick={() => { setActivePerspective('okta'); setShowMobileToc(false); }}
-                      className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium ${
-                        activePerspective === 'okta' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'
-                      }`}
-                    >
-                      Okta
-                    </button>
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Research</h4>
+                  <Tabs
+                    value={activePerspective}
+                    onValueChange={(value) => {
+                      setActivePerspective(value as 'auth0' | 'okta');
+                      setShowMobileToc(false);
+                    }}
+                  >
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="auth0">Auth0</TabsTrigger>
+                      <TabsTrigger value="okta">Okta</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+
+                <div className="mb-4">
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sections</h4>
+                  <div className="flex flex-col gap-1">
+                    {sidebarSections.map((section) => (
+                      <Button
+                        key={section.id}
+                        variant="ghost"
+                        className="justify-start"
+                        onClick={() => {
+                          document.getElementById(section.id)?.scrollIntoView({ behavior: 'smooth' });
+                          setShowMobileToc(false);
+                        }}
+                      >
+                        {section.label}
+                      </Button>
+                    ))}
                   </div>
                 </div>
-                {/* Section links */}
+
                 <div className="mb-4">
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Sections</h4>
-                  {sidebarSections.map((section) => (
-                    <button
-                      key={section.id}
-                      onClick={() => {
-                        document.getElementById(section.id)?.scrollIntoView({ behavior: 'smooth' });
-                        setShowMobileToc(false);
-                      }}
-                      className="block w-full text-left px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 rounded"
+                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tools</h4>
+                  <div className="flex flex-col gap-1">
+                    <Button
+                      variant="ghost"
+                      className="justify-start"
+                      onClick={() => { document.getElementById('section-email')?.scrollIntoView({ behavior: 'smooth' }); setShowMobileToc(false); }}
                     >
-                      {section.label}
-                    </button>
-                  ))}
+                      Email Writer
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="justify-start"
+                      onClick={() => { document.getElementById('section-sequence')?.scrollIntoView({ behavior: 'smooth' }); setShowMobileToc(false); }}
+                    >
+                      Sequence Builder
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="justify-start"
+                      onClick={() => { document.getElementById('section-pov')?.scrollIntoView({ behavior: 'smooth' }); setShowMobileToc(false); }}
+                    >
+                      POV Writer
+                    </Button>
+                  </div>
                 </div>
-                {/* Tool links */}
-                <div className="mb-4">
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Tools</h4>
-                  <button
-                    onClick={() => { document.getElementById('section-email')?.scrollIntoView({ behavior: 'smooth' }); setShowMobileToc(false); }}
-                    className="block w-full text-left px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 rounded"
-                  >
-                    Email Writer
-                  </button>
-                  <button
-                    onClick={() => { document.getElementById('section-sequence')?.scrollIntoView({ behavior: 'smooth' }); setShowMobileToc(false); }}
-                    className="block w-full text-left px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 rounded"
-                  >
-                    Sequence Builder
-                  </button>
-                  <button
-                    onClick={() => { document.getElementById('section-pov')?.scrollIntoView({ behavior: 'smooth' }); setShowMobileToc(false); }}
-                    className="block w-full text-left px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 rounded"
-                  >
-                    POV Writer
-                  </button>
-                </div>
-                {/* Actions */}
-                <div className="border-t pt-4 flex flex-col gap-2">
-                  <button onClick={() => { window.print(); setShowMobileToc(false); }} className="px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded text-left">
+
+                <div className="flex flex-col gap-2 border-t border-border pt-4">
+                  <Button variant="ghost" className="justify-start" onClick={() => { window.print(); setShowMobileToc(false); }}>
                     Print / PDF
-                  </button>
-                  <button onClick={() => { setShowDeleteModal(true); setShowMobileToc(false); }} className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded text-left">
+                  </Button>
+                  <Button variant="destructive" className="justify-start" onClick={() => { setShowDeleteModal(true); setShowMobileToc(false); }}>
                     Delete Account
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -1069,40 +1079,49 @@ export default function AccountDetailPage({
           <div className="flex-1 min-w-0" ref={mainContentRef}>
             {/* Collapsible SDR Categorization Section */}
             <div className="mb-8">
-              <button
+              <Button
+                variant="outline"
                 onClick={() => setShowCategorization(!showCategorization)}
-                className="w-full flex items-center justify-between bg-white rounded-xl shadow-sm p-4 border border-gray-200 hover:bg-gray-50 transition-colors"
+                className="h-auto w-full justify-between rounded-xl border-border bg-card p-4 shadow-sm hover:bg-muted/40"
               >
                 <div className="flex items-center gap-3">
                   <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  <span className="text-lg font-bold text-gray-900">SDR Categorization</span>
+                  <span className="text-lg font-bold">SDR Categorization</span>
                   {/* Inline badges when collapsed */}
                   {!showCategorization && (
                     <div className="flex gap-2 ml-4">
                       {account.tier && (
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          account.tier === 'A' ? 'bg-green-100 text-green-800' :
-                          account.tier === 'B' ? 'bg-blue-100 text-blue-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-xs font-semibold',
+                            account.tier === 'A' && 'border-emerald-300 bg-emerald-100 text-emerald-800',
+                            account.tier === 'B' && 'border-blue-300 bg-blue-100 text-blue-800',
+                            account.tier === 'C' && 'border-slate-300 bg-slate-100 text-slate-800'
+                          )}
+                        >
                           Auth0: Tier {account.tier}
-                        </span>
+                        </Badge>
                       )}
                       {account.oktaTier && (
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          account.oktaTier === 'A' ? 'bg-green-100 text-green-800' :
-                          account.oktaTier === 'B' ? 'bg-blue-100 text-blue-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-xs font-semibold',
+                            account.oktaTier === 'A' && 'border-emerald-300 bg-emerald-100 text-emerald-800',
+                            account.oktaTier === 'B' && 'border-blue-300 bg-blue-100 text-blue-800',
+                            account.oktaTier === 'C' && 'border-slate-300 bg-slate-100 text-slate-800'
+                          )}
+                        >
                           Okta: Tier {account.oktaTier}
-                        </span>
+                        </Badge>
                       )}
                       {account.oktaPatch && (
-                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+                        <Badge variant="outline" className="border-violet-300 bg-violet-100 text-xs font-semibold text-violet-800">
                           {account.oktaPatch === 'emerging' ? 'Emerging' : account.oktaPatch === 'crp' ? 'Corporate' : account.oktaPatch === 'ent' ? 'Enterprise' : account.oktaPatch === 'pubsec' ? 'Public Sector' : 'Strategic'}
-                        </span>
+                        </Badge>
                       )}
                     </div>
                   )}
@@ -1110,7 +1129,7 @@ export default function AccountDetailPage({
                 <svg className={`w-5 h-5 text-gray-400 transition-transform ${showCategorization ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
-              </button>
+              </Button>
 
               {showCategorization && (
                 <div className="bg-white rounded-b-xl shadow-lg px-6 pb-6 border border-t-0 border-gray-200">
@@ -1127,19 +1146,21 @@ export default function AccountDetailPage({
                         </h3>
                         {!isEditingAuth0 && (
                           <div className="flex gap-2">
-                            <button
+                            <Button
+                              size="sm"
                               onClick={handleAuth0AISuggest}
-                              className="px-3 py-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded text-xs font-semibold hover:from-blue-700 hover:to-purple-700 transition-all"
+                              className="h-7 bg-gradient-to-r from-blue-600 to-purple-600 px-3 text-xs font-semibold text-white hover:from-blue-700 hover:to-purple-700"
                               title="AI Suggest"
                             >
                               AI
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                              size="sm"
                               onClick={handleEditAuth0}
-                              className="px-3 py-1 bg-blue-600 text-white rounded text-xs font-semibold hover:bg-blue-700 transition-colors"
+                              className="h-7 bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700"
                             >
                               Edit
-                            </button>
+                            </Button>
                           </div>
                         )}
                       </div>
@@ -1148,60 +1169,64 @@ export default function AccountDetailPage({
                         <div className="space-y-4">
                           <div className="flex gap-2">
                             {account.tier && (
-                              <span className={`px-3 py-1 rounded-full text-sm font-semibold border-2 ${
-                                account.tier === 'A' ? 'bg-green-100 text-green-800 border-green-300' :
-                                account.tier === 'B' ? 'bg-blue-100 text-blue-800 border-blue-300' :
-                                'bg-gray-100 text-gray-800 border-gray-300'
-                              }`}>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'text-sm font-semibold',
+                                  account.tier === 'A' && 'border-green-300 bg-green-100 text-green-800',
+                                  account.tier === 'B' && 'border-blue-300 bg-blue-100 text-blue-800',
+                                  account.tier === 'C' && 'border-gray-300 bg-gray-100 text-gray-800'
+                                )}
+                              >
                                 Tier {account.tier}
-                              </span>
+                              </Badge>
                             )}
                             {account.priorityScore !== null && (
-                              <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold border-2 border-purple-300">
+                              <Badge variant="outline" className="border-purple-300 bg-purple-100 text-sm font-semibold text-purple-800">
                                 Priority: {account.priorityScore}/10
-                              </span>
+                              </Badge>
                             )}
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Revenue</label>
-                            <p className="text-sm text-gray-900">{account.estimatedAnnualRevenue || 'Not set'}</p>
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Revenue</Label>
+                            <p className="text-sm">{account.estimatedAnnualRevenue || 'Not set'}</p>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">User Volume</label>
-                            <p className="text-sm text-gray-900">{account.estimatedUserVolume || 'Not set'}</p>
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">User Volume</Label>
+                            <p className="text-sm">{account.estimatedUserVolume || 'Not set'}</p>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-2">SKUs</label>
+                            <Label className="mb-2 block text-xs font-semibold text-muted-foreground">SKUs</Label>
                             <div className="flex flex-wrap gap-2">
                               {account.auth0Skus && account.auth0Skus.length > 0 ? (
                                 account.auth0Skus.map(sku => (
-                                  <span key={sku} className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                                  <Badge key={sku} variant="outline" className="border-blue-300 bg-blue-100 text-xs font-medium text-blue-800">
                                     {sku}
-                                  </span>
+                                  </Badge>
                                 ))
                               ) : (
-                                <span className="text-xs text-gray-500">No SKUs set</span>
+                                <span className="text-xs text-muted-foreground">No SKUs set</span>
                               )}
                             </div>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-2">Use Cases</label>
+                            <Label className="mb-2 block text-xs font-semibold text-muted-foreground">Use Cases</Label>
                             <div className="flex flex-wrap gap-1">
                               {account.useCases && account.useCases.length > 0 ? (
                                 account.useCases.map(uc => (
-                                  <span key={uc} className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs">
+                                  <Badge key={uc} variant="outline" className="border-blue-200 bg-blue-50 text-xs text-blue-700">
                                     {uc}
-                                  </span>
+                                  </Badge>
                                 ))
                               ) : (
-                                <span className="text-xs text-gray-500">No use cases</span>
+                                <span className="text-xs text-muted-foreground">No use cases</span>
                               )}
                             </div>
                           </div>
                           {account.sdrNotes && (
                             <div>
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
-                              <p className="text-xs text-gray-700 whitespace-pre-wrap">{account.sdrNotes}</p>
+                              <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Notes</Label>
+                              <p className="whitespace-pre-wrap text-xs text-muted-foreground">{account.sdrNotes}</p>
                             </div>
                           )}
                         </div>
@@ -1216,23 +1241,19 @@ export default function AccountDetailPage({
                             onChange={(priorityScore) => setAuth0EditData({ ...auth0EditData, priorityScore })}
                           />
                           <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">Revenue</label>
-                            <input
-                              type="text"
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Revenue</Label>
+                            <Input
                               value={auth0EditData.estimatedAnnualRevenue}
                               onChange={(e) => setAuth0EditData({ ...auth0EditData, estimatedAnnualRevenue: e.target.value })}
                               placeholder="e.g., $10M-$50M"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">User Volume</label>
-                            <input
-                              type="text"
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">User Volume</Label>
+                            <Input
                               value={auth0EditData.estimatedUserVolume}
                               onChange={(e) => setAuth0EditData({ ...auth0EditData, estimatedUserVolume: e.target.value })}
                               placeholder="e.g., 100K-500K"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
                             />
                           </div>
                           <SKUMultiSelect
@@ -1244,30 +1265,30 @@ export default function AccountDetailPage({
                             onChange={(useCases) => setAuth0EditData({ ...auth0EditData, useCases })}
                           />
                           <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">Notes</label>
-                            <textarea
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Notes</Label>
+                            <Textarea
                               value={auth0EditData.sdrNotes}
                               onChange={(e) => setAuth0EditData({ ...auth0EditData, sdrNotes: e.target.value })}
                               placeholder="Add notes..."
                               rows={3}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
                             />
                           </div>
                           <div className="flex gap-2 pt-2">
-                            <button
+                            <Button
                               onClick={handleSaveAuth0}
                               disabled={savingAuth0}
-                              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:bg-gray-400 text-sm"
+                              className="flex-1 bg-green-600 text-sm font-semibold text-white hover:bg-green-700"
                             >
                               {savingAuth0 ? 'Saving...' : 'Save'}
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                              variant="secondary"
                               onClick={handleCancelAuth0}
                               disabled={savingAuth0}
-                              className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors text-sm"
+                              className="flex-1 text-sm font-semibold"
                             >
                               Cancel
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       )}
@@ -1284,19 +1305,21 @@ export default function AccountDetailPage({
                         </h3>
                         {!isEditingOkta && account.oktaProcessedAt && (
                           <div className="flex gap-2">
-                            <button
+                            <Button
+                              size="sm"
                               onClick={handleOktaAISuggest}
-                              className="px-3 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded text-xs font-semibold hover:from-purple-700 hover:to-indigo-700 transition-all"
+                              className="h-7 bg-gradient-to-r from-purple-600 to-indigo-600 px-3 text-xs font-semibold text-white hover:from-purple-700 hover:to-indigo-700"
                               title="AI Suggest"
                             >
                               AI
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                              size="sm"
                               onClick={handleEditOkta}
-                              className="px-3 py-1 bg-purple-600 text-white rounded text-xs font-semibold hover:bg-purple-700 transition-colors"
+                              className="h-7 bg-purple-600 px-3 text-xs font-semibold text-white hover:bg-purple-700"
                             >
                               Edit
-                            </button>
+                            </Button>
                           </div>
                         )}
                       </div>
@@ -1305,77 +1328,85 @@ export default function AccountDetailPage({
                         <div className="space-y-4">
                           <div className="flex flex-wrap gap-2">
                             {account.oktaTier && (
-                              <span className={`px-3 py-1 rounded-full text-sm font-semibold border-2 ${
-                                account.oktaTier === 'A' ? 'bg-green-100 text-green-800 border-green-300' :
-                                account.oktaTier === 'B' ? 'bg-blue-100 text-blue-800 border-blue-300' :
-                                'bg-gray-100 text-gray-800 border-gray-300'
-                              }`}>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'text-sm font-semibold',
+                                  account.oktaTier === 'A' && 'border-green-300 bg-green-100 text-green-800',
+                                  account.oktaTier === 'B' && 'border-blue-300 bg-blue-100 text-blue-800',
+                                  account.oktaTier === 'C' && 'border-gray-300 bg-gray-100 text-gray-800'
+                                )}
+                              >
                                 Tier {account.oktaTier}
-                              </span>
+                              </Badge>
                             )}
                             {account.oktaPatch && (
-                              <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold border-2 border-purple-300">
+                              <Badge variant="outline" className="border-purple-300 bg-purple-100 text-sm font-semibold text-purple-800">
                                 {account.oktaPatch === 'emerging' ? 'Emerging' : account.oktaPatch === 'crp' ? 'Corporate' : account.oktaPatch === 'ent' ? 'Enterprise' : account.oktaPatch === 'pubsec' ? 'Public Sector' : 'Strategic'}
-                              </span>
+                              </Badge>
                             )}
                             {account.oktaPriorityScore !== null && (
-                              <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold border-2 border-purple-300">
+                              <Badge variant="outline" className="border-purple-300 bg-purple-100 text-sm font-semibold text-purple-800">
                                 Priority: {account.oktaPriorityScore}/10
-                              </span>
+                              </Badge>
                             )}
                             {account.oktaOpportunityType && (
-                              <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                                account.oktaOpportunityType === 'net_new' ? 'bg-green-100 text-green-800' :
-                                account.oktaOpportunityType === 'competitive_displacement' ? 'bg-orange-100 text-orange-800' :
-                                account.oktaOpportunityType === 'expansion' ? 'bg-blue-100 text-blue-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'text-xs font-bold',
+                                  account.oktaOpportunityType === 'net_new' && 'border-green-300 bg-green-100 text-green-800',
+                                  account.oktaOpportunityType === 'competitive_displacement' && 'border-orange-300 bg-orange-100 text-orange-800',
+                                  account.oktaOpportunityType === 'expansion' && 'border-blue-300 bg-blue-100 text-blue-800',
+                                  account.oktaOpportunityType === 'unknown' && 'border-gray-300 bg-gray-100 text-gray-800'
+                                )}
+                              >
                                 {account.oktaOpportunityType === 'net_new' ? 'Net New' :
                                  account.oktaOpportunityType === 'competitive_displacement' ? 'Competitive' :
                                  account.oktaOpportunityType === 'expansion' ? 'Expansion' : 'Unknown'}
-                              </span>
+                              </Badge>
                             )}
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Revenue</label>
-                            <p className="text-sm text-gray-900">{account.oktaEstimatedAnnualRevenue || 'Not set'}</p>
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Revenue</Label>
+                            <p className="text-sm">{account.oktaEstimatedAnnualRevenue || 'Not set'}</p>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Employee Count</label>
-                            <p className="text-sm text-gray-900">{account.oktaEstimatedUserVolume || 'Not set'}</p>
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Employee Count</Label>
+                            <p className="text-sm">{account.oktaEstimatedUserVolume || 'Not set'}</p>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-2">SKUs</label>
+                            <Label className="mb-2 block text-xs font-semibold text-muted-foreground">SKUs</Label>
                             <div className="flex flex-wrap gap-2">
                               {account.oktaSkus && account.oktaSkus.length > 0 ? (
                                 account.oktaSkus.map(sku => (
-                                  <span key={sku} className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-medium">
+                                  <Badge key={sku} variant="outline" className="border-purple-300 bg-purple-100 text-xs font-medium text-purple-800">
                                     {sku}
-                                  </span>
+                                  </Badge>
                                 ))
                               ) : (
-                                <span className="text-xs text-gray-500">No SKUs set</span>
+                                <span className="text-xs text-muted-foreground">No SKUs set</span>
                               )}
                             </div>
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-2">Use Cases</label>
+                            <Label className="mb-2 block text-xs font-semibold text-muted-foreground">Use Cases</Label>
                             <div className="flex flex-wrap gap-1">
                               {account.oktaUseCases && account.oktaUseCases.length > 0 ? (
                                 account.oktaUseCases.map(uc => (
-                                  <span key={uc} className="px-2 py-1 bg-purple-50 text-purple-700 rounded text-xs">
+                                  <Badge key={uc} variant="outline" className="border-purple-200 bg-purple-50 text-xs text-purple-700">
                                     {uc}
-                                  </span>
+                                  </Badge>
                                 ))
                               ) : (
-                                <span className="text-xs text-gray-500">No use cases</span>
+                                <span className="text-xs text-muted-foreground">No use cases</span>
                               )}
                             </div>
                           </div>
                           {account.oktaSdrNotes && (
                             <div>
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Notes</label>
-                              <p className="text-xs text-gray-700 whitespace-pre-wrap">{account.oktaSdrNotes}</p>
+                              <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Notes</Label>
+                              <p className="whitespace-pre-wrap text-xs text-muted-foreground">{account.oktaSdrNotes}</p>
                             </div>
                           )}
                         </div>
@@ -1386,77 +1417,66 @@ export default function AccountDetailPage({
                             onChange={(tier) => setOktaEditData({ ...oktaEditData, oktaTier: tier })}
                           />
                           <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">Revenue</label>
-                            <input
-                              type="text"
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Revenue</Label>
+                            <Input
                               value={oktaEditData.oktaEstimatedAnnualRevenue}
                               onChange={(e) => setOktaEditData({ ...oktaEditData, oktaEstimatedAnnualRevenue: e.target.value })}
                               placeholder="e.g., $10M-$50M"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">Employee Count</label>
-                            <input
-                              type="text"
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Employee Count</Label>
+                            <Input
                               value={oktaEditData.oktaEstimatedUserVolume}
                               onChange={(e) => setOktaEditData({ ...oktaEditData, oktaEstimatedUserVolume: e.target.value })}
                               placeholder="e.g., 500-1000"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">Okta SKUs</label>
-                            <select
-                              multiple
-                              value={oktaEditData.oktaSkus}
-                              onChange={(e) => setOktaEditData({ ...oktaEditData, oktaSkus: Array.from(e.target.selectedOptions, option => option.value) })}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-purple-500"
-                              size={5}
-                            >
-                              <option value="Workforce Identity Cloud">Workforce Identity Cloud</option>
-                              <option value="Identity Governance">Identity Governance</option>
-                              <option value="Privileged Access">Privileged Access</option>
-                              <option value="Identity Threat Protection">Identity Threat Protection</option>
-                              <option value="Okta for AI Agents">Okta for AI Agents</option>
-                            </select>
-                            <p className="text-xs text-gray-500 mt-1">Hold Ctrl/Cmd to select multiple</p>
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Okta SKUs (comma-separated)</Label>
+                            <Textarea
+                              value={oktaEditData.oktaSkus.join(', ')}
+                              onChange={(e) => setOktaEditData({ ...oktaEditData, oktaSkus: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
+                              placeholder="Workforce Identity Cloud, Identity Governance..."
+                              rows={2}
+                              className="text-xs"
+                            />
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">Use Cases (comma-separated)</label>
-                            <textarea
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Use Cases (comma-separated)</Label>
+                            <Textarea
                               value={oktaEditData.oktaUseCases.join(', ')}
                               onChange={(e) => setOktaEditData({ ...oktaEditData, oktaUseCases: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
                               placeholder="SSO, MFA, Identity Governance..."
                               rows={2}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-purple-500"
+                              className="text-xs"
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">Notes</label>
-                            <textarea
+                            <Label className="mb-1 block text-xs font-semibold text-muted-foreground">Notes</Label>
+                            <Textarea
                               value={oktaEditData.oktaSdrNotes}
                               onChange={(e) => setOktaEditData({ ...oktaEditData, oktaSdrNotes: e.target.value })}
                               placeholder="Add notes..."
                               rows={3}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
                             />
                           </div>
                           <div className="flex gap-2 pt-2">
-                            <button
+                            <Button
                               onClick={handleSaveOkta}
                               disabled={savingOkta}
-                              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:bg-gray-400 text-sm"
+                              className="flex-1 bg-green-600 text-sm font-semibold text-white hover:bg-green-700"
                             >
                               {savingOkta ? 'Saving...' : 'Save'}
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                              variant="secondary"
                               onClick={handleCancelOkta}
                               disabled={savingOkta}
-                              className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors text-sm"
+                              className="flex-1 text-sm font-semibold"
                             >
                               Cancel
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       )}
@@ -1477,17 +1497,18 @@ export default function AccountDetailPage({
                     <div className="mt-6 border-2 border-purple-200 rounded-lg p-4 bg-purple-50">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-lg font-bold text-purple-900">Okta AI Suggestions</h3>
-                        <button
+                        <Button
+                          size="icon"
+                          variant="ghost"
                           onClick={() => setShowOktaAISuggestions(false)}
-                          className="text-gray-500 hover:text-gray-700"
                         >
                           &times;
-                        </button>
+                        </Button>
                       </div>
                       <p className="text-sm text-purple-700 mb-4">
                         This will call the Okta AI categorizer. Click &quot;Generate Suggestions&quot; below.
                       </p>
-                      <button
+                      <Button
                         onClick={async () => {
                           try {
                             const res = await fetch(`/api/accounts/${id}/okta-auto-categorize`, {
@@ -1502,10 +1523,10 @@ export default function AccountDetailPage({
                             alert(err instanceof Error ? err.message : 'Failed to generate suggestions');
                           }
                         }}
-                        className="px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors"
+                        className="bg-purple-600 font-semibold text-white hover:bg-purple-700"
                       >
                         Generate Suggestions
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -2086,63 +2107,66 @@ export default function AccountDetailPage({
               <div className="mt-4 pt-4 border-t border-purple-200">
                 <p className="text-sm text-purple-700 mb-3">This account has been triaged but not yet fully researched.</p>
                 <div className="flex gap-2">
-                  <button
+                  <Button
                     onClick={() => handleReprocess('both')}
                     disabled={isReprocessing}
-                    className="px-5 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors disabled:bg-gray-400 text-sm"
+                    className="text-sm"
                   >
                     {isReprocessing ? 'Starting...' : 'Research (Both)'}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => handleReprocess('auth0')}
                     disabled={isReprocessing}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400 text-sm"
+                    className="bg-blue-600 text-sm text-white hover:bg-blue-700"
                   >
                     Auth0 Only
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => handleReprocess('okta')}
                     disabled={isReprocessing}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:bg-gray-400 text-sm"
+                    className="bg-indigo-600 text-sm text-white hover:bg-indigo-700"
                   >
                     Okta Only
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
           )}
 
           {!account.triagedAt && (
-            <div className="bg-gray-50 border border-gray-200 rounded-xl p-8 mb-6 text-center">
-              <p className="text-gray-600 mb-4">This account has not been researched yet.</p>
-              <div className="flex gap-2 justify-center">
-                <button
-                  onClick={() => handleReprocess('both')}
-                  disabled={isReprocessing}
-                  className="px-5 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:bg-gray-400 text-sm"
-                >
-                  {isReprocessing ? 'Starting...' : 'Start Research'}
-                </button>
-              </div>
-            </div>
+            <Card className="mb-6 bg-muted/30">
+              <CardContent className="p-8 text-center">
+                <p className="mb-4 text-muted-foreground">This account has not been researched yet.</p>
+                <div className="flex justify-center gap-2">
+                  <Button
+                    onClick={() => handleReprocess('both')}
+                    disabled={isReprocessing}
+                    className="text-sm"
+                  >
+                    {isReprocessing ? 'Starting...' : 'Start Research'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           <div className="flex gap-4">
-            <button
+            <Button
+              variant="secondary"
               onClick={() => router.push('/accounts')}
-              className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-semibold"
             >
               Back to Accounts
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="destructive"
               onClick={() => setShowDeleteModal(true)}
-              className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold flex items-center gap-2"
+              className="gap-2"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
               Delete Account
-            </button>
+            </Button>
           </div>
         </div>
       )}

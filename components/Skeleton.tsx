@@ -69,30 +69,48 @@ export function SkeletonProgressBar({ className = '' }: { className?: string }) 
 
 export function DashboardSkeleton() {
   return (
-    <main className="min-h-screen p-8 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <div className="skeleton h-10 w-48 mb-2" />
-        <div className="skeleton h-5 w-72" />
+    <main className="mx-auto max-w-7xl space-y-6">
+      <div>
+        <div className="skeleton h-9 w-48 mb-2" />
+        <div className="skeleton h-4 w-80" />
       </div>
-      {/* Action cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <SkeletonCard />
-        <SkeletonCard />
-        <SkeletonCard />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <SkeletonStat />
+        <SkeletonStat />
+        <SkeletonStat />
+        <SkeletonStat />
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <SkeletonCard className="h-20" />
-        <SkeletonCard className="h-20" />
-        <SkeletonCard className="h-20" />
-        <SkeletonCard className="h-20" />
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="xl:col-span-2 bg-white border border-gray-200 rounded-xl p-6">
+          <div className="skeleton h-5 w-44 mb-2" />
+          <div className="skeleton h-4 w-64 mb-4" />
+          <div className="space-y-3">
+            <div className="skeleton h-20 w-full" />
+            <div className="skeleton h-20 w-full" />
+            <div className="skeleton h-20 w-full" />
+          </div>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <div className="skeleton h-5 w-40 mb-2" />
+          <div className="skeleton h-4 w-56 mb-4" />
+          <div className="space-y-2">
+            <div className="skeleton h-9 w-full" />
+            <div className="skeleton h-9 w-full" />
+            <div className="skeleton h-9 w-full" />
+          </div>
+        </div>
       </div>
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-        <SkeletonStat />
-        <SkeletonStat />
-        <SkeletonStat />
-        <SkeletonStat />
-        <SkeletonStat />
+
+      <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <div className="skeleton h-5 w-32 mb-2" />
+        <div className="skeleton h-4 w-52 mb-4" />
+        <div className="space-y-2">
+          <div className="skeleton h-14 w-full" />
+          <div className="skeleton h-14 w-full" />
+          <div className="skeleton h-14 w-full" />
+        </div>
       </div>
     </main>
   );
