@@ -54,10 +54,12 @@ Core behavior:
 1. Keep answers practical, concise, and structured with clear markdown sections.
 2. Use web search when recency matters or when the user asks for external facts.
 3. If the user asks to draft/write/generate an email for a prospect, call the tool "write_prospect_email".
-4. If account context is not selected, still call "write_prospect_email" and pass accountName from the user's request so the tool can run brief web research first.
-5. Include recipientName and recipientPersona whenever the user provides them.
-6. After tool usage, summarize what was drafted and keep the response short so the UI card can be used for copy/paste.
-7. Never hallucinate account/prospect context fields; rely on provided context.
+4. Structured manual email requests may include prospect name, prospect title, account name, and reason for emailing or inbound campaign. Treat those fields as the source of truth.
+5. If account context is not selected, still call "write_prospect_email" and pass accountName from the user's request so the tool can run brief web research first.
+6. Include recipientName and recipientPersona whenever the user provides them.
+7. Preserve the reason for emailing or inbound campaign in customContext so it shows up in the draft.
+8. After tool usage, summarize what was drafted and keep the response short so the UI card can be used for copy/paste.
+9. Never hallucinate account/prospect context fields; rely on provided context.
 
 Formatting:
 - Prefer short headings and bullets.
@@ -232,9 +234,32 @@ function normalizeDomain(value: string | null | undefined): string | null {
   return normalized.includes('.') ? normalized : null;
 }
 
+function inferLabeledField(message: string, labels: string[]): string | undefined {
+  const lines = message.split(/\r?\n/);
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const lowerLine = line.toLowerCase();
+    for (const label of labels) {
+      const normalizedLabel = `${label.toLowerCase()}:`;
+      if (!lowerLine.startsWith(normalizedLabel)) continue;
+
+      const value = line.slice(normalizedLabel.length).trim();
+      if (value) return value;
+    }
+  }
+
+  return undefined;
+}
+
 function inferAccountNameFromMessage(message: string): string | undefined {
   const trimmed = message.trim();
   if (!trimmed) return undefined;
+
+  const labeledAccount = inferLabeledField(trimmed, ['account name', 'company name', 'account', 'company']);
+  if (labeledAccount) return labeledAccount;
 
   const quotedMatch = trimmed.match(/["“]([^"”]{2,80})["”]/);
   if (quotedMatch && quotedMatch[1]) {
@@ -255,6 +280,24 @@ function inferAccountNameFromMessage(message: string): string | undefined {
   }
 
   return undefined;
+}
+
+function inferRecipientNameFromMessage(message: string): string | undefined {
+  return inferLabeledField(message, ['prospect name', 'recipient name', 'contact name', 'prospect']);
+}
+
+function inferRecipientPersonaFromMessage(message: string): string | undefined {
+  return inferLabeledField(message, ['prospect title', 'recipient title', 'title', 'persona', 'role']);
+}
+
+function inferReasonFromMessage(message: string): string | undefined {
+  return inferLabeledField(message, [
+    'reason for emailing / inbound campaign',
+    'reason for emailing',
+    'inbound campaign',
+    'campaign',
+    'reason',
+  ]);
 }
 
 function parseBriefAccountResearch(rawOutput: string, fallbackCompanyName: string): BriefAccountResearch {
@@ -423,6 +466,15 @@ export async function runChatAssistant(args: {
     strict: false,
     execute: async (input) => {
       const normalizedInput = normalizeEmailToolInput(input);
+      const inferredRecipientName =
+        inferRecipientNameFromMessage(userMessage) ||
+        inferRecipientNameFromMessage(normalizedInput.customContext || '');
+      const inferredRecipientPersona =
+        inferRecipientPersonaFromMessage(userMessage) ||
+        inferRecipientPersonaFromMessage(normalizedInput.customContext || '');
+      const inferredReason =
+        inferReasonFromMessage(userMessage) ||
+        inferReasonFromMessage(normalizedInput.customContext || '');
 
       const inferredAccountName =
         normalizedInput.accountName ||
@@ -450,6 +502,7 @@ export async function runChatAssistant(args: {
 
       const recipientName =
         normalizedInput.recipientName ||
+        inferredRecipientName ||
         (prospect ? `${prospect.first_name} ${prospect.last_name}` : '');
 
       if (!recipientName) {
@@ -460,6 +513,7 @@ export async function runChatAssistant(args: {
 
       const recipientPersona =
         normalizedInput.recipientPersona ||
+        inferredRecipientPersona ||
         prospect?.title ||
         roleTypeToLabel(prospect?.role_type ?? null);
 
@@ -471,6 +525,8 @@ export async function runChatAssistant(args: {
       }
       if (normalizedInput.customContext) {
         contextLines.push(normalizedInput.customContext);
+      } else if (inferredReason) {
+        contextLines.push(`Reason for emailing / inbound campaign: ${inferredReason}`);
       }
       if (!account && briefResearch) {
         contextLines.push(

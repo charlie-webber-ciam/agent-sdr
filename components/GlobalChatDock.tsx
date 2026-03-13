@@ -50,6 +50,20 @@ interface ManualContext {
   prospectId: number | null;
 }
 
+interface ManualEmailDraftInput {
+  prospectName: string;
+  prospectTitle: string;
+  accountName: string;
+  outreachReason: string;
+}
+
+const EMPTY_MANUAL_EMAIL_DRAFT: ManualEmailDraftInput = {
+  prospectName: '',
+  prospectTitle: '',
+  accountName: '',
+  outreachReason: '',
+};
+
 function parseEmailPayload(contentJson: string | null): EmailResultPayload | null {
   if (!contentJson) return null;
   try {
@@ -66,6 +80,18 @@ function parseEmailPayload(contentJson: string | null): EmailResultPayload | nul
 
 function formatProspectName(prospect: ContextProspectOption): string {
   return `${prospect.firstName} ${prospect.lastName}`;
+}
+
+function buildManualProspectEmailPrompt(input: ManualEmailDraftInput): string {
+  return [
+    'Draft a cold outbound email for a prospect who does not have a CRM account or prospect record.',
+    'Treat this as a structured manual prospect email request.',
+    `Prospect name: ${input.prospectName.trim()}`,
+    `Prospect title: ${input.prospectTitle.trim()}`,
+    `Account name: ${input.accountName.trim()}`,
+    `Reason for emailing / inbound campaign: ${input.outreachReason.trim()}`,
+    'Use the account name for brief company research and keep the campaign or reason reflected in the draft.',
+  ].join('\n');
 }
 
 function CopyButton({
@@ -158,6 +184,8 @@ export default function GlobalChatDock() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [showManualEmailForm, setShowManualEmailForm] = useState(false);
+  const [manualEmailDraft, setManualEmailDraft] = useState<ManualEmailDraftInput>(EMPTY_MANUAL_EMAIL_DRAFT);
 
   const messagesBottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -283,6 +311,31 @@ export default function GlobalChatDock() {
     messagesBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isOpen, sending]);
 
+  const postChatMessage = useCallback(async (
+    message: string,
+    contextOverride?: {
+      accountId: number | null;
+      prospectId: number | null;
+      perspective: Perspective;
+    }
+  ) => {
+    const response = await fetch('/api/chat/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        context: contextOverride ?? effectiveContext,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Failed to send message');
+    }
+
+    return data;
+  }, [effectiveContext]);
+
   const handleSend = async () => {
     const trimmed = input.trim();
     if (!trimmed || sending) return;
@@ -292,24 +345,50 @@ export default function GlobalChatDock() {
     setInput('');
 
     try {
-      const response = await fetch('/api/chat/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: trimmed,
-          context: effectiveContext,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to send message');
-      }
-
+      const data = await postChatMessage(trimmed);
       setMessages(data.messages || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
       setInput(trimmed);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleManualEmailSubmit = async () => {
+    const prospectName = manualEmailDraft.prospectName.trim();
+    const prospectTitle = manualEmailDraft.prospectTitle.trim();
+    const accountName = manualEmailDraft.accountName.trim();
+    const outreachReason = manualEmailDraft.outreachReason.trim();
+
+    if (!prospectName || !prospectTitle || !accountName || !outreachReason || sending) {
+      setError('Prospect name, title, account name, and reason are required for a manual email draft.');
+      return;
+    }
+
+    const prompt = buildManualProspectEmailPrompt({
+      prospectName,
+      prospectTitle,
+      accountName,
+      outreachReason,
+    });
+
+    setSending(true);
+    setError(null);
+    setManualContext({ accountId: null, prospectId: null });
+
+    try {
+      const data = await postChatMessage(prompt, {
+        accountId: null,
+        prospectId: null,
+        perspective: perspective as Perspective,
+      });
+
+      setMessages(data.messages || []);
+      setShowManualEmailForm(false);
+      setManualEmailDraft(EMPTY_MANUAL_EMAIL_DRAFT);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to draft manual prospect email');
     } finally {
       setSending(false);
     }
@@ -507,6 +586,83 @@ export default function GlobalChatDock() {
           </div>
 
           <div className="border-t border-border bg-muted/20 p-3">
+            <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/80 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">No-account prospect email</p>
+                  <p className="text-[11px] leading-5 text-muted-foreground">
+                    Draft for a prospect not linked to a CRM account by entering their details manually.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowManualEmailForm((current) => !current);
+                    setError(null);
+                  }}
+                  className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+                >
+                  {showManualEmailForm ? 'Hide form' : 'Open form'}
+                </button>
+              </div>
+
+              {showManualEmailForm && (
+                <div className="mt-3 space-y-2">
+                  <input
+                    value={manualEmailDraft.prospectName}
+                    onChange={(event) => setManualEmailDraft((current) => ({ ...current, prospectName: event.target.value }))}
+                    placeholder="Prospect name"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <input
+                    value={manualEmailDraft.prospectTitle}
+                    onChange={(event) => setManualEmailDraft((current) => ({ ...current, prospectTitle: event.target.value }))}
+                    placeholder="Prospect title"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <input
+                    value={manualEmailDraft.accountName}
+                    onChange={(event) => setManualEmailDraft((current) => ({ ...current, accountName: event.target.value }))}
+                    placeholder="Account name"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <textarea
+                    value={manualEmailDraft.outreachReason}
+                    onChange={(event) => setManualEmailDraft((current) => ({ ...current, outreachReason: event.target.value }))}
+                    placeholder="Reason for emailing / inbound campaign"
+                    className="min-h-[84px] w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    rows={3}
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] leading-5 text-muted-foreground">
+                      This sends with no CRM account selected and uses the typed company name for brief research.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowManualEmailForm(false);
+                          setManualEmailDraft(EMPTY_MANUAL_EMAIL_DRAFT);
+                          setError(null);
+                        }}
+                        className="rounded-md px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleManualEmailSubmit}
+                        disabled={sending}
+                        className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Draft email
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {error && (
               <p className="mb-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
                 {error}
