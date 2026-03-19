@@ -968,4 +968,55 @@ export function migrateDatabase(db: Database.Database) {
   } catch (error) {
     console.error('Failed to create prospect_edges table:', error);
   }
+
+  // Add account_vector_index table for embedding metadata
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_vector_index (
+        account_id INTEGER NOT NULL,
+        perspective TEXT NOT NULL CHECK(perspective IN ('auth0', 'okta', 'overall')),
+        qdrant_point_id TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        vector_status TEXT NOT NULL DEFAULT 'pending' CHECK(vector_status IN ('pending', 'indexed', 'failed')),
+        last_indexed_at TEXT,
+        last_error TEXT,
+        embedding_model TEXT,
+        dimensions INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (account_id, perspective),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_vector_index_status ON account_vector_index(vector_status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_vector_index_perspective ON account_vector_index(perspective)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_vector_index_indexed_at ON account_vector_index(last_indexed_at DESC)');
+    console.log('✓ Ensured account_vector_index table exists');
+  } catch (error) {
+    console.error('Failed to create account_vector_index table:', error);
+  }
+
+  // Add vector_index_jobs table for manual backfill/rebuild jobs
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vector_index_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        total_accounts INTEGER NOT NULL DEFAULT 0,
+        processed_count INTEGER NOT NULL DEFAULT 0,
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
+        current_account_id INTEGER,
+        current_account_name TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT,
+        FOREIGN KEY (current_account_id) REFERENCES accounts(id) ON DELETE SET NULL
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_vector_index_jobs_status ON vector_index_jobs(status)');
+    console.log('✓ Ensured vector_index_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create vector_index_jobs table:', error);
+  }
 }

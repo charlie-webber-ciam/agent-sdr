@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getAccount, updateAccountAuth0Research, updateAccountOktaResearch } from '@/lib/db';
 import { researchSection as researchAuth0Section, AUTH0_RESEARCH_SECTIONS } from '@/lib/agent-researcher';
 import { researchOktaSection, OKTA_RESEARCH_SECTIONS } from '@/lib/okta-agent-researcher';
+import { indexAccountResearchVectorsBestEffort } from '@/lib/account-vectors';
 
 export async function POST(
   request: Request,
@@ -93,6 +94,8 @@ export async function POST(
         updateAccountOktaResearch(accountId, update);
       }
     }
+
+    await indexAccountResearchVectorsBestEffort(accountId);
 
     return NextResponse.json({ results });
   } catch (error) {

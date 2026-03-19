@@ -13,7 +13,7 @@ if (!existsSync(dataDir)) {
 const DB_PATH = join(dataDir, 'accounts.db');
 
 // Bump this version whenever migrations change to force re-run in dev mode
-const MIGRATION_VERSION = 8;
+const MIGRATION_VERSION = 9;
 
 // Use globalThis to survive HMR in Next.js dev mode
 const globalDb = globalThis as unknown as {
@@ -46,6 +46,11 @@ export function getDb(): Database.Database {
     if (resetCount > 0) {
       console.log(`✓ Reset ${resetCount} stuck 'processing' account(s) to 'pending'`);
     }
+
+    const resetVectorJobCount = resetStuckVectorIndexJobs(globalDb.__sdr_db);
+    if (resetVectorJobCount > 0) {
+      console.log(`✓ Reset ${resetVectorJobCount} stuck vector indexing job(s) to 'failed'`);
+    }
   } else if (needsMigrationRerun) {
     // Migration version changed (code was updated via HMR) — re-run migrations
     console.log(`⚙️  Migration version changed (${globalDb.__sdr_db_migration_version} → ${MIGRATION_VERSION}), re-running migrations...`);
@@ -68,6 +73,22 @@ export function resetStuckProcessingAccounts(database?: Database.Database): numb
         error_message = NULL,
         updated_at = datetime('now')
     WHERE research_status = 'processing'
+  `);
+  const result = stmt.run();
+  return result.changes;
+}
+
+export function resetStuckVectorIndexJobs(database?: Database.Database): number {
+  const d = database || getDb();
+  const stmt = d.prepare(`
+    UPDATE vector_index_jobs
+    SET status = 'failed',
+        error_message = COALESCE(error_message, 'Interrupted during vector indexing'),
+        current_account_id = NULL,
+        current_account_name = NULL,
+        completed_at = datetime('now'),
+        updated_at = datetime('now')
+    WHERE status = 'processing'
   `);
   const result = stmt.run();
   return result.changes;
@@ -181,6 +202,37 @@ export interface TriageJob {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   current_account: string | null;
   paused: number; // SQLite boolean (0/1)
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export type VectorPerspective = 'auth0' | 'okta' | 'overall';
+export type VectorIndexStatus = 'pending' | 'indexed' | 'failed';
+
+export interface AccountVectorIndexRow {
+  account_id: number;
+  perspective: VectorPerspective;
+  qdrant_point_id: string;
+  content_hash: string;
+  vector_status: VectorIndexStatus;
+  last_indexed_at: string | null;
+  last_error: string | null;
+  embedding_model: string | null;
+  dimensions: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VectorIndexJob {
+  id: number;
+  total_accounts: number;
+  processed_count: number;
+  failed_count: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  current_account_id: number | null;
+  current_account_name: string | null;
+  error_message: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -848,6 +900,289 @@ export function getFilterMetadata(): {
     accountOwners,
     oktaAccountOwners,
     availableHqStates,
+  };
+}
+
+export function getVectorEligibleAccounts(options?: {
+  accountIds?: number[];
+  limit?: number;
+  offset?: number;
+}): Account[] {
+  const db = getDb();
+  let query = `SELECT * FROM accounts WHERE research_status = 'completed'`;
+  const params: any[] = [];
+
+  if (options?.accountIds?.length) {
+    const placeholders = options.accountIds.map(() => '?').join(', ');
+    query += ` AND id IN (${placeholders})`;
+    params.push(...options.accountIds);
+  }
+
+  query += ' ORDER BY processed_at DESC, created_at DESC';
+
+  if (options?.limit !== undefined) {
+    query += ' LIMIT ? OFFSET ?';
+    params.push(options.limit, options.offset || 0);
+  }
+
+  return db.prepare(query).all(...params) as Account[];
+}
+
+export function countVectorEligibleAccounts(accountIds?: number[]): number {
+  const db = getDb();
+
+  if (accountIds?.length) {
+    const placeholders = accountIds.map(() => '?').join(', ');
+    const row = db.prepare(`
+      SELECT COUNT(*) as total
+      FROM accounts
+      WHERE research_status = 'completed' AND id IN (${placeholders})
+    `).get(...accountIds) as { total: number };
+    return row.total;
+  }
+
+  const row = db.prepare(`
+    SELECT COUNT(*) as total
+    FROM accounts
+    WHERE research_status = 'completed'
+  `).get() as { total: number };
+  return row.total;
+}
+
+export function getAccountVectorIndexRows(accountId: number): AccountVectorIndexRow[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT *
+    FROM account_vector_index
+    WHERE account_id = ?
+    ORDER BY perspective
+  `).all(accountId) as AccountVectorIndexRow[];
+}
+
+export function getAccountVectorIndexRow(
+  accountId: number,
+  perspective: VectorPerspective
+): AccountVectorIndexRow | undefined {
+  const db = getDb();
+  return db.prepare(`
+    SELECT *
+    FROM account_vector_index
+    WHERE account_id = ? AND perspective = ?
+  `).get(accountId, perspective) as AccountVectorIndexRow | undefined;
+}
+
+export function upsertAccountVectorIndex(row: {
+  account_id: number;
+  perspective: VectorPerspective;
+  qdrant_point_id: string;
+  content_hash: string;
+  vector_status: VectorIndexStatus;
+  last_indexed_at?: string | null;
+  last_error?: string | null;
+  embedding_model?: string | null;
+  dimensions?: number | null;
+}): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO account_vector_index (
+      account_id,
+      perspective,
+      qdrant_point_id,
+      content_hash,
+      vector_status,
+      last_indexed_at,
+      last_error,
+      embedding_model,
+      dimensions
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(account_id, perspective) DO UPDATE SET
+      qdrant_point_id = excluded.qdrant_point_id,
+      content_hash = excluded.content_hash,
+      vector_status = excluded.vector_status,
+      last_indexed_at = excluded.last_indexed_at,
+      last_error = excluded.last_error,
+      embedding_model = excluded.embedding_model,
+      dimensions = excluded.dimensions,
+      updated_at = datetime('now')
+  `).run(
+    row.account_id,
+    row.perspective,
+    row.qdrant_point_id,
+    row.content_hash,
+    row.vector_status,
+    row.last_indexed_at ?? null,
+    row.last_error ?? null,
+    row.embedding_model ?? null,
+    row.dimensions ?? null
+  );
+}
+
+export function deleteAccountVectorIndexRow(accountId: number, perspective: VectorPerspective): void {
+  const db = getDb();
+  db.prepare(`
+    DELETE FROM account_vector_index
+    WHERE account_id = ? AND perspective = ?
+  `).run(accountId, perspective);
+}
+
+export function createVectorIndexJob(totalAccounts: number): number {
+  const db = getDb();
+  const result = db.prepare(`
+    INSERT INTO vector_index_jobs (total_accounts)
+    VALUES (?)
+  `).run(totalAccounts);
+  return result.lastInsertRowid as number;
+}
+
+export function getVectorIndexJob(jobId: number): VectorIndexJob | undefined {
+  const db = getDb();
+  return db.prepare(`
+    SELECT *
+    FROM vector_index_jobs
+    WHERE id = ?
+  `).get(jobId) as VectorIndexJob | undefined;
+}
+
+export function updateVectorIndexJob(
+  jobId: number,
+  updates: {
+    processed_count?: number;
+    failed_count?: number;
+    status?: VectorIndexJob['status'];
+    current_account_id?: number | null;
+    current_account_name?: string | null;
+    error_message?: string | null;
+    completed_at?: string | null;
+  }
+): void {
+  const db = getDb();
+  const sets: string[] = [];
+  const params: any[] = [];
+
+  for (const [column, value] of Object.entries(updates)) {
+    sets.push(`${column} = ?`);
+    params.push(value);
+  }
+
+  if (sets.length === 0) return;
+
+  sets.push(`updated_at = datetime('now')`);
+  params.push(jobId);
+
+  db.prepare(`
+    UPDATE vector_index_jobs
+    SET ${sets.join(', ')}
+    WHERE id = ?
+  `).run(...params);
+}
+
+export function getIndexedAccountsForMap(filters: {
+  perspective: VectorPerspective;
+  search?: string;
+  tier?: string | 'unassigned';
+  oktaTier?: string | 'unassigned';
+  accountOwner?: string;
+  oktaAccountOwner?: string;
+  includeGlobalParent?: boolean;
+  hqState?: string;
+  sortBy?: string;
+  limit?: number;
+  offset?: number;
+}): { accounts: Account[]; total: number } {
+  const db = getDb();
+  let query = `
+    SELECT a.*
+    FROM accounts a
+    INNER JOIN account_vector_index avi
+      ON avi.account_id = a.id
+     AND avi.perspective = ?
+     AND avi.vector_status = 'indexed'
+    WHERE a.research_status = 'completed'
+  `;
+  const params: any[] = [filters.perspective];
+
+  if (!filters.includeGlobalParent) {
+    query += " AND (a.parent_company_region IS NULL OR a.parent_company_region != 'global')";
+  }
+
+  if (filters.search) {
+    query += ' AND (a.company_name LIKE ? OR a.domain LIKE ?)';
+    const searchPattern = `%${filters.search}%`;
+    params.push(searchPattern, searchPattern);
+  }
+
+  if (filters.tier) {
+    if (filters.tier === 'unassigned') {
+      query += ' AND a.tier IS NULL';
+    } else {
+      query += ' AND a.tier = ?';
+      params.push(filters.tier);
+    }
+  }
+
+  if (filters.oktaTier) {
+    if (filters.oktaTier === 'unassigned') {
+      query += ' AND a.okta_tier IS NULL';
+    } else {
+      query += ' AND a.okta_tier = ?';
+      params.push(filters.oktaTier);
+    }
+  }
+
+  if (filters.accountOwner) {
+    if (filters.accountOwner === 'unassigned') {
+      query += " AND (a.auth0_account_owner IS NULL OR a.auth0_account_owner = '')";
+    } else {
+      query += ' AND a.auth0_account_owner LIKE ?';
+      params.push(`%${filters.accountOwner}%`);
+    }
+  }
+
+  if (filters.oktaAccountOwner) {
+    if (filters.oktaAccountOwner === 'unassigned') {
+      query += " AND (a.okta_account_owner IS NULL OR a.okta_account_owner = '')";
+    } else {
+      query += ' AND a.okta_account_owner LIKE ?';
+      params.push(`%${filters.oktaAccountOwner}%`);
+    }
+  }
+
+  if (filters.hqState) {
+    if (filters.hqState === 'unassigned') {
+      query += ' AND a.hq_state IS NULL';
+    } else {
+      query += ' AND a.hq_state = ?';
+      params.push(filters.hqState);
+    }
+  }
+
+  const countRow = db.prepare(
+    query.replace('SELECT a.*', 'SELECT COUNT(DISTINCT a.id) as total')
+  ).get(...params) as { total: number };
+
+  const sortBy = filters.sortBy || (filters.perspective === 'okta' ? 'okta_priority_score' : 'priority_score');
+  const validSortFields = ['processed_at', 'priority_score', 'tier', 'company_name', 'created_at', 'okta_priority_score', 'okta_tier'];
+  const sortField = validSortFields.includes(sortBy) ? sortBy : 'priority_score';
+
+  if (sortField === 'tier' || sortField === 'okta_tier') {
+    query += ` ORDER BY CASE a.${sortField} WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 ELSE 4 END ASC, a.created_at DESC`;
+  } else if (sortField === 'company_name') {
+    query += ' ORDER BY a.company_name ASC, a.created_at DESC';
+  } else {
+    query += ` ORDER BY a.${sortField} DESC, a.created_at DESC`;
+  }
+
+  if (filters.limit !== undefined) {
+    query += ' LIMIT ? OFFSET ?';
+    params.push(filters.limit, filters.offset || 0);
+  }
+
+  const accounts = db.prepare(query).all(...params) as Account[];
+
+  return {
+    accounts,
+    total: countRow.total,
   };
 }
 

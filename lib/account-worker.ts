@@ -23,6 +23,7 @@ import { analyzeOktaAccountData, OktaPatch } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
 import { buildOpportunityContext } from './opportunity-context';
 import { logWorkerError, sleep } from './worker-error-utils';
+import { indexAccountResearchVectorsBestEffort } from './account-vectors';
 
 export interface AccountProcessingResult {
   accountId: number;
@@ -166,6 +167,8 @@ export async function processAccountWithRetry(
       if (model) {
         updateAccountResearchModel(account.id, model);
       }
+
+      await indexAccountResearchVectorsBestEffort(account.id);
 
       console.log(`[Account ${account.id}] ✓ Completed processing for ${account.company_name}`);
 

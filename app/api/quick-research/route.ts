@@ -17,6 +17,7 @@ import {
 import { researchCompanyDual } from '@/lib/dual-researcher';
 import { analyzeAccountData } from '@/lib/categorizer';
 import { analyzeOktaAccountData, OktaPatch } from '@/lib/okta-categorizer';
+import { indexAccountResearchVectorsBestEffort } from '@/lib/account-vectors';
 
 const VALID_PATCHES: OktaPatch[] = ['emerging', 'crp', 'ent', 'stg', 'pubsec'];
 
@@ -134,6 +135,8 @@ async function performResearch(
 
     // Record which model was used for research
     updateAccountResearchModel(accountId, model || 'gpt-5.2');
+
+    await indexAccountResearchVectorsBestEffort(accountId);
 
     console.log(`Research completed for: ${companyName}, starting categorization...`);
 

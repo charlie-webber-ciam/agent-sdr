@@ -22,6 +22,7 @@ import { processJobParallel } from './parallel-processor';
 import { buildOpportunityContext } from './opportunity-context';
 import { buildActivityContext } from './activity-context';
 import { logWorkerError, sleep } from './worker-error-utils';
+import { indexAccountResearchVectorsBestEffort } from './account-vectors';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -312,6 +313,8 @@ export async function processJobSequential(
       if (model) {
         updateAccountResearchModel(account.id, model);
       }
+
+      await indexAccountResearchVectorsBestEffort(account.id);
 
       // Emit account_complete event
       insertJobEvent(jobId, 'processing', 'account_complete', {

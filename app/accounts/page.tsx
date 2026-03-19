@@ -565,6 +565,9 @@ function AccountsPageContent() {
                 {isAllSelected ? 'Deselect All' : `Select All (${totalAccounts})`}
               </Button>
               <Button asChild variant="outline">
+                <Link href="/accounts/map">Account Map</Link>
+              </Button>
+              <Button asChild variant="outline">
                 <Link href="/accounts/duplicates">Find Duplicates</Link>
               </Button>
               <Button

@@ -32,6 +32,10 @@ interface AccountCardProps {
   selectable?: boolean;
   selected?: boolean;
   onSelectionChange?: (id: number, selected: boolean) => void;
+  onCardClick?: (id: number) => void;
+  footerActionLabel?: string;
+  onFooterActionClick?: (id: number) => void;
+  displayPerspective?: 'auth0' | 'okta';
 }
 
 function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
@@ -60,14 +64,19 @@ function AccountCardInner({
   selectable = false,
   selected = false,
   onSelectionChange,
+  onCardClick,
+  footerActionLabel,
+  onFooterActionClick,
+  displayPerspective,
 }: AccountCardProps) {
   const router = useRouter();
   const { perspective } = usePerspective();
+  const activePerspective = displayPerspective || perspective;
 
-  const displayTier = perspective === 'okta' ? account.oktaTier : account.tier;
-  const displaySkus = perspective === 'okta' ? account.oktaSkus : account.auth0Skus;
-  const displayPriority = perspective === 'okta' ? account.oktaPriorityScore : account.priorityScore;
-  const displayOwner = perspective === 'okta' ? account.oktaAccountOwner : account.auth0AccountOwner;
+  const displayTier = activePerspective === 'okta' ? account.oktaTier : account.tier;
+  const displaySkus = activePerspective === 'okta' ? account.oktaSkus : account.auth0Skus;
+  const displayPriority = activePerspective === 'okta' ? account.oktaPriorityScore : account.priorityScore;
+  const displayOwner = activePerspective === 'okta' ? account.oktaAccountOwner : account.auth0AccountOwner;
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Not processed';
@@ -100,6 +109,11 @@ function AccountCardInner({
   const stalenessInfo = getStalenessInfo(account.processedAt);
 
   const handleCardClick = () => {
+    if (onCardClick) {
+      onCardClick(account.id);
+      return;
+    }
+
     router.push(`/accounts/${account.id}`);
   };
 
@@ -140,7 +154,7 @@ function AccountCardInner({
             <p className="text-sm text-muted-foreground">{formatDomain(account.domain)} · {account.industry}</p>
 
             {displayOwner && (
-              <p className={cn('mt-1 flex items-center gap-1 text-xs', perspective === 'okta' ? 'text-purple-700' : 'text-blue-700')}>
+              <p className={cn('mt-1 flex items-center gap-1 text-xs', activePerspective === 'okta' ? 'text-purple-700' : 'text-blue-700')}>
                 <UserRound className="h-3.5 w-3.5" />
                 {displayOwner}
               </p>
@@ -182,10 +196,15 @@ function AccountCardInner({
           className="h-auto p-0 text-sm"
           onClick={(e) => {
             e.stopPropagation();
+            if (onFooterActionClick) {
+              onFooterActionClick(account.id);
+              return;
+            }
+
             router.push(`/accounts/${account.id}`);
           }}
         >
-          View Details
+          {footerActionLabel || 'View Details'}
         </Button>
       </CardFooter>
     </Card>

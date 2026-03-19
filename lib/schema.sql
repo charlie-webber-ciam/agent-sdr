@@ -318,3 +318,40 @@ CREATE TABLE IF NOT EXISTS job_events (
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_job_events_lookup ON job_events(job_id, job_type, id);
+
+-- Account vector index tracking - metadata for embeddings stored in Qdrant
+CREATE TABLE IF NOT EXISTS account_vector_index (
+  account_id INTEGER NOT NULL,
+  perspective TEXT NOT NULL CHECK(perspective IN ('auth0', 'okta', 'overall')),
+  qdrant_point_id TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  vector_status TEXT NOT NULL DEFAULT 'pending' CHECK(vector_status IN ('pending', 'indexed', 'failed')),
+  last_indexed_at TEXT,
+  last_error TEXT,
+  embedding_model TEXT,
+  dimensions INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (account_id, perspective),
+  FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_account_vector_index_status ON account_vector_index(vector_status);
+CREATE INDEX IF NOT EXISTS idx_account_vector_index_perspective ON account_vector_index(perspective);
+CREATE INDEX IF NOT EXISTS idx_account_vector_index_indexed_at ON account_vector_index(last_indexed_at DESC);
+
+-- Manual vector indexing/backfill jobs
+CREATE TABLE IF NOT EXISTS vector_index_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  total_accounts INTEGER NOT NULL DEFAULT 0,
+  processed_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
+  current_account_id INTEGER,
+  current_account_name TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT,
+  FOREIGN KEY (current_account_id) REFERENCES accounts(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_vector_index_jobs_status ON vector_index_jobs(status);

@@ -47,6 +47,7 @@ const primaryLinks: NavItem[] = [
 ];
 
 const toolLinks: NavItem[] = [
+  { href: '/accounts/map', label: 'Account Map', activePath: '/accounts/map', icon: MapPinned },
   { href: '/email-writer', label: 'Email Writer', icon: Mail },
   { href: '/quick-research', label: 'Quick Research', icon: Search },
   { href: '/upload', label: 'Upload CSV', icon: Upload },

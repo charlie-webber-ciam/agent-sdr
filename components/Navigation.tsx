@@ -23,6 +23,7 @@ const PATCH_OPTIONS: { value: OktaPatch; label: string }[] = [
 ];
 
 const toolLinks = [
+  { href: '/accounts/map', label: 'Account Map', activePath: '/accounts/map' },
   { href: '/email-writer', label: 'Email Writer' },
   { href: '/quick-research', label: 'Quick Research' },
   { href: '/upload', label: 'Upload CSV' },
