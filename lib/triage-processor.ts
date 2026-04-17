@@ -33,7 +33,7 @@ export function isTriageJobActive(jobId: number): boolean {
 export async function processTriageJob(
   jobId: number,
   processingJobId: number,
-  concurrency: number = Math.min(PROCESSING_CONFIG.concurrency, 10),
+  concurrency: number = Math.min(PROCESSING_CONFIG.concurrency, 50),
   model?: string,
   oktaPatch?: OktaPatch
 ): Promise<void> {

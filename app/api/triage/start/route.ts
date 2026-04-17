@@ -40,9 +40,9 @@ export async function POST(request: Request) {
       const maybeConcurrency =
         typeof concurrency === 'number' ? concurrency : parseInt(String(concurrency), 10);
       assertProcessAction(
-        Number.isInteger(maybeConcurrency) && maybeConcurrency >= 1 && maybeConcurrency <= 10,
+        Number.isInteger(maybeConcurrency) && maybeConcurrency >= 1 && maybeConcurrency <= 50,
         400,
-        'concurrency must be an integer between 1 and 10'
+        'concurrency must be an integer between 1 and 50'
       );
       parsedConcurrency = maybeConcurrency;
     }

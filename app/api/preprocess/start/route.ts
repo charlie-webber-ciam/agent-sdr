@@ -27,12 +27,12 @@ export async function POST(request: Request) {
     assertProcessAction(job.status === 'pending', 409, `Job is ${job.status}. Only pending jobs can be started.`);
 
     // Validate concurrency
-    let selectedConcurrency = Math.min(PROCESSING_CONFIG.concurrency, 10);
+    let selectedConcurrency = Math.min(PROCESSING_CONFIG.concurrency, 50);
     if (concurrency !== undefined) {
       const parsedConcurrency =
         typeof concurrency === 'number' ? concurrency : parseInt(String(concurrency), 10);
       assertProcessAction(Number.isInteger(parsedConcurrency), 400, 'Concurrency must be an integer');
-      selectedConcurrency = Math.min(Math.max(parsedConcurrency, 1), 10);
+      selectedConcurrency = Math.min(Math.max(parsedConcurrency, 1), 50);
     }
 
     console.log(`Starting preprocessing for job ${parsedJobId}:`);

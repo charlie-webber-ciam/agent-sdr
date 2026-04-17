@@ -29,7 +29,7 @@ const activeJobs = new Set<number>();
 export async function processPreprocessingJob(
   jobId: number,
   companies: CompanyInput[],
-  concurrency: number = Math.min(PROCESSING_CONFIG.concurrency, 10) // Max 10 for preprocessing
+  concurrency: number = Math.min(PROCESSING_CONFIG.concurrency, 50) // Max 50 for preprocessing
 ): Promise<void> {
   if (activeJobs.has(jobId)) {
     console.log(`Preprocessing job ${jobId} is already being processed`);

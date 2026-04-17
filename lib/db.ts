@@ -34,6 +34,7 @@ export function getDb(): Database.Database {
   if (!globalDb.__sdr_db) {
     globalDb.__sdr_db = new Database(DB_PATH);
     globalDb.__sdr_db.pragma('journal_mode = WAL');
+    globalDb.__sdr_db.pragma('busy_timeout = 5000');
     globalDb.__sdr_db.pragma('foreign_keys = ON');
 
     // Initialize schema
