@@ -9,9 +9,8 @@ export const PROCESSING_CONFIG = {
   // Enable parallel processing (feature flag)
   enableParallel: process.env.ENABLE_PARALLEL_PROCESSING !== 'false',
 
-  // Number of accounts to process concurrently (1-50)
-  // Conservative: 5, Moderate: 10, Aggressive: 50
-  concurrency: parseInt(process.env.PROCESSING_CONCURRENCY || '10', 10),
+  // Number of accounts to process concurrently
+  concurrency: 50,
 
   // Maximum retry attempts for rate limit errors
   maxRetries: parseInt(process.env.MAX_API_RETRIES || '3', 10),
@@ -30,8 +29,8 @@ export function validateConfig(): void {
   const { concurrency, maxRetries } = PROCESSING_CONFIG;
 
   if (concurrency < 1 || concurrency > 50) {
-    console.warn(`Invalid PROCESSING_CONCURRENCY: ${concurrency}. Using default: 10`);
-    (PROCESSING_CONFIG as any).concurrency = 10;
+    console.warn(`Invalid concurrency: ${concurrency}. Using default: 50`);
+    (PROCESSING_CONFIG as any).concurrency = 50;
   }
 
   if (maxRetries < 0 || maxRetries > 10) {
