@@ -28,7 +28,8 @@ export async function researchCompanyDual(
   model?: string,
   opportunityContext?: string,
   onStep?: (source: 'auth0' | 'okta', step: string, stepIndex: number, total: number) => void,
-  oktaPatch?: OktaPatch
+  oktaPatch?: OktaPatch,
+  accountId?: number
 ): Promise<DualResearchResult> {
   console.log(`[Dual Researcher] Starting ${mode} research for ${company.company_name}${model ? ` (model: ${model})` : ''}${opportunityContext ? ' (with opportunity context)' : ''}`);
 
@@ -46,7 +47,7 @@ export async function researchCompanyDual(
       // Run both agents in parallel
       const [auth0Result, oktaResult] = await Promise.allSettled([
         researchAuth0(company, model, opportunityContext, auth0OnStep),
-        researchOkta(company, model, opportunityContext, oktaOnStep, oktaPatch),
+        researchOkta(company, model, opportunityContext, oktaOnStep, oktaPatch, accountId),
       ]);
 
       // Handle Auth0 result
@@ -81,7 +82,7 @@ export async function researchCompanyDual(
         ? (step: string, i: number, total: number) => onStep('okta', step, i, total)
         : undefined;
       // Run Okta agent only
-      result.okta = await researchOkta(company, model, opportunityContext, oktaOnStep, oktaPatch);
+      result.okta = await researchOkta(company, model, opportunityContext, oktaOnStep, oktaPatch, accountId);
       console.log(`[Dual Researcher] ✓ Okta research completed for ${company.company_name}`);
     }
 

@@ -3,6 +3,8 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import { logDetailedError } from './error-logger';
 import { OktaPatch, PATCH_CONFIGS } from './okta-categorizer';
+import { isPlaceholderDomain } from './domain-resolver';
+import { getDb } from './db';
 
 // Disable tracing — it tries to hit api.openai.com directly, which fails with a custom base URL
 setTracingDisabled(true);
@@ -64,17 +66,109 @@ const runWithRetry = async (agent: Agent, prompt: string, maxRetries = 2) => {
   throw new Error('Unreachable');
 };
 
-// ─── Input Validation ──────────────────────────────────────────────────────────
+// ─── Input Validation & Enrichment ───────────────────────────────────────────
 
-function validateCompanyInput(company: CompanyInfo): void {
+const CompanyEnrichmentSchema = z.object({
+  domain: z.string().nullable().describe('The primary website domain (e.g. "stripe.com"). null if unknown.'),
+  industry: z.string().nullable().describe('The company industry (e.g. "Financial Services", "Healthcare"). null if unknown.'),
+});
+
+/**
+ * Enrich missing company data (domain, industry) via a quick web search,
+ * then persist the results to the database so subsequent runs don't repeat the lookup.
+ * Mutates the `company` object in-place and returns it.
+ */
+async function enrichAndValidateCompany(
+  company: CompanyInfo,
+  accountId?: number,
+  model?: string
+): Promise<void> {
   if (!company.company_name || company.company_name.trim().length < 2) {
     throw new Error('Invalid company name: must be at least 2 characters');
   }
-  if (!company.industry || company.industry.trim().length < 2) {
-    throw new Error('Invalid industry: must be at least 2 characters');
+
+  const needsDomain = !company.domain || isPlaceholderDomain(company.domain);
+  const needsIndustry = !company.industry || company.industry.trim().length < 2;
+
+  if (!needsDomain && !needsIndustry) {
+    return; // Nothing to enrich
   }
-  if (company.domain && !/^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.[a-zA-Z]{2,}$/.test(company.domain)) {
-    console.warn(`Domain "${company.domain}" may be invalid, proceeding anyway`);
+
+  const missingFields = [needsDomain && 'domain', needsIndustry && 'industry'].filter(Boolean).join(' and ');
+  console.log(`[Okta Enrichment] Looking up ${missingFields} for "${company.company_name}" via web search...`);
+
+  try {
+    const enrichmentAgent = new Agent({
+      model: model || 'gpt-5.2',
+      name: 'Company Enrichment Agent',
+      instructions: `You are a company data enrichment specialist. Given a company name, use web search to find the company's primary website domain and industry classification. Be precise and factual. Only return information you are confident about from search results.`,
+      tools: [webSearchTool()],
+      outputType: CompanyEnrichmentSchema,
+    });
+
+    const prompt = `Look up the company "${company.company_name}" and find:
+${needsDomain ? '- Their primary website domain (e.g. "stripe.com", "commbank.com.au"). Return the bare domain, no protocol or www prefix.' : ''}
+${needsIndustry ? '- Their industry classification (e.g. "Financial Services", "Healthcare Technology", "Government", "Retail"). Use a standard industry label.' : ''}
+
+${!needsDomain ? `Their domain is already known: ${company.domain}` : ''}
+${!needsIndustry ? `Their industry is already known: ${company.industry}` : ''}
+
+Return your findings as JSON.`;
+
+    const result = await run(enrichmentAgent, prompt);
+    const enriched = result.finalOutput as z.infer<typeof CompanyEnrichmentSchema> | null;
+
+    if (!enriched) {
+      console.warn(`[Okta Enrichment] No enrichment results for "${company.company_name}"`);
+      if (needsIndustry) company.industry = 'Unknown';
+      return;
+    }
+
+    let updated = false;
+
+    // Apply domain if we needed it and got a valid one
+    if (needsDomain && enriched.domain) {
+      const cleanDomain = enriched.domain
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .split('/')[0]
+        .trim();
+
+      if (cleanDomain.includes('.') && cleanDomain.length >= 4) {
+        company.domain = cleanDomain;
+        updated = true;
+        console.log(`[Okta Enrichment] ✓ Found domain for "${company.company_name}": ${cleanDomain}`);
+      }
+    }
+
+    // Apply industry if we needed it and got one
+    if (needsIndustry && enriched.industry && enriched.industry.trim().length >= 2) {
+      company.industry = enriched.industry.trim();
+      updated = true;
+      console.log(`[Okta Enrichment] ✓ Found industry for "${company.company_name}": ${company.industry}`);
+    } else if (needsIndustry) {
+      company.industry = 'Unknown';
+    }
+
+    // Persist to DB if we have an account ID and found new data
+    if (updated && accountId) {
+      try {
+        const db = getDb();
+        if (needsDomain && company.domain && !isPlaceholderDomain(company.domain)) {
+          db.prepare('UPDATE accounts SET domain = ? WHERE id = ?').run(company.domain, accountId);
+        }
+        if (needsIndustry && company.industry !== 'Unknown') {
+          db.prepare('UPDATE accounts SET industry = ? WHERE id = ?').run(company.industry, accountId);
+        }
+        console.log(`[Okta Enrichment] ✓ Persisted enriched data to DB for account ${accountId}`);
+      } catch (dbErr) {
+        console.warn(`[Okta Enrichment] Failed to persist enrichment to DB:`, dbErr);
+      }
+    }
+  } catch (error) {
+    console.warn(`[Okta Enrichment] Web search enrichment failed for "${company.company_name}", proceeding with defaults:`, error);
+    if (needsIndustry) company.industry = 'Unknown';
   }
 }
 
@@ -498,9 +592,9 @@ export async function researchOktaSection(
 
 // ─── Main Research Function ────────────────────────────────────────────────────
 
-export async function researchCompany(company: CompanyInfo, model?: string, opportunityContext?: string, onStep?: (step: string, stepIndex: number, totalSteps: number) => void, oktaPatch?: OktaPatch): Promise<ResearchResult> {
-  // Validate input
-  validateCompanyInput(company);
+export async function researchCompany(company: CompanyInfo, model?: string, opportunityContext?: string, onStep?: (step: string, stepIndex: number, totalSteps: number) => void, oktaPatch?: OktaPatch, accountId?: number): Promise<ResearchResult> {
+  // Enrich missing data (domain, industry) via web search, then validate
+  await enrichAndValidateCompany(company, accountId, model);
 
   const companyIdentifier = company.domain
     ? `${company.company_name} (${company.domain})`

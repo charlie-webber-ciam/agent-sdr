@@ -182,7 +182,8 @@ export async function processJobSequential(
         model,
         combinedContext,
         onStep,
-        oktaPatch
+        oktaPatch,
+        account.id
       );
 
       // Update Auth0 research if available
