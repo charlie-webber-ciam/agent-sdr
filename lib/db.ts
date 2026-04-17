@@ -96,6 +96,23 @@ export function resetStuckProcessingAccounts(database?: Database.Database): numb
   return result.changes;
 }
 
+/**
+ * Reset accounts stuck in 'processing' for a specific job back to 'pending'.
+ * Used when a job is cancelled or fails mid-processing.
+ */
+export function resetStuckProcessingAccountsByJob(jobId: number): number {
+  const d = getDb();
+  const stmt = d.prepare(`
+    UPDATE accounts
+    SET research_status = 'pending',
+        error_message = NULL,
+        updated_at = datetime('now')
+    WHERE job_id = ? AND research_status = 'processing'
+  `);
+  const result = stmt.run(jobId);
+  return result.changes;
+}
+
 export function resetStuckVectorIndexJobs(database?: Database.Database): number {
   const d = database || getDb();
   const stmt = d.prepare(`
@@ -330,7 +347,8 @@ export function createAccount(
   if (!finalDomain) {
     const sanitizedName = companyName.toLowerCase().replace(/[^a-z0-9]/g, '-');
     const timestamp = Date.now();
-    finalDomain = `no-domain-${sanitizedName}-${timestamp}.placeholder`;
+    const rand = Math.random().toString(36).slice(2, 8);
+    finalDomain = `no-domain-${sanitizedName}-${timestamp}-${rand}.placeholder`;
   }
 
   const stmt = db.prepare(`
@@ -816,12 +834,13 @@ export function findAccountByDomain(domain: string): Account | undefined {
 
 export function findDuplicateDomains(domains: string[]): string[] {
   const db = getDb();
-  const placeholders = domains.map(() => '?').join(',');
+  const lowerDomains = domains.map(d => d.toLowerCase().trim());
+  const placeholders = lowerDomains.map(() => '?').join(',');
   const stmt = db.prepare(`
-    SELECT domain FROM accounts
-    WHERE domain IN (${placeholders})
+    SELECT LOWER(domain) as domain FROM accounts
+    WHERE LOWER(domain) IN (${placeholders})
   `);
-  const results = stmt.all(...domains) as Array<{ domain: string }>;
+  const results = stmt.all(...lowerDomains) as Array<{ domain: string }>;
   return results.map(r => r.domain);
 }
 
@@ -897,6 +916,7 @@ export function getAccountsWithFilters(filters: {
   search?: string;
   status?: string;
   customerStatus?: string;
+  industry?: string;
   tier?: string | 'unassigned';
   oktaTier?: string | 'unassigned';
   accountOwner?: string;
@@ -933,6 +953,11 @@ export function getAccountsWithFilters(filters: {
   }
 
   query = appendCustomerStatusFilter(query, params, 'customer_status', filters.customerStatus);
+
+  if (filters.industry) {
+    query += ' AND industry = ?';
+    params.push(filters.industry);
+  }
 
   if (filters.tier) {
     if (filters.tier === 'unassigned') {
@@ -1004,7 +1029,7 @@ export function getAccountsWithFilters(filters: {
 
   // Sorting (default to priority_score)
   const sortBy = filters.sortBy || 'priority_score';
-  const validSortFields = ['processed_at', 'priority_score', 'tier', 'company_name', 'created_at', 'okta_priority_score', 'okta_tier'];
+  const validSortFields = ['processed_at', 'priority_score', 'tier', 'company_name', 'created_at', 'okta_priority_score', 'okta_tier', 'industry'];
   const sortField = validSortFields.includes(sortBy) ? sortBy : 'priority_score';
 
   if (sortField === 'tier' || sortField === 'okta_tier') {
@@ -1012,6 +1037,8 @@ export function getAccountsWithFilters(filters: {
     query += ` ORDER BY CASE ${sortField} WHEN 'A' THEN 1 WHEN 'B' THEN 2 WHEN 'C' THEN 3 ELSE 4 END ASC, created_at DESC`;
   } else if (sortField === 'company_name') {
     query += ` ORDER BY company_name ASC, created_at DESC`;
+  } else if (sortField === 'industry') {
+    query += ` ORDER BY COALESCE(industry, '') ASC, company_name ASC`;
   } else {
     // priority_score, okta_priority_score, processed_at, created_at → highest/newest first
     query += ` ORDER BY ${sortField} DESC, created_at DESC`;
@@ -1037,6 +1064,7 @@ export function getFilterMetadata(): {
   oktaAccountOwners: string[];
   availableHqStates: string[];
   availableOktaPatches: string[];
+  availableIndustries: string[];
 } {
   const db = getDb();
 
@@ -1056,11 +1084,16 @@ export function getFilterMetadata(): {
   const oktaPatchesStmt = db.prepare("SELECT DISTINCT okta_patch FROM accounts WHERE okta_patch IS NOT NULL AND okta_patch != '' ORDER BY okta_patch");
   const availableOktaPatches = (oktaPatchesStmt.all() as Array<{ okta_patch: string }>).map(row => row.okta_patch);
 
+  // Get unique industries
+  const industriesStmt = db.prepare("SELECT DISTINCT industry FROM accounts WHERE industry IS NOT NULL AND industry != '' ORDER BY industry");
+  const availableIndustries = (industriesStmt.all() as Array<{ industry: string }>).map(row => row.industry);
+
   return {
     accountOwners,
     oktaAccountOwners,
     availableHqStates,
     availableOktaPatches,
+    availableIndustries,
   };
 }
 
@@ -1602,12 +1635,12 @@ export function getMultiplePendingAccounts(jobId: number, limit: number): Accoun
 /**
  * Update account status with transaction support and retry logic for SQLITE_BUSY
  */
-export function updateAccountStatusSafe(
+export async function updateAccountStatusSafe(
   id: number,
   status: 'pending' | 'processing' | 'completed' | 'failed',
   errorMessage?: string,
   maxRetries: number = 3
-): void {
+): Promise<void> {
   const db = getDb();
   let lastError: Error | null = null;
 
@@ -1632,12 +1665,8 @@ export function updateAccountStatusSafe(
 
       // Check if it's a SQLITE_BUSY error
       if (lastError.message.includes('SQLITE_BUSY') && attempt < maxRetries - 1) {
-        // Wait and retry
         const delay = 100 * Math.pow(2, attempt);
-        const start = Date.now();
-        while (Date.now() - start < delay) {
-          // Busy wait
-        }
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       } else {
         throw lastError;
@@ -1651,7 +1680,7 @@ export function updateAccountStatusSafe(
 /**
  * Update account research with transaction support
  */
-export function updateAccountResearchSafe(
+export async function updateAccountResearchSafe(
   id: number,
   research: {
     command_of_message?: string;
@@ -1664,7 +1693,7 @@ export function updateAccountResearchSafe(
     research_summary?: string;
   },
   maxRetries: number = 3
-): void {
+): Promise<void> {
   const db = getDb();
   const fields: string[] = [];
   const values: any[] = [];
@@ -1700,10 +1729,7 @@ export function updateAccountResearchSafe(
 
       if (lastError.message.includes('SQLITE_BUSY') && attempt < maxRetries - 1) {
         const delay = 100 * Math.pow(2, attempt);
-        const start = Date.now();
-        while (Date.now() - start < delay) {
-          // Busy wait
-        }
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       } else {
         throw lastError;
@@ -1717,7 +1743,7 @@ export function updateAccountResearchSafe(
 /**
  * Update Auth0 research with transaction support
  */
-export function updateAccountAuth0ResearchSafe(
+export async function updateAccountAuth0ResearchSafe(
   id: number,
   research: {
     command_of_message?: string;
@@ -1730,7 +1756,7 @@ export function updateAccountAuth0ResearchSafe(
     research_summary?: string;
   },
   maxRetries: number = 3
-): void {
+): Promise<void> {
   const db = getDb();
   const fields: string[] = [];
   const values: any[] = [];
@@ -1766,10 +1792,7 @@ export function updateAccountAuth0ResearchSafe(
 
       if (lastError.message.includes('SQLITE_BUSY') && attempt < maxRetries - 1) {
         const delay = 100 * Math.pow(2, attempt);
-        const start = Date.now();
-        while (Date.now() - start < delay) {
-          // Busy wait
-        }
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       } else {
         throw lastError;
@@ -1783,7 +1806,7 @@ export function updateAccountAuth0ResearchSafe(
 /**
  * Update Okta research with transaction support
  */
-export function updateAccountOktaResearchSafe(
+export async function updateAccountOktaResearchSafe(
   id: number,
   research: {
     current_iam_solution?: string;
@@ -1798,7 +1821,7 @@ export function updateAccountOktaResearchSafe(
     priority_score?: number;
   },
   maxRetries: number = 3
-): void {
+): Promise<void> {
   const db = getDb();
   const fields: string[] = [];
   const values: any[] = [];
@@ -1852,10 +1875,7 @@ export function updateAccountOktaResearchSafe(
 
       if (lastError.message.includes('SQLITE_BUSY') && attempt < maxRetries - 1) {
         const delay = 100 * Math.pow(2, attempt);
-        const start = Date.now();
-        while (Date.now() - start < delay) {
-          // Busy wait
-        }
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       } else {
         throw lastError;
@@ -1869,7 +1889,7 @@ export function updateAccountOktaResearchSafe(
 /**
  * Update account metadata with transaction support
  */
-export function updateAccountMetadataSafe(
+export async function updateAccountMetadataSafe(
   id: number,
   updates: {
     tier?: 'A' | 'B' | 'C' | null;
@@ -1883,7 +1903,7 @@ export function updateAccountMetadataSafe(
     ai_suggestions?: string;
   },
   maxRetries: number = 3
-): void {
+): Promise<void> {
   const db = getDb();
   const fields: string[] = [];
   const values: any[] = [];
@@ -1916,10 +1936,7 @@ export function updateAccountMetadataSafe(
 
       if (lastError.message.includes('SQLITE_BUSY') && attempt < maxRetries - 1) {
         const delay = 100 * Math.pow(2, attempt);
-        const start = Date.now();
-        while (Date.now() - start < delay) {
-          // Busy wait
-        }
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       } else {
         throw lastError;
@@ -1933,7 +1950,7 @@ export function updateAccountMetadataSafe(
 /**
  * Update Okta account metadata with transaction support
  */
-export function updateOktaAccountMetadataSafe(
+export async function updateOktaAccountMetadataSafe(
   id: number,
   updates: {
     okta_tier?: 'A' | 'B' | 'C' | 'DQ' | null;
@@ -1947,7 +1964,7 @@ export function updateOktaAccountMetadataSafe(
     okta_patch?: string | null;
   },
   maxRetries: number = 3
-): void {
+): Promise<void> {
   const db = getDb();
   const fields: string[] = [];
   const values: any[] = [];
@@ -1980,10 +1997,7 @@ export function updateOktaAccountMetadataSafe(
 
       if (lastError.message.includes('SQLITE_BUSY') && attempt < maxRetries - 1) {
         const delay = 100 * Math.pow(2, attempt);
-        const start = Date.now();
-        while (Date.now() - start < delay) {
-          // Busy wait
-        }
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       } else {
         throw lastError;

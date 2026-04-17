@@ -9,6 +9,7 @@ export async function GET(request: Request) {
       search: searchParams.get('search') || undefined,
       status: searchParams.get('status') || undefined,
       customerStatus: searchParams.get('customerStatus') || undefined,
+      industry: searchParams.get('industry') || undefined,
       tier: searchParams.get('tier') || undefined,
       oktaTier: searchParams.get('oktaTier') || undefined,
       accountOwner: searchParams.get('accountOwner') || undefined,
@@ -122,6 +123,7 @@ export async function GET(request: Request) {
         availableOktaAccountOwners: filterMetadata.oktaAccountOwners,
         availableHqStates: filterMetadata.availableHqStates,
         availableOktaPatches: filterMetadata.availableOktaPatches,
+        availableIndustries: filterMetadata.availableIndustries,
       },
     });
   } catch (error) {

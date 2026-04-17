@@ -21,6 +21,7 @@ export interface FilterState {
   search: string;
   status: string;            // research status filter
   customerStatus: string;    // customer status filter
+  industry: string;          // industry filter
   tier: string;              // Auth0 tier
   oktaTier: string;          // Okta tier
   accountOwner: string;      // Auth0 account owner
@@ -38,6 +39,7 @@ interface SearchBarProps {
   auth0AccountOwners: string[];
   oktaAccountOwners: string[];
   hqStates: string[];
+  industries: string[];
   oktaPatches?: string[];
   perspective?: 'auth0' | 'okta';
   onSearchPendingChange?: (pending: boolean) => void;
@@ -46,7 +48,7 @@ interface SearchBarProps {
 const TIERS = ['A', 'B', 'C', 'unassigned'];
 
 const SECONDARY_FILTER_KEYS: (keyof FilterState)[] = [
-  'customerStatus', 'tier', 'oktaTier', 'accountOwner', 'oktaAccountOwner', 'oktaPatch', 'hqState', 'reviewStatus',
+  'customerStatus', 'industry', 'tier', 'oktaTier', 'accountOwner', 'oktaAccountOwner', 'oktaPatch', 'hqState', 'reviewStatus',
 ];
 
 function countActiveFilters(filters: FilterState): number {
@@ -92,6 +94,7 @@ const SORT_OPTIONS_AUTH0 = [
   { value: 'processed_at', label: 'Recently Processed' },
   { value: 'created_at', label: 'Recently Added' },
   { value: 'company_name', label: 'Name (A→Z)' },
+  { value: 'industry', label: 'Industry (A→Z)' },
 ];
 
 const SORT_OPTIONS_OKTA = [
@@ -100,6 +103,7 @@ const SORT_OPTIONS_OKTA = [
   { value: 'processed_at', label: 'Recently Processed' },
   { value: 'created_at', label: 'Recently Added' },
   { value: 'company_name', label: 'Name (A→Z)' },
+  { value: 'industry', label: 'Industry (A→Z)' },
 ];
 
 const OKTA_PATCH_OPTIONS = [
@@ -110,7 +114,7 @@ const OKTA_PATCH_OPTIONS = [
   { value: 'pubsec', label: 'Public Sector' },
 ];
 
-export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners, oktaAccountOwners, hqStates, oktaPatches = [], perspective = 'auth0', onSearchPendingChange }: SearchBarProps) {
+export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners, oktaAccountOwners, hqStates, industries, oktaPatches = [], perspective = 'auth0', onSearchPendingChange }: SearchBarProps) {
   const [localSearch, setLocalSearch] = useState(filters.search);
   const [showMore, setShowMore] = useState(false);
   const [searchPending, setSearchPending] = useState(false);
@@ -159,6 +163,7 @@ export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners
       search: '',
       status: '',
       customerStatus: '',
+      industry: '',
       tier: '',
       oktaTier: '',
       accountOwner: '',
@@ -275,6 +280,16 @@ export default function SearchBar({ filters, onFiltersChange, auth0AccountOwners
                     { value: 'unassigned', label: 'Blank' },
                     ...CUSTOMER_STATUS_FILTER_OPTIONS.map((status) => ({ value: status.value, label: status.label })),
                   ]}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="industry" className="mb-2 block text-muted-foreground">Industry</Label>
+                <ControlledSelect
+                  value={filters.industry}
+                  onValueChange={(value) => handleFilterChange('industry', value)}
+                  placeholder="All industries"
+                  options={industries.map((ind) => ({ value: ind, label: ind }))}
                 />
               </div>
 

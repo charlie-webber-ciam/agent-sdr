@@ -50,6 +50,7 @@ export async function POST(request: Request) {
     const job = getJob(jobIdNum);
     assertProcessAction(job, 404, 'Job not found');
     assertProcessAction(job.status === 'pending', 409, `Job is ${job.status}. Only pending jobs can be started.`);
+    assertProcessAction(job.total_accounts > 0, 400, 'Job has no accounts to process');
 
     const selectedMode: ProcessMode = (mode as ProcessMode | undefined)
       || (PROCESSING_CONFIG.enableParallel ? 'parallel' : 'sequential');

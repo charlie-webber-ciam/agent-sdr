@@ -12,6 +12,7 @@ import {
   updateAccountParentCompany,
   insertJobEvent,
   updateJobCurrentStep,
+  resetStuckProcessingAccountsByJob,
 } from './db';
 import { findParentCompanies } from './parent-company-finder';
 import { researchCompanyDual, ResearchMode } from './dual-researcher';
@@ -26,14 +27,25 @@ import { indexAccountResearchVectorsBestEffort } from './account-vectors';
 import { generateOverviewsBestEffort } from './generate-account-overviews';
 
 // Global processing state to prevent concurrent processing
-const activeJobs = new Set<number>();
+// Stores jobId -> start timestamp so stale entries can be detected
+const activeJobs = new Map<number, number>();
+
+// Jobs running longer than 6 hours are considered stale (likely orphaned by HMR/crash)
+const STALE_JOB_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Check if a job currently has an active processing loop in this server process.
- * Used to detect orphaned jobs after server restarts.
+ * Automatically cleans up stale entries from orphaned jobs.
  */
 export function isJobActive(jobId: number): boolean {
-  return activeJobs.has(jobId);
+  const startTime = activeJobs.get(jobId);
+  if (startTime === undefined) return false;
+  if (Date.now() - startTime > STALE_JOB_THRESHOLD_MS) {
+    console.warn(`Clearing stale activeJobs entry for job ${jobId} (started ${new Date(startTime).toISOString()})`);
+    activeJobs.delete(jobId);
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -50,12 +62,12 @@ export async function processJob(
   }
 ): Promise<void> {
   // Check if job is already being processed
-  if (activeJobs.has(jobId)) {
+  if (isJobActive(jobId)) {
     console.log(`Job ${jobId} is already being processed`);
     return;
   }
 
-  activeJobs.add(jobId);
+  activeJobs.set(jobId, Date.now());
 
   try {
     // Determine processing mode
@@ -370,6 +382,11 @@ export async function processJobSequential(
   }
 
   if (wasCancelled) {
+    // Reset any accounts that were mid-processing back to pending
+    const resetCount = resetStuckProcessingAccountsByJob(jobId);
+    if (resetCount > 0) {
+      console.log(`Reset ${resetCount} stuck 'processing' account(s) for cancelled job ${jobId}`);
+    }
     insertJobEvent(jobId, 'processing', 'job_cancelled', {
       message: `Job cancelled. Processed: ${processedCount}, Failed: ${failedCount}`,
     });

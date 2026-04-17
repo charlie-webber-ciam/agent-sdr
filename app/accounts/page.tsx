@@ -62,6 +62,7 @@ const DEFAULT_FILTERS: FilterState = {
   search: '',
   status: '',
   customerStatus: '',
+  industry: '',
   tier: '',
   oktaTier: '',
   accountOwner: '',
@@ -88,6 +89,7 @@ function AccountsPageContent() {
   const [oktaAccountOwners, setOktaAccountOwners] = useState<string[]>([]);
   const [hqStates, setHqStates] = useState<string[]>([]);
   const [oktaPatches, setOktaPatches] = useState<string[]>([]);
+  const [industries, setIndustries] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 
   // Pagination state
@@ -204,6 +206,9 @@ function AccountsPageContent() {
       }
       if (data.filters?.availableOktaPatches) {
         setOktaPatches(data.filters.availableOktaPatches);
+      }
+      if (data.filters?.availableIndustries) {
+        setIndustries(data.filters.availableIndustries);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load accounts');
@@ -426,6 +431,10 @@ function AccountsPageContent() {
 
     if (filters.search) active.push({ key: 'search', label: 'Search', value: filters.search });
 
+    if (filters.industry) {
+      active.push({ key: 'industry', label: 'Industry', value: filters.industry });
+    }
+
     if (filters.tier) {
       const tierLabel = filters.tier === 'unassigned' ? 'Unassigned' : `Tier ${filters.tier}`;
       active.push({ key: 'tier', label: 'Auth0 Tier', value: tierLabel });
@@ -496,6 +505,7 @@ function AccountsPageContent() {
         tier: 'By Tier',
         okta_tier: 'By Okta Tier',
         company_name: 'By Name',
+        industry: 'By Industry',
         priority_score: 'Priority Score',
         okta_priority_score: 'Okta Priority Score',
       };
@@ -569,6 +579,7 @@ function AccountsPageContent() {
         auth0AccountOwners={accountOwners}
         oktaAccountOwners={oktaAccountOwners}
         hqStates={hqStates}
+        industries={industries}
         oktaPatches={oktaPatches}
         perspective={perspective}
         onSearchPendingChange={setSearchPending}

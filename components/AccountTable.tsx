@@ -137,7 +137,7 @@ function AccountTableInner({ accounts, selectable = true, selectedIds, onSelecti
         <TableRow>
           {selectable && <TableHead className="w-10" />}
           <SortableHeader label="Company" sortKey="company_name" currentSort={sortBy} onSort={onSortChange} />
-          <SortableHeader label="Industry" sortKey={null} currentSort={sortBy} onSort={onSortChange} className="hidden md:table-cell" />
+          <SortableHeader label="Industry" sortKey="industry" currentSort={sortBy} onSort={onSortChange} className="hidden md:table-cell" />
           <SortableHeader label="Tier" sortKey={tierSortKey} currentSort={sortBy} onSort={onSortChange} />
           <SortableHeader label="Priority" sortKey={prioritySortKey} currentSort={sortBy} onSort={onSortChange} />
           <TableHead className="hidden lg:table-cell">Owner</TableHead>

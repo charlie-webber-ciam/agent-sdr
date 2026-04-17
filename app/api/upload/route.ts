@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
-import { createJob, createAccount, findDuplicateDomains, updateJobTotalAccounts } from '@/lib/db';
+import { createJob, createAccount, findDuplicateDomains, updateJobTotalAccounts, deleteProcessingJob } from '@/lib/db';
 
 // Map common CSV header variations to internal field names.
 // Keys are lowercased for case-insensitive matching.
@@ -221,6 +221,8 @@ export async function POST(request: Request) {
     }
 
     if (actualInserted === 0) {
+      // Clean up the empty job so it doesn't linger in the database
+      deleteProcessingJob(jobId);
       return NextResponse.json(
         {
           error: 'No new accounts to import',
@@ -236,7 +238,11 @@ export async function POST(request: Request) {
 
     // Only auto-trigger processing in research mode
     if (mode === 'research') {
-      fetch(`${request.headers.get('origin')}/api/process/start`, {
+      const origin = request.headers.get('origin') || request.headers.get('x-forwarded-host')
+        ? `${request.headers.get('x-forwarded-proto') || 'http'}://${request.headers.get('x-forwarded-host')}`
+        : null;
+      const baseUrl = origin || new URL(request.url).origin;
+      fetch(`${baseUrl}/api/process/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobId, ...(oktaPatch ? { oktaPatch } : {}) }),

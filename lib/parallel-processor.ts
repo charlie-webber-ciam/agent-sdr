@@ -15,6 +15,7 @@ import {
   getMultiplePendingAccounts,
   updateJobStatus,
   updateJobProgress,
+  resetStuckProcessingAccountsByJob,
 } from './db';
 import { processAccountWithRetry, AccountProcessingResult } from './account-worker';
 import { ResearchMode } from './dual-researcher';
@@ -110,10 +111,11 @@ export async function processJobParallel(
       // Update job progress
       updateJobProgress(jobId, processedCount, failedCount);
 
+      // Re-fetch job for accurate remaining count
+      const latestJob = getJob(jobId);
+      const remaining = (latestJob?.total_accounts ?? job.total_accounts) - processedCount - failedCount;
       console.log(
-        `\n📊 Progress: ${processedCount} completed, ${failedCount} failed, ${
-          job.total_accounts - processedCount - failedCount
-        } remaining`
+        `\n📊 Progress: ${processedCount} completed, ${failedCount} failed, ${remaining} remaining`
       );
 
       // Small delay between batches to avoid overwhelming the API
@@ -123,6 +125,11 @@ export async function processJobParallel(
     }
 
     if (wasCancelled) {
+      // Reset any accounts that were mid-processing back to pending
+      const resetCount = resetStuckProcessingAccountsByJob(jobId);
+      if (resetCount > 0) {
+        console.log(`Reset ${resetCount} stuck 'processing' account(s) for cancelled job ${jobId}`);
+      }
       console.log(`Job ${jobId} cancelled. Processed: ${processedCount}, Failed: ${failedCount}`);
       return;
     }

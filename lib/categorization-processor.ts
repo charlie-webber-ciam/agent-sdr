@@ -9,24 +9,34 @@ import { analyzeAccountData } from './categorizer';
 import { logWorkerError, parseFilters, sleep } from './worker-error-utils';
 
 // Global processing state to prevent concurrent processing
-const activeJobs = new Set<number>();
+// Stores jobId -> start timestamp so stale entries can be detected
+const activeJobs = new Map<number, number>();
+
+const STALE_JOB_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Check if a categorization job currently has an active processing loop in this server process.
- * Used to detect orphaned jobs after server restarts.
+ * Automatically cleans up stale entries from orphaned jobs.
  */
 export function isCategorizationJobActive(jobId: number): boolean {
-  return activeJobs.has(jobId);
+  const startTime = activeJobs.get(jobId);
+  if (startTime === undefined) return false;
+  if (Date.now() - startTime > STALE_JOB_THRESHOLD_MS) {
+    console.warn(`Clearing stale categorization activeJobs entry for job ${jobId}`);
+    activeJobs.delete(jobId);
+    return false;
+  }
+  return true;
 }
 
 export async function processCategorizationJob(jobId: number): Promise<void> {
   // Check if job is already being processed
-  if (activeJobs.has(jobId)) {
+  if (isCategorizationJobActive(jobId)) {
     console.log(`Categorization job ${jobId} is already being processed`);
     return;
   }
 
-  activeJobs.add(jobId);
+  activeJobs.set(jobId, Date.now());
 
   try {
     const job = getCategorizationJob(jobId);
