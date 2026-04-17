@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAccount } from '@/lib/db';
+import { getAccount, getAccountNotes, getAccountOverview } from '@/lib/db';
+import { buildOverviewRecordFromStorage } from '@/lib/account-overview';
 import { generateEmail, EmailRequest } from '@/lib/email-writer-agent';
 import { z } from 'zod';
 
@@ -10,6 +11,7 @@ const requestSchema = z.object({
   researchContext: z.enum(['auth0', 'okta']).default('auth0'),
   customInstructions: z.string().optional(),
   customContext: z.string().optional(),
+  model: z.string().optional(),
 });
 
 export async function POST(
@@ -50,6 +52,12 @@ export async function POST(
       );
     }
 
+    // Fetch overview and notes for enhanced context
+    const overviewRow = getAccountOverview(accountId);
+    const overview = overviewRow ? buildOverviewRecordFromStorage(overviewRow) : null;
+    const dbNotes = getAccountNotes(accountId);
+    const notes = dbNotes.map((n) => ({ content: n.content, createdAt: n.created_at }));
+
     // Build email request with research context
     const emailRequest: EmailRequest = {
       recipientName: validatedData.recipientName,
@@ -59,6 +67,9 @@ export async function POST(
       customInstructions: validatedData.customInstructions,
       customContext: validatedData.customContext,
       accountData: account,
+      overview,
+      notes,
+      model: validatedData.model,
     };
 
     // Generate email using agent

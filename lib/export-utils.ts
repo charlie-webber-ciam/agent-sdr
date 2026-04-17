@@ -14,6 +14,7 @@ export interface ExportAccount {
   use_cases: string[];
   auth0_account_owner: string | null;
   research_summary: string | null;
+  command_of_message: string | null;
   current_auth_solution: string | null;
   customer_base_info: string | null;
   security_incidents: string | null;
@@ -54,6 +55,7 @@ export function transformAccountForExport(account: Account): ExportAccount {
     use_cases: parseJSON(account.use_cases, []),
     auth0_account_owner: account.auth0_account_owner,
     research_summary: account.research_summary,
+    command_of_message: account.command_of_message,
     current_auth_solution: account.current_auth_solution,
     customer_base_info: account.customer_base_info,
     security_incidents: account.security_incidents,
@@ -88,6 +90,7 @@ export function generateCSV(accounts: Account[]): string {
     use_cases: account.use_cases.join(', '),
     auth0_account_owner: account.auth0_account_owner || '',
     research_summary: account.research_summary || '',
+    command_of_message: account.command_of_message || '',
     current_auth_solution: account.current_auth_solution || '',
     customer_base_info: account.customer_base_info || '',
     security_incidents: account.security_incidents || '',
@@ -116,6 +119,7 @@ export function generateCSV(accounts: Account[]): string {
       'use_cases',
       'auth0_account_owner',
       'research_summary',
+      'command_of_message',
       'current_auth_solution',
       'customer_base_info',
       'security_incidents',
@@ -160,6 +164,7 @@ export function generateJSON(
       auth0_account_owner: account.auth0_account_owner,
       research: {
         summary: account.research_summary,
+        command_of_message: account.command_of_message,
         current_auth_solution: account.current_auth_solution,
         customer_base_info: account.customer_base_info,
         security_incidents: account.security_incidents,

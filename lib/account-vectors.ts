@@ -3,15 +3,32 @@ import { createHash } from 'crypto';
 
 import {
   Account,
+  AccountNote,
+  AccountTag,
+  Prospect,
+  SalesforceOpportunity,
+  SectionComment,
   VectorPerspective,
   deleteAccountVectorIndexRow,
   getAccount,
+  getAccountNotes,
+  getAccountTags,
   getAccountVectorIndexRows,
+  getOpportunitiesByAccount,
+  getProspectsByAccount,
+  getSectionComments,
   upsertAccountVectorIndex,
 } from './db';
+import {
+  getEmbeddingModel,
+  getQdrantCollectionName,
+  getVectorReadProfileVersion,
+  getVectorWriteProfileVersion,
+} from './vector-profile';
 
 const VECTOR_PERSPECTIVES: VectorPerspective[] = ['auth0', 'okta', 'overall'];
 const VECTOR_DISTANCE_THRESHOLD = 0.72;
+const OPENAI_EMBEDDING_CHAR_BUDGET = 24000;
 
 interface VectorDocument {
   perspective: VectorPerspective;
@@ -21,12 +38,36 @@ interface VectorDocument {
   summarySnippet: string;
 }
 
+interface AccountVectorContext {
+  account: Account;
+  auth0ResearchLines: string[];
+  oktaResearchLines: string[];
+  auth0MatrixLines: string[];
+  oktaMatrixLines: string[];
+  opportunityLines: string[];
+  prospectLines: string[];
+  auth0AnnotationLines: string[];
+  oktaAnnotationLines: string[];
+  sharedAnnotationLines: string[];
+  activityLines: string[];
+  useCases: string[];
+  oktaUseCases: string[];
+  auth0Skus: string[];
+  oktaSkus: string[];
+  opportunityCount: number;
+  prospectCount: number;
+  noteCount: number;
+  commentCount: number;
+}
+
 export interface AccountVectorPayload {
   accountId: number;
   companyName: string;
   domain: string | null;
   industry: string;
   perspective: VectorPerspective;
+  profileVersion: string;
+  customerStatus: Account['customer_status'];
   tier: string | null;
   oktaTier: string | null;
   priorityScore: number | null;
@@ -35,6 +76,15 @@ export interface AccountVectorPayload {
   oktaAccountOwner: string | null;
   processedAt: string | null;
   summarySnippet: string;
+  useCases: string[];
+  oktaUseCases: string[];
+  auth0Skus: string[];
+  oktaSkus: string[];
+  oktaOpportunityType: string | null;
+  opportunityCount: number;
+  prospectCount: number;
+  noteCount: number;
+  commentCount: number;
 }
 
 export interface RetrievedAccountVectorPoint {
@@ -49,14 +99,15 @@ interface QdrantPoint {
   payload: AccountVectorPayload;
 }
 
-interface NormalizedSection {
-  label: string;
-  value: string;
-}
-
 interface EmbeddingConfig {
   fingerprint: string;
   requestBody: Record<string, unknown>;
+}
+
+interface ProfileBlock {
+  title: string;
+  lines: string[];
+  baseBudget: number;
 }
 
 function getEmbeddingApiKey(): string {
@@ -69,10 +120,6 @@ function getEmbeddingApiKey(): string {
 
 function getEmbeddingBaseUrl(): string | undefined {
   return process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL || undefined;
-}
-
-export function getEmbeddingModel(): string {
-  return process.env.EMBEDDING_MODEL || 'text-embedding-3-large';
 }
 
 function getEmbeddingClient(): OpenAI {
@@ -114,16 +161,6 @@ function getEmbeddingConfig(model: string): EmbeddingConfig {
     fingerprint: model,
     requestBody: {},
   };
-}
-
-function sanitizeCollectionSegment(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-}
-
-export function getQdrantCollectionName(): string {
-  const prefix = sanitizeCollectionSegment(process.env.QDRANT_COLLECTION_PREFIX || 'agent_sdr');
-  const model = sanitizeCollectionSegment(getEmbeddingModel());
-  return `${prefix}_account_research_${model}`;
 }
 
 function getPointId(accountId: number, perspective: VectorPerspective): string {
@@ -172,7 +209,7 @@ function normalizeText(input: string | null | undefined): string {
     .trim();
 }
 
-function isMeaningfulContent(value: string | null | undefined): boolean {
+function hasNarrativeContent(value: string | null | undefined): boolean {
   const normalized = normalizeText(value);
   if (!normalized) return false;
 
@@ -184,28 +221,22 @@ function isMeaningfulContent(value: string | null | undefined): boolean {
   return normalized.length >= 20;
 }
 
+function hasCompactContent(value: string | null | undefined): boolean {
+  return normalizeText(value).length > 0;
+}
+
 function getEmbeddingDocumentCharBudget(): number {
   const model = getEmbeddingModel().toLowerCase();
 
   if (model.includes('gemini-embedding-001')) {
-    // Gemini has a smaller input window than the OpenAI embeddings used previously.
     return 6000;
   }
 
   if (model.includes('text-embedding-3-small') || model.includes('text-embedding-3-large')) {
-    return 24000;
+    return OPENAI_EMBEDDING_CHAR_BUDGET;
   }
 
   return 6000;
-}
-
-function collectSections(sections: Array<[string, string | null | undefined]>): NormalizedSection[] {
-  return sections
-    .filter(([, value]) => isMeaningfulContent(value))
-    .map(([label, value]) => ({
-      label,
-      value: normalizeText(value),
-    }));
 }
 
 function truncateText(text: string, maxChars: number): string {
@@ -227,104 +258,433 @@ function truncateText(text: string, maxChars: number): string {
   return `${sliced.trimEnd()}...`;
 }
 
-function buildBoundedDocument(header: string, sections: NormalizedSection[]): { text: string; summarySnippet: string } | null {
-  const budget = getEmbeddingDocumentCharBudget();
-  const parts = [header.trim()];
-  let used = parts[0].length;
-
-  for (const section of sections) {
-    const prefix = `${section.label}: `;
-    const remaining = budget - used - 1;
-
-    if (remaining <= prefix.length + 40) {
-      break;
-    }
-
-    const availableForValue = remaining - prefix.length;
-    const boundedValue = truncateText(section.value, availableForValue);
-    parts.push(`${prefix}${boundedValue}`);
-    used += 1 + prefix.length + boundedValue.length;
-  }
-
-  if (parts.length === 1) {
-    return null;
-  }
-
-  const body = parts.slice(1).join('\n');
-  return {
-    text: parts.join('\n'),
-    summarySnippet: createSnippet(body.replace(/\n+/g, ' ')),
-  };
-}
-
 function createSnippet(text: string): string {
   if (text.length <= 280) return text;
   return `${text.slice(0, 277).trimEnd()}...`;
 }
 
-function normalizeEmbeddingVector(vector: number[]): number[] {
-  let magnitude = 0;
+function safeJsonParse<T>(value: string | null | undefined): T | null {
+  if (!value) return null;
 
-  for (const value of vector) {
-    magnitude += value * value;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
   }
-
-  const norm = Math.sqrt(magnitude);
-  if (!Number.isFinite(norm) || norm === 0) {
-    return vector;
-  }
-
-  return vector.map((value) => value / norm);
 }
 
-export function buildAccountVectorDocuments(account: Account): VectorDocument[] {
-  const sharedIntro = `Company: ${account.company_name}\nDomain: ${account.domain || 'Unknown'}\nIndustry: ${account.industry}`;
+function normalizeStringList(value: string | null | undefined): string[] {
+  if (!value) return [];
 
-  const auth0Sections = collectSections([
-    ['Auth0 Executive Summary', account.research_summary],
-    ['Current Auth Solution', account.current_auth_solution],
-    ['Customer Base', account.customer_base_info],
-    ['Security and Compliance', account.security_incidents],
-    ['News and Funding', account.news_and_funding],
-    ['Tech Transformation', account.tech_transformation],
-  ]);
+  const parsed = safeJsonParse<unknown>(value);
+  if (Array.isArray(parsed)) {
+    return Array.from(new Set(
+      parsed
+        .map((item) => normalizeText(typeof item === 'string' ? item : String(item)))
+        .filter(Boolean)
+    ));
+  }
 
-  const oktaSections = collectSections([
-    ['Okta Executive Summary', account.okta_research_summary],
-    ['Current IAM Solution', account.okta_current_iam_solution],
-    ['Workforce Profile', account.okta_workforce_info],
-    ['Security and Compliance', account.okta_security_incidents],
-    ['News and Funding', account.okta_news_and_funding],
-    ['Tech Transformation', account.okta_tech_transformation],
-    ['Okta Ecosystem', account.okta_ecosystem],
-  ]);
+  const normalized = normalizeText(value);
+  if (!normalized) return [];
 
-  const definitions: Array<{ perspective: VectorPerspective; sections: NormalizedSection[] }> = [
-    { perspective: 'auth0', sections: auth0Sections },
-    { perspective: 'okta', sections: oktaSections },
-    {
-      perspective: 'overall',
-      sections: [
-        ...auth0Sections,
-        ...oktaSections,
-      ],
-    },
+  return Array.from(new Set(
+    normalized
+      .split(/[,\n;]/)
+      .map((item) => normalizeText(item))
+      .filter(Boolean)
+  ));
+}
+
+function collectNarrativeLines(entries: Array<[string, string | null | undefined]>): string[] {
+  return entries
+    .filter(([, value]) => hasNarrativeContent(value))
+    .map(([label, value]) => `${label}: ${normalizeText(value)}`);
+}
+
+function addCompactLine(lines: string[], label: string, value: string | null | undefined): void {
+  const normalized = normalizeText(value);
+  if (!normalized) return;
+  lines.push(`${label}: ${normalized}`);
+}
+
+function addCompactListLine(lines: string[], label: string, values: string[]): void {
+  if (values.length === 0) return;
+  lines.push(`${label}: ${values.join(', ')}`);
+}
+
+function rolePriority(roleType: Prospect['role_type']): number {
+  switch (roleType) {
+    case 'decision_maker':
+      return 0;
+    case 'champion':
+      return 1;
+    case 'influencer':
+      return 2;
+    case 'blocker':
+      return 3;
+    case 'end_user':
+      return 4;
+    default:
+      return 5;
+  }
+}
+
+function valueTierPriority(valueTier: string | null): number {
+  switch ((valueTier || '').toUpperCase()) {
+    case 'HVT':
+      return 0;
+    case 'MVT':
+      return 1;
+    case 'LVT':
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function sortProspects(prospects: Prospect[]): Prospect[] {
+  return [...prospects].sort((left, right) => {
+    const roleDelta = rolePriority(left.role_type) - rolePriority(right.role_type);
+    if (roleDelta !== 0) return roleDelta;
+
+    const valueTierDelta = valueTierPriority(left.value_tier) - valueTierPriority(right.value_tier);
+    if (valueTierDelta !== 0) return valueTierDelta;
+
+    const leftActivity = left.last_activity_date || '';
+    const rightActivity = right.last_activity_date || '';
+    if (leftActivity !== rightActivity) {
+      return rightActivity.localeCompare(leftActivity);
+    }
+
+    return left.sort_order - right.sort_order || left.id - right.id;
+  });
+}
+
+function serializeOpportunity(opportunity: SalesforceOpportunity): string {
+  const parts = [
+    `Opportunity: ${normalizeText(opportunity.opportunity_name)}`,
   ];
 
-  return definitions
-    .map(({ perspective, sections }) => {
-      const document = buildBoundedDocument(
-        `${sharedIntro}\nPerspective: ${perspective.toUpperCase()}`,
-        sections
-      );
+  if (hasCompactContent(opportunity.stage)) parts.push(`Stage ${normalizeText(opportunity.stage)}`);
+  if (hasCompactContent(opportunity.last_stage_change_date)) parts.push(`Changed ${normalizeText(opportunity.last_stage_change_date)}`);
+  if (hasNarrativeContent(opportunity.business_use_case)) parts.push(`Use case ${normalizeText(opportunity.business_use_case)}`);
+  if (hasNarrativeContent(opportunity.identify_pain)) parts.push(`Pain ${normalizeText(opportunity.identify_pain)}`);
+  if (hasNarrativeContent(opportunity.decision_criteria)) parts.push(`Criteria ${normalizeText(opportunity.decision_criteria)}`);
+  if (hasNarrativeContent(opportunity.champions)) {
+    const championTitle = hasCompactContent(opportunity.champion_title) ? ` (${normalizeText(opportunity.champion_title)})` : '';
+    parts.push(`Champion ${normalizeText(opportunity.champions)}${championTitle}`);
+  }
+  if (hasNarrativeContent(opportunity.competition)) parts.push(`Competition ${normalizeText(opportunity.competition)}`);
 
+  return parts.join('; ');
+}
+
+function serializeProspect(prospect: Prospect): string {
+  const name = `${normalizeText(prospect.first_name)} ${normalizeText(prospect.last_name)}`.trim();
+  const title = normalizeText(prospect.title);
+  const department = normalizeText(prospect.department);
+  const roleType = normalizeText(prospect.role_type);
+  const valueTier = normalizeText(prospect.value_tier);
+  const readiness = normalizeText(prospect.contact_readiness);
+  const summarySource = hasNarrativeContent(prospect.ai_summary)
+    ? prospect.ai_summary
+    : hasNarrativeContent(prospect.notes)
+      ? prospect.notes
+      : prospect.description;
+
+  const descriptors = [
+    title,
+    department,
+    roleType,
+    valueTier,
+    readiness,
+  ].filter(Boolean);
+
+  const parts = [name || 'Unnamed prospect'];
+  if (descriptors.length > 0) {
+    parts.push(`(${descriptors.join(' | ')})`);
+  }
+
+  if (hasNarrativeContent(summarySource)) {
+    parts.push(`- ${normalizeText(summarySource)}`);
+  }
+
+  return parts.join(' ');
+}
+
+function serializeSectionComment(comment: SectionComment): string {
+  return `Comment ${comment.perspective}/${comment.section_key}: ${normalizeText(comment.content)}`;
+}
+
+function serializeAccountNote(note: AccountNote): string {
+  return `Note: ${normalizeText(note.content)}`;
+}
+
+function buildAccountVectorContext(account: Account): AccountVectorContext {
+  const useCases = normalizeStringList(account.use_cases);
+  const oktaUseCases = normalizeStringList(account.okta_use_cases);
+  const auth0Skus = normalizeStringList(account.auth0_skus);
+  const oktaSkus = normalizeStringList(account.okta_skus);
+
+  const opportunities = getOpportunitiesByAccount(account.id);
+  const prospects = sortProspects(getProspectsByAccount(account.id));
+  const tags = getAccountTags(account.id);
+  const comments = getSectionComments(account.id);
+  const notes = getAccountNotes(account.id);
+
+  const auth0MatrixLines: string[] = [];
+  if (hasCompactContent(account.tier)) addCompactLine(auth0MatrixLines, 'Auth0 Tier', account.tier);
+  if (account.priority_score !== null) auth0MatrixLines.push(`Auth0 Priority Score: ${account.priority_score}/10`);
+  addCompactLine(auth0MatrixLines, 'Estimated ARR', account.estimated_annual_revenue);
+  addCompactLine(auth0MatrixLines, 'Estimated User Volume', account.estimated_user_volume);
+  addCompactListLine(auth0MatrixLines, 'Use Cases', useCases);
+  addCompactListLine(auth0MatrixLines, 'Relevant SKUs', auth0Skus);
+  if (hasNarrativeContent(account.sdr_notes)) addCompactLine(auth0MatrixLines, 'SDR Notes', account.sdr_notes);
+
+  const oktaMatrixLines: string[] = [];
+  if (hasCompactContent(account.okta_tier)) addCompactLine(oktaMatrixLines, 'Okta Tier', account.okta_tier);
+  if (account.okta_priority_score !== null) oktaMatrixLines.push(`Okta Priority Score: ${account.okta_priority_score}/100`);
+  addCompactLine(oktaMatrixLines, 'Okta Opportunity Type', account.okta_opportunity_type);
+  addCompactLine(oktaMatrixLines, 'Estimated ARR', account.okta_estimated_annual_revenue);
+  addCompactLine(oktaMatrixLines, 'Estimated User Volume', account.okta_estimated_user_volume);
+  addCompactListLine(oktaMatrixLines, 'Use Cases', oktaUseCases);
+  addCompactListLine(oktaMatrixLines, 'Relevant SKUs', oktaSkus);
+  if (hasNarrativeContent(account.okta_sdr_notes)) addCompactLine(oktaMatrixLines, 'SDR Notes', account.okta_sdr_notes);
+
+  if (hasCompactContent(account.triage_auth0_tier) || hasCompactContent(account.triage_okta_tier)) {
+    auth0MatrixLines.push(
+      `Triage: Auth0 ${account.triage_auth0_tier || 'n/a'}, Okta ${account.triage_okta_tier || 'n/a'}`
+    );
+    oktaMatrixLines.push(
+      `Triage: Auth0 ${account.triage_auth0_tier || 'n/a'}, Okta ${account.triage_okta_tier || 'n/a'}`
+    );
+  }
+  if (hasNarrativeContent(account.triage_summary)) {
+    addCompactLine(auth0MatrixLines, 'Triage Summary', account.triage_summary);
+    addCompactLine(oktaMatrixLines, 'Triage Summary', account.triage_summary);
+  }
+
+  const auth0AnnotationLines = comments
+    .filter((comment) => comment.perspective === 'auth0')
+    .map(serializeSectionComment);
+  const oktaAnnotationLines = comments
+    .filter((comment) => comment.perspective === 'okta')
+    .map(serializeSectionComment);
+  const sharedAnnotationLines = [
+    ...(tags.length > 0 ? [`Tags: ${tags.map((tag: AccountTag) => normalizeText(tag.tag)).filter(Boolean).join(', ')}`] : []),
+    ...notes.slice(0, 3).filter((note) => hasNarrativeContent(note.content)).map(serializeAccountNote),
+  ];
+
+  return {
+    account,
+    auth0ResearchLines: collectNarrativeLines([
+      ['Command of the Message', account.command_of_message],
+      ['Auth0 Executive Summary', account.research_summary],
+      ['Current Auth Solution', account.current_auth_solution],
+      ['Customer Base', account.customer_base_info],
+      ['Security and Compliance', account.security_incidents],
+      ['News and Funding', account.news_and_funding],
+      ['Tech Transformation', account.tech_transformation],
+    ]),
+    oktaResearchLines: collectNarrativeLines([
+      ['Okta Executive Summary', account.okta_research_summary],
+      ['Current IAM Solution', account.okta_current_iam_solution],
+      ['Workforce Profile', account.okta_workforce_info],
+      ['Security and Compliance', account.okta_security_incidents],
+      ['News and Funding', account.okta_news_and_funding],
+      ['Tech Transformation', account.okta_tech_transformation],
+      ['Okta Ecosystem', account.okta_ecosystem],
+    ]),
+    auth0MatrixLines,
+    oktaMatrixLines,
+    opportunityLines: opportunities.slice(0, 3).map(serializeOpportunity),
+    prospectLines: prospects.slice(0, 5).map(serializeProspect),
+    auth0AnnotationLines,
+    oktaAnnotationLines,
+    sharedAnnotationLines,
+    activityLines: hasNarrativeContent(account.activity_summary)
+      ? [`Activity Summary: ${normalizeText(account.activity_summary)}`]
+      : [],
+    useCases,
+    oktaUseCases,
+    auth0Skus,
+    oktaSkus,
+    opportunityCount: opportunities.length,
+    prospectCount: prospects.length,
+    noteCount: notes.length,
+    commentCount: comments.length,
+  };
+}
+
+function getSharedHeaderLines(account: Account): string[] {
+  const lines = [
+    `Company: ${normalizeText(account.company_name) || 'Unknown'}`,
+    `Domain: ${normalizeText(account.domain) || 'Unknown'}`,
+    `Industry: ${normalizeText(account.industry) || 'Unknown'}`,
+  ];
+
+  if (hasCompactContent(account.customer_status)) lines.push(`Customer Status: ${normalizeText(account.customer_status)}`);
+  if (hasCompactContent(account.parent_company)) lines.push(`Parent Company: ${normalizeText(account.parent_company)}`);
+  if (hasCompactContent(account.parent_company_region)) {
+    lines.push(`Parent Company Region: ${normalizeText(account.parent_company_region)}`);
+  }
+
+  return lines;
+}
+
+function getBlocksForPerspective(context: AccountVectorContext, perspective: VectorPerspective): ProfileBlock[] {
+  const sharedBlock: ProfileBlock = {
+    title: 'Company Context',
+    lines: getSharedHeaderLines(context.account),
+    baseBudget: 1000,
+  };
+
+  const sharedOpportunities: ProfileBlock = {
+    title: 'Opportunity History',
+    lines: context.opportunityLines,
+    baseBudget: 3000,
+  };
+
+  const sharedProspects: ProfileBlock = {
+    title: 'Prospect Coverage',
+    lines: context.prospectLines,
+    baseBudget: 2500,
+  };
+
+  const sharedActivity: ProfileBlock = {
+    title: 'Activity Summary',
+    lines: context.activityLines,
+    baseBudget: perspective === 'okta' ? 1000 : 500,
+  };
+
+  if (perspective === 'auth0') {
+    return [
+      sharedBlock,
+      { title: 'Auth0 Research', lines: context.auth0ResearchLines, baseBudget: 13000 },
+      { title: 'Auth0 Matrix', lines: context.auth0MatrixLines, baseBudget: 2500 },
+      sharedOpportunities,
+      sharedProspects,
+      {
+        title: 'Annotations',
+        lines: [...context.auth0AnnotationLines, ...context.sharedAnnotationLines],
+        baseBudget: 1500,
+      },
+      sharedActivity,
+    ];
+  }
+
+  if (perspective === 'okta') {
+    return [
+      sharedBlock,
+      { title: 'Okta Research', lines: context.oktaResearchLines, baseBudget: 12000 },
+      { title: 'Okta Matrix', lines: context.oktaMatrixLines, baseBudget: 3000 },
+      sharedOpportunities,
+      sharedProspects,
+      {
+        title: 'Annotations',
+        lines: [...context.oktaAnnotationLines, ...context.sharedAnnotationLines],
+        baseBudget: 1500,
+      },
+      sharedActivity,
+    ];
+  }
+
+  return [
+    sharedBlock,
+    { title: 'Auth0 Research', lines: context.auth0ResearchLines, baseBudget: 6500 },
+    { title: 'Okta Research', lines: context.oktaResearchLines, baseBudget: 5500 },
+    {
+      title: 'Matrix Criteria',
+      lines: [
+        ...context.auth0MatrixLines,
+        ...context.oktaMatrixLines,
+      ],
+      baseBudget: 3500,
+    },
+    sharedOpportunities,
+    sharedProspects,
+    {
+      title: 'Annotations',
+      lines: [
+        ...context.auth0AnnotationLines,
+        ...context.oktaAnnotationLines,
+        ...context.sharedAnnotationLines,
+      ],
+      baseBudget: 1500,
+    },
+    sharedActivity,
+  ];
+}
+
+function scaleBlocksToBudget(blocks: ProfileBlock[], availableBudget: number): ProfileBlock[] {
+  const scale = Math.min(availableBudget / OPENAI_EMBEDDING_CHAR_BUDGET, 1);
+  return blocks.map((block) => ({
+    ...block,
+    baseBudget: Math.max(Math.floor(block.baseBudget * scale), 0),
+  }));
+}
+
+function fitLinesToBudget(lines: string[], budget: number): string {
+  if (budget <= 0) return '';
+
+  const parts: string[] = [];
+  let used = 0;
+
+  for (const line of lines) {
+    const normalized = normalizeText(line);
+    if (!normalized) continue;
+
+    const separatorLength = parts.length > 0 ? 1 : 0;
+    const remaining = budget - used - separatorLength;
+    if (remaining <= 40) break;
+
+    const bounded = truncateText(normalized, remaining);
+    if (!bounded) continue;
+
+    parts.push(bounded);
+    used += separatorLength + bounded.length;
+  }
+
+  return parts.join('\n');
+}
+
+function buildProfileDocument(account: Account, perspective: VectorPerspective, blocks: ProfileBlock[]): { text: string; summarySnippet: string } | null {
+  const header = `${getSharedHeaderLines(account).join('\n')}\nPerspective: ${perspective.toUpperCase()}`;
+  const remainingBudget = Math.max(getEmbeddingDocumentCharBudget() - header.length - 2, 0);
+  const scaledBlocks = scaleBlocksToBudget(blocks, remainingBudget);
+  const sections = scaledBlocks.reduce<string[]>((result, block) => {
+    const body = fitLinesToBudget(block.lines, block.baseBudget);
+    if (!body) return result;
+
+    result.push(`${block.title}:\n${body}`);
+    return result;
+  }, []);
+
+  if (sections.length === 0) return null;
+
+  const body = sections.join('\n\n');
+  return {
+    text: `${header}\n\n${body}`,
+    summarySnippet: createSnippet(body.replace(/\n+/g, ' ')),
+  };
+}
+
+export function buildAccountVectorDocuments(account: Account, profileVersion = getVectorWriteProfileVersion()): VectorDocument[] {
+  const context = buildAccountVectorContext(account);
+
+  return VECTOR_PERSPECTIVES
+    .map((perspective) => {
+      const document = buildProfileDocument(account, perspective, getBlocksForPerspective(context, perspective));
       if (!document) return null;
 
       return {
         perspective,
         pointId: getPointId(account.id, perspective),
         text: document.text,
-        contentHash: createHash('sha256').update(document.text).digest('hex'),
+        contentHash: createHash('sha256')
+          .update(`${profileVersion}:${document.text}`)
+          .digest('hex'),
         summarySnippet: document.summarySnippet,
       };
     })
@@ -388,8 +748,8 @@ async function recreateCollection(collectionName: string, vectorSize: number): P
   });
 }
 
-async function ensureCollection(vectorSize: number): Promise<void> {
-  const collectionName = getQdrantCollectionName();
+async function ensureCollection(vectorSize: number, profileVersion = getVectorWriteProfileVersion()): Promise<void> {
+  const collectionName = getQdrantCollectionName(profileVersion);
 
   try {
     const existing = await qdrantRequest<{
@@ -443,20 +803,25 @@ async function ensureCollection(vectorSize: number): Promise<void> {
   });
 }
 
-async function upsertPoints(points: QdrantPoint[]): Promise<void> {
+async function upsertPoints(points: QdrantPoint[], profileVersion = getVectorWriteProfileVersion()): Promise<void> {
   if (points.length === 0) return;
 
-  await qdrantRequest(`/collections/${getQdrantCollectionName()}/points?wait=true`, {
+  await qdrantRequest(`/collections/${getQdrantCollectionName(profileVersion)}/points?wait=true`, {
     method: 'PUT',
     body: JSON.stringify({ points }),
   });
 }
 
-export async function deleteVectorPoints(pointIds: string[]): Promise<void> {
+export async function deleteVectorPoints(
+  pointIds: string[],
+  options?: {
+    profileVersion?: string;
+  }
+): Promise<void> {
   if (pointIds.length === 0) return;
 
   try {
-    await qdrantRequest(`/collections/${getQdrantCollectionName()}/points/delete?wait=true`, {
+    await qdrantRequest(`/collections/${getQdrantCollectionName(options?.profileVersion || getVectorWriteProfileVersion())}/points/delete?wait=true`, {
       method: 'POST',
       body: JSON.stringify({
         points: pointIds,
@@ -485,9 +850,15 @@ function normalizeRetrievedVector(vector: unknown): number[] {
   return [];
 }
 
-export async function retrieveVectorPoints(pointIds: string[]): Promise<RetrievedAccountVectorPoint[]> {
+export async function retrieveVectorPoints(
+  pointIds: string[],
+  options?: {
+    profileVersion?: string;
+  }
+): Promise<RetrievedAccountVectorPoint[]> {
   if (pointIds.length === 0) return [];
 
+  const profileVersion = options?.profileVersion || getVectorReadProfileVersion();
   const response = await qdrantRequest<{
     result?: Array<{
       id: string;
@@ -495,7 +866,7 @@ export async function retrieveVectorPoints(pointIds: string[]): Promise<Retrieve
       vector?: unknown;
       vectors?: unknown;
     }>;
-  }>(`/collections/${getQdrantCollectionName()}/points`, {
+  }>(`/collections/${getQdrantCollectionName(profileVersion)}/points`, {
     method: 'POST',
     body: JSON.stringify({
       ids: pointIds,
@@ -533,6 +904,21 @@ export function cosineSimilarity(left: number[], right: number[]): number {
   return dot / denominator;
 }
 
+function normalizeEmbeddingVector(vector: number[]): number[] {
+  let magnitude = 0;
+
+  for (const value of vector) {
+    magnitude += value * value;
+  }
+
+  const norm = Math.sqrt(magnitude);
+  if (!Number.isFinite(norm) || norm === 0) {
+    return vector;
+  }
+
+  return vector.map((value) => value / norm);
+}
+
 export function getVectorDistanceThreshold(): number {
   return VECTOR_DISTANCE_THRESHOLD;
 }
@@ -547,9 +933,11 @@ export async function indexAccountResearchVectors(accountOrId: number | Account)
     throw new Error('Account not found for vector indexing.');
   }
 
-  const documents = buildAccountVectorDocuments(account);
+  const profileVersion = getVectorWriteProfileVersion();
+  const collectionName = getQdrantCollectionName(profileVersion);
+  const documents = buildAccountVectorDocuments(account, profileVersion);
   const existingRows = new Map(
-    getAccountVectorIndexRows(account.id).map((row) => [row.perspective, row])
+    getAccountVectorIndexRows(account.id, { profileVersion }).map((row) => [row.perspective, row])
   );
 
   const desiredPerspectives = new Set(documents.map((doc) => doc.perspective));
@@ -558,9 +946,12 @@ export async function indexAccountResearchVectors(accountOrId: number | Account)
   );
 
   if (obsoletePerspectives.length > 0) {
-    await deleteVectorPoints(obsoletePerspectives.map((perspective) => getPointId(account.id, perspective)));
+    await deleteVectorPoints(
+      obsoletePerspectives.map((perspective) => getPointId(account.id, perspective)),
+      { profileVersion }
+    );
     for (const perspective of obsoletePerspectives) {
-      deleteAccountVectorIndexRow(account.id, perspective);
+      deleteAccountVectorIndexRow(account.id, perspective, profileVersion);
     }
   }
 
@@ -575,7 +966,8 @@ export async function indexAccountResearchVectors(accountOrId: number | Account)
     return !existing
       || existing.content_hash !== document.contentHash
       || existing.embedding_model !== embeddingConfig.fingerprint
-      || existing.vector_status !== 'indexed';
+      || existing.vector_status !== 'indexed'
+      || existing.collection_name !== collectionName;
   });
 
   const skipped = documents
@@ -604,8 +996,9 @@ export async function indexAccountResearchVectors(accountOrId: number | Account)
       throw new Error('Embedding response did not include vector data.');
     }
 
-    await ensureCollection(vectorSize);
+    await ensureCollection(vectorSize, profileVersion);
 
+    const context = buildAccountVectorContext(account);
     const now = new Date().toISOString();
     const points: QdrantPoint[] = toIndex.map((document, index) => ({
       id: document.pointId,
@@ -616,6 +1009,8 @@ export async function indexAccountResearchVectors(accountOrId: number | Account)
         domain: account.domain,
         industry: account.industry,
         perspective: document.perspective,
+        profileVersion,
+        customerStatus: account.customer_status,
         tier: account.tier,
         oktaTier: account.okta_tier,
         priorityScore: account.priority_score,
@@ -624,17 +1019,28 @@ export async function indexAccountResearchVectors(accountOrId: number | Account)
         oktaAccountOwner: account.okta_account_owner,
         processedAt: account.processed_at || account.okta_processed_at || null,
         summarySnippet: document.summarySnippet,
+        useCases: context.useCases,
+        oktaUseCases: context.oktaUseCases,
+        auth0Skus: context.auth0Skus,
+        oktaSkus: context.oktaSkus,
+        oktaOpportunityType: account.okta_opportunity_type,
+        opportunityCount: context.opportunityCount,
+        prospectCount: context.prospectCount,
+        noteCount: context.noteCount,
+        commentCount: context.commentCount,
       },
     }));
 
-    await upsertPoints(points);
+    await upsertPoints(points, profileVersion);
 
     for (let index = 0; index < toIndex.length; index += 1) {
       const document = toIndex[index];
       upsertAccountVectorIndex({
         account_id: account.id,
         perspective: document.perspective,
+        profile_version: profileVersion,
         qdrant_point_id: document.pointId,
+        collection_name: collectionName,
         content_hash: document.contentHash,
         vector_status: 'indexed',
         last_indexed_at: now,
@@ -656,7 +1062,9 @@ export async function indexAccountResearchVectors(accountOrId: number | Account)
       upsertAccountVectorIndex({
         account_id: account.id,
         perspective: document.perspective,
+        profile_version: profileVersion,
         qdrant_point_id: document.pointId,
+        collection_name: collectionName,
         content_hash: document.contentHash,
         vector_status: 'failed',
         last_indexed_at: null,

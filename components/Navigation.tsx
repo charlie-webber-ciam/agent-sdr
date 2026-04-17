@@ -25,8 +25,11 @@ const PATCH_OPTIONS: { value: OktaPatch; label: string }[] = [
 const toolLinks = [
   { href: '/accounts/map', label: 'Account Map', activePath: '/accounts/map' },
   { href: '/email-writer', label: 'Email Writer' },
+  { href: '/event-invites', label: 'Event Invites' },
+  { href: '/org-chart', label: 'Org Chart' },
   { href: '/quick-research', label: 'Quick Research' },
   { href: '/upload', label: 'Upload CSV' },
+  { href: '/customer-status-upload', label: 'Customer Status Upload' },
   { href: '/import-opportunities', label: 'Import Opportunities' },
   { href: '/import-activities', label: 'Import Activities' },
   { href: '/ql-import', label: 'Bulk HVT Writing' },
@@ -142,8 +145,22 @@ export default function Navigation() {
             </div>
           </div>
 
-          {/* Desktop right: perspective toggle + hamburger on mobile */}
+          {/* Desktop right: search + perspective toggle + hamburger on mobile */}
           <div className="flex items-center gap-3">
+            {/* Search trigger — opens CommandPalette via synthetic Cmd+K */}
+            <button
+              onClick={() => {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }));
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-500 bg-gray-100 hover:bg-gray-200 border border-gray-200 transition-all cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <span className="hidden lg:inline">Search</span>
+              <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 text-[10px] font-mono text-gray-400">⌘K</kbd>
+            </button>
+
             <div className="hidden md:flex items-center gap-2">
               <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
                 <button

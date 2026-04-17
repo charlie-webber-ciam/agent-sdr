@@ -10,7 +10,6 @@ import ProspectDataQualityBar from '@/components/prospects/ProspectDataQualityBa
 import ProspectSmartListBuilder from '@/components/prospects/ProspectSmartListBuilder';
 import BulkActionBar from '@/components/prospects/BulkActionBar';
 import { cn, downloadFile } from '@/lib/utils';
-import { usePageChatContext } from '@/lib/page-chat-context';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -77,7 +76,6 @@ type PageTab = 'table' | 'lists' | 'build';
 
 export default function ProspectsPage() {
   const router = useRouter();
-  const { setActiveProspect, clearActiveProspect } = usePageChatContext();
   const [prospects, setProspects] = useState<ProspectRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -117,20 +115,6 @@ export default function ProspectsPage() {
     fetchProspects();
   }, [fetchProspects]);
 
-  useEffect(() => {
-    if (!selectedProspectId) {
-      clearActiveProspect();
-      return;
-    }
-
-    const selectedProspect = prospects.find((prospect) => prospect.id === selectedProspectId);
-    if (!selectedProspect) {
-      clearActiveProspect();
-      return;
-    }
-
-    setActiveProspect(selectedProspect.id, selectedProspect.account_id);
-  }, [selectedProspectId, prospects, setActiveProspect, clearActiveProspect]);
 
   const handleFiltersChange = (newFilters: Record<string, string>) => {
     setFilters(newFilters);

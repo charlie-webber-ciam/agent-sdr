@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { compareAccounts } from '@/lib/account-similarity';
+import { classifyVectorServiceError } from '@/lib/vector-service-errors';
 
 export async function GET(request: Request) {
   try {
@@ -18,6 +19,19 @@ export async function GET(request: Request) {
     const comparison = await compareAccounts(leftAccountId, rightAccountId);
     return NextResponse.json(comparison);
   } catch (error) {
+    const vectorServiceError = classifyVectorServiceError(error);
+    if (vectorServiceError) {
+      console.error('Error comparing accounts:', error);
+      return NextResponse.json(
+        {
+          code: vectorServiceError.code,
+          error: vectorServiceError.error,
+          detail: vectorServiceError.detail,
+        },
+        { status: vectorServiceError.status }
+      );
+    }
+
     const message = error instanceof Error ? error.message : 'Failed to compare accounts';
     const status = message.includes('not found') ? 404 : 500;
 

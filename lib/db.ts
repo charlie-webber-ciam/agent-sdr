@@ -2,6 +2,8 @@ import Database from 'better-sqlite3';
 import { readFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { migrateDatabase } from './migrate';
+import { CustomerStatus, normalizeCustomerStatus } from './customer-status';
+import { getVectorReadProfileVersion } from './vector-profile';
 
 // Ensure data directory exists
 const dataDir = join(process.cwd(), 'data');
@@ -13,13 +15,18 @@ if (!existsSync(dataDir)) {
 const DB_PATH = join(dataDir, 'accounts.db');
 
 // Bump this version whenever migrations change to force re-run in dev mode
-const MIGRATION_VERSION = 9;
+const MIGRATION_VERSION = 16;
 
 // Use globalThis to survive HMR in Next.js dev mode
 const globalDb = globalThis as unknown as {
   __sdr_db?: Database.Database;
   __sdr_db_migration_version?: number;
 };
+
+function hasAccountColumn(database: Database.Database, columnName: string): boolean {
+  const columns = database.prepare('PRAGMA table_info(accounts)').all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === columnName);
+}
 
 export function getDb(): Database.Database {
   const needsMigrationRerun = globalDb.__sdr_db_migration_version !== MIGRATION_VERSION;
@@ -36,6 +43,10 @@ export function getDb(): Database.Database {
     // Initialize employee count schema
     const employeeCountSchema = readFileSync(join(process.cwd(), 'lib', 'employee-count-schema.sql'), 'utf-8');
     globalDb.__sdr_db.exec(employeeCountSchema);
+
+    // Initialize org chart schema
+    const orgChartSchema = readFileSync(join(process.cwd(), 'lib', 'org-chart-schema.sql'), 'utf-8');
+    globalDb.__sdr_db.exec(orgChartSchema);
 
     // Run migrations to add new columns
     migrateDatabase(globalDb.__sdr_db);
@@ -54,6 +65,12 @@ export function getDb(): Database.Database {
   } else if (needsMigrationRerun) {
     // Migration version changed (code was updated via HMR) — re-run migrations
     console.log(`⚙️  Migration version changed (${globalDb.__sdr_db_migration_version} → ${MIGRATION_VERSION}), re-running migrations...`);
+    migrateDatabase(globalDb.__sdr_db);
+    globalDb.__sdr_db_migration_version = MIGRATION_VERSION;
+  }
+
+  if (!hasAccountColumn(globalDb.__sdr_db, 'customer_status')) {
+    console.log('⚙️  customer_status column missing, re-running migrations...');
     migrateDatabase(globalDb.__sdr_db);
     globalDb.__sdr_db_migration_version = MIGRATION_VERSION;
   }
@@ -100,7 +117,9 @@ export interface Account {
   company_name: string;
   domain: string | null;
   industry: string;
+  customer_status: CustomerStatus | null;
   research_status: 'pending' | 'processing' | 'completed' | 'failed';
+  command_of_message: string | null;
   current_auth_solution: string | null;
   customer_base_info: string | null;
   security_incidents: string | null;
@@ -161,6 +180,59 @@ export interface Account {
   // Parent company
   parent_company: string | null;
   parent_company_region: 'australia' | 'global' | null;
+  // Spreadsheet workspace
+  spreadsheet_perspective: string | null;
+  spreadsheet_messaging: string | null;
+  // Review workflow status
+  review_status: 'new' | 'reviewed' | 'working' | 'dismissed';
+  review_status_updated_at: string | null;
+}
+
+export interface AccountOverviewRow {
+  account_id: number;
+  priorities_json: string | null;
+  value_drivers_json: string | null;
+  triggers_json: string | null;
+  business_model_markdown: string | null;
+  business_structure_json: string | null;
+  tech_stack_json: string | null;
+  pov_markdown: string | null;
+  generated_at: string | null;
+  pov_generated_at: string | null;
+  last_edited_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AccountOktaOverviewRow {
+  account_id: number;
+  priorities_json: string | null;
+  value_drivers_json: string | null;
+  triggers_json: string | null;
+  business_model_markdown: string | null;
+  business_structure_json: string | null;
+  tech_stack_json: string | null;
+  pov_markdown: string | null;
+  generated_at: string | null;
+  pov_generated_at: string | null;
+  last_edited_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AccountDocumentRow {
+  id: number;
+  account_id: number;
+  filename: string;
+  storage_path: string;
+  mime_type: string | null;
+  file_size_bytes: number;
+  openai_file_id: string | null;
+  context_markdown: string | null;
+  processing_status: 'processing' | 'ready' | 'failed';
+  extraction_error: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ProcessingJob {
@@ -213,7 +285,9 @@ export type VectorIndexStatus = 'pending' | 'indexed' | 'failed';
 export interface AccountVectorIndexRow {
   account_id: number;
   perspective: VectorPerspective;
+  profile_version: string;
   qdrant_point_id: string;
+  collection_name: string;
   content_hash: string;
   vector_status: VectorIndexStatus;
   last_indexed_at: string | null;
@@ -245,7 +319,8 @@ export function createAccount(
   industry: string,
   jobId: number | null,
   auth0AccountOwner?: string,
-  oktaAccountOwner?: string
+  oktaAccountOwner?: string,
+  customerStatus?: CustomerStatus | null
 ): number {
   const db = getDb();
 
@@ -258,11 +333,38 @@ export function createAccount(
   }
 
   const stmt = db.prepare(`
-    INSERT INTO accounts (company_name, domain, industry, job_id, auth0_account_owner, okta_account_owner)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO accounts (company_name, domain, industry, job_id, auth0_account_owner, okta_account_owner, customer_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
-  const result = stmt.run(companyName, finalDomain, industry, jobId, auth0AccountOwner || null, oktaAccountOwner || null);
+  const result = stmt.run(
+    companyName,
+    finalDomain,
+    industry,
+    jobId,
+    auth0AccountOwner || null,
+    oktaAccountOwner || null,
+    customerStatus || null
+  );
   return result.lastInsertRowid as number;
+}
+
+function appendCustomerStatusFilter(
+  query: string,
+  params: any[],
+  columnName: string,
+  customerStatus?: string
+): string {
+  if (!customerStatus) return query;
+
+  if (customerStatus === 'unassigned') {
+    return `${query} AND (${columnName} IS NULL OR ${columnName} = '')`;
+  }
+
+  const normalized = normalizeCustomerStatus(customerStatus);
+  if (!normalized) return query;
+
+  params.push(normalized);
+  return `${query} AND ${columnName} = ?`;
 }
 
 export function getAccount(id: number): Account | undefined {
@@ -347,6 +449,7 @@ export function updateAccountResearchModel(id: number, model: string): void {
 export function updateAccountResearch(
   id: number,
   research: {
+    command_of_message?: string;
     current_auth_solution?: string;
     customer_base_info?: string;
     security_incidents?: string;
@@ -383,6 +486,7 @@ export function updateAccountResearch(
 export function updateAccountAuth0Research(
   id: number,
   research: {
+    command_of_message?: string;
     current_auth_solution?: string;
     customer_base_info?: string;
     security_incidents?: string;
@@ -759,16 +863,47 @@ export function deleteAccountsByIds(ids: number[]): number {
   return result.changes;
 }
 
+// Review status update
+export type ReviewStatus = 'new' | 'reviewed' | 'working' | 'dismissed';
+
+export function updateAccountReviewStatus(id: number, reviewStatus: ReviewStatus): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE accounts
+    SET review_status = ?,
+        review_status_updated_at = datetime('now'),
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(reviewStatus, id);
+}
+
+export function bulkUpdateAccountReviewStatus(ids: number[], reviewStatus: ReviewStatus): number {
+  if (ids.length === 0) return 0;
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  const result = db.prepare(`
+    UPDATE accounts
+    SET review_status = ?,
+        review_status_updated_at = datetime('now'),
+        updated_at = datetime('now')
+    WHERE id IN (${placeholders})
+  `).run(reviewStatus, ...ids);
+  return result.changes;
+}
+
 // Enhanced filtering with tier, SKU, priority
 export function getAccountsWithFilters(filters: {
   search?: string;
   status?: string;
+  customerStatus?: string;
   tier?: string | 'unassigned';
   oktaTier?: string | 'unassigned';
   accountOwner?: string;
   oktaAccountOwner?: string;
+  oktaPatch?: string;
   includeGlobalParent?: boolean;
   hqState?: string;
+  reviewStatus?: string;
   sortBy?: string;
   limit?: number;
   offset?: number;
@@ -795,6 +930,8 @@ export function getAccountsWithFilters(filters: {
       params.push(filters.status);
     }
   }
+
+  query = appendCustomerStatusFilter(query, params, 'customer_status', filters.customerStatus);
 
   if (filters.tier) {
     if (filters.tier === 'unassigned') {
@@ -832,12 +969,29 @@ export function getAccountsWithFilters(filters: {
     }
   }
 
+  if (filters.oktaPatch) {
+    if (filters.oktaPatch === 'unassigned') {
+      query += " AND (okta_patch IS NULL OR okta_patch = '')";
+    } else {
+      query += ' AND okta_patch = ?';
+      params.push(filters.oktaPatch);
+    }
+  }
+
   if (filters.hqState) {
     if (filters.hqState === 'unassigned') {
       query += ' AND hq_state IS NULL';
     } else {
       query += ' AND hq_state = ?';
       params.push(filters.hqState);
+    }
+  }
+
+  if (filters.reviewStatus) {
+    const validReviewStatuses = ['new', 'reviewed', 'working', 'dismissed'];
+    if (validReviewStatuses.includes(filters.reviewStatus)) {
+      query += ' AND review_status = ?';
+      params.push(filters.reviewStatus);
     }
   }
 
@@ -881,6 +1035,7 @@ export function getFilterMetadata(): {
   accountOwners: string[];
   oktaAccountOwners: string[];
   availableHqStates: string[];
+  availableOktaPatches: string[];
 } {
   const db = getDb();
 
@@ -896,10 +1051,15 @@ export function getFilterMetadata(): {
   const hqStatesStmt = db.prepare("SELECT DISTINCT hq_state FROM accounts WHERE hq_state IS NOT NULL AND hq_state != '' ORDER BY hq_state");
   const availableHqStates = (hqStatesStmt.all() as Array<{ hq_state: string }>).map(row => row.hq_state);
 
+  // Get unique Okta patches
+  const oktaPatchesStmt = db.prepare("SELECT DISTINCT okta_patch FROM accounts WHERE okta_patch IS NOT NULL AND okta_patch != '' ORDER BY okta_patch");
+  const availableOktaPatches = (oktaPatchesStmt.all() as Array<{ okta_patch: string }>).map(row => row.okta_patch);
+
   return {
     accountOwners,
     oktaAccountOwners,
     availableHqStates,
+    availableOktaPatches,
   };
 }
 
@@ -949,32 +1109,48 @@ export function countVectorEligibleAccounts(accountIds?: number[]): number {
   return row.total;
 }
 
-export function getAccountVectorIndexRows(accountId: number): AccountVectorIndexRow[] {
+export function getAccountVectorIndexRows(
+  accountId: number,
+  options?: {
+    profileVersion?: string;
+  }
+): AccountVectorIndexRow[] {
   const db = getDb();
-  return db.prepare(`
+  let query = `
     SELECT *
     FROM account_vector_index
     WHERE account_id = ?
-    ORDER BY perspective
-  `).all(accountId) as AccountVectorIndexRow[];
+  `;
+  const params: any[] = [accountId];
+
+  if (options?.profileVersion) {
+    query += ' AND profile_version = ?';
+    params.push(options.profileVersion);
+  }
+
+  query += ' ORDER BY perspective, profile_version';
+  return db.prepare(query).all(...params) as AccountVectorIndexRow[];
 }
 
 export function getAccountVectorIndexRow(
   accountId: number,
-  perspective: VectorPerspective
+  perspective: VectorPerspective,
+  profileVersion = getVectorReadProfileVersion()
 ): AccountVectorIndexRow | undefined {
   const db = getDb();
   return db.prepare(`
     SELECT *
     FROM account_vector_index
-    WHERE account_id = ? AND perspective = ?
-  `).get(accountId, perspective) as AccountVectorIndexRow | undefined;
+    WHERE account_id = ? AND perspective = ? AND profile_version = ?
+  `).get(accountId, perspective, profileVersion) as AccountVectorIndexRow | undefined;
 }
 
 export function upsertAccountVectorIndex(row: {
   account_id: number;
   perspective: VectorPerspective;
+  profile_version: string;
   qdrant_point_id: string;
+  collection_name: string;
   content_hash: string;
   vector_status: VectorIndexStatus;
   last_indexed_at?: string | null;
@@ -987,7 +1163,9 @@ export function upsertAccountVectorIndex(row: {
     INSERT INTO account_vector_index (
       account_id,
       perspective,
+      profile_version,
       qdrant_point_id,
+      collection_name,
       content_hash,
       vector_status,
       last_indexed_at,
@@ -995,9 +1173,10 @@ export function upsertAccountVectorIndex(row: {
       embedding_model,
       dimensions
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(account_id, perspective) DO UPDATE SET
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(account_id, perspective, profile_version) DO UPDATE SET
       qdrant_point_id = excluded.qdrant_point_id,
+      collection_name = excluded.collection_name,
       content_hash = excluded.content_hash,
       vector_status = excluded.vector_status,
       last_indexed_at = excluded.last_indexed_at,
@@ -1008,7 +1187,9 @@ export function upsertAccountVectorIndex(row: {
   `).run(
     row.account_id,
     row.perspective,
+    row.profile_version,
     row.qdrant_point_id,
+    row.collection_name,
     row.content_hash,
     row.vector_status,
     row.last_indexed_at ?? null,
@@ -1018,12 +1199,16 @@ export function upsertAccountVectorIndex(row: {
   );
 }
 
-export function deleteAccountVectorIndexRow(accountId: number, perspective: VectorPerspective): void {
+export function deleteAccountVectorIndexRow(
+  accountId: number,
+  perspective: VectorPerspective,
+  profileVersion = getVectorReadProfileVersion()
+): void {
   const db = getDb();
   db.prepare(`
     DELETE FROM account_vector_index
-    WHERE account_id = ? AND perspective = ?
-  `).run(accountId, perspective);
+    WHERE account_id = ? AND perspective = ? AND profile_version = ?
+  `).run(accountId, perspective, profileVersion);
 }
 
 export function createVectorIndexJob(totalAccounts: number): number {
@@ -1079,7 +1264,9 @@ export function updateVectorIndexJob(
 
 export function getIndexedAccountsForMap(filters: {
   perspective: VectorPerspective;
+  profileVersion?: string;
   search?: string;
+  customerStatus?: string;
   tier?: string | 'unassigned';
   oktaTier?: string | 'unassigned';
   accountOwner?: string;
@@ -1091,16 +1278,18 @@ export function getIndexedAccountsForMap(filters: {
   offset?: number;
 }): { accounts: Account[]; total: number } {
   const db = getDb();
+  const profileVersion = filters.profileVersion || getVectorReadProfileVersion();
   let query = `
     SELECT a.*
     FROM accounts a
     INNER JOIN account_vector_index avi
       ON avi.account_id = a.id
      AND avi.perspective = ?
+     AND avi.profile_version = ?
      AND avi.vector_status = 'indexed'
     WHERE a.research_status = 'completed'
   `;
-  const params: any[] = [filters.perspective];
+  const params: any[] = [filters.perspective, profileVersion];
 
   if (!filters.includeGlobalParent) {
     query += " AND (a.parent_company_region IS NULL OR a.parent_company_region != 'global')";
@@ -1111,6 +1300,8 @@ export function getIndexedAccountsForMap(filters: {
     const searchPattern = `%${filters.search}%`;
     params.push(searchPattern, searchPattern);
   }
+
+  query = appendCustomerStatusFilter(query, params, 'a.customer_status', filters.customerStatus);
 
   if (filters.tier) {
     if (filters.tier === 'unassigned') {
@@ -1462,6 +1653,7 @@ export function updateAccountStatusSafe(
 export function updateAccountResearchSafe(
   id: number,
   research: {
+    command_of_message?: string;
     current_auth_solution?: string;
     customer_base_info?: string;
     security_incidents?: string;
@@ -1527,6 +1719,7 @@ export function updateAccountResearchSafe(
 export function updateAccountAuth0ResearchSafe(
   id: number,
   research: {
+    command_of_message?: string;
     current_auth_solution?: string;
     customer_base_info?: string;
     security_incidents?: string;
@@ -2150,6 +2343,7 @@ export function getStaleAccounts(thresholdDays: number, limit?: number): Account
 export function refreshAccountResearch(
   id: number,
   research: {
+    command_of_message?: string;
     current_auth_solution?: string;
     customer_base_info?: string;
     security_incidents?: string;
@@ -2724,160 +2918,199 @@ export function deleteAccountNote(noteId: number): boolean {
   return result.changes > 0;
 }
 
-// ─── Chat Threads / Messages ────────────────────────────────────────────────
+// ─── Account Overviews ──────────────────────────────────────────────────────
 
-export type ChatPerspective = 'auth0' | 'okta';
-export type ChatRole = 'user' | 'assistant' | 'tool';
-
-export interface ChatThread {
-  id: number;
-  context_key: string;
-  context_account_id: number | null;
-  context_prospect_id: number | null;
-  perspective: ChatPerspective;
-  title: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ChatMessage {
-  id: number;
-  thread_id: number;
-  role: ChatRole;
-  content_markdown: string | null;
-  content_json: string | null;
-  tool_name: string | null;
-  created_at: string;
-}
-
-export function buildChatContextKey(input: {
-  accountId?: number | null;
-  prospectId?: number | null;
-  perspective: ChatPerspective;
-}): string {
-  const accountPart = input.accountId ?? 'none';
-  const prospectPart = input.prospectId ?? 'none';
-  return `${input.perspective}:${accountPart}:${prospectPart}`;
-}
-
-export function getChatThread(id: number): ChatThread | undefined {
+export function getAccountOverview(accountId: number): AccountOverviewRow | undefined {
   const db = getDb();
-  return db.prepare('SELECT * FROM chat_threads WHERE id = ?').get(id) as ChatThread | undefined;
+  return db.prepare('SELECT * FROM account_overviews WHERE account_id = ?').get(accountId) as AccountOverviewRow | undefined;
 }
 
-export function getChatThreadByContext(input: {
-  accountId?: number | null;
-  prospectId?: number | null;
-  perspective: ChatPerspective;
-}): ChatThread | undefined {
+export function ensureAccountOverview(accountId: number): AccountOverviewRow {
   const db = getDb();
-  const contextKey = buildChatContextKey(input);
-  return db.prepare('SELECT * FROM chat_threads WHERE context_key = ?').get(contextKey) as ChatThread | undefined;
+  db.prepare('INSERT OR IGNORE INTO account_overviews (account_id) VALUES (?)').run(accountId);
+  return db.prepare('SELECT * FROM account_overviews WHERE account_id = ?').get(accountId) as AccountOverviewRow;
 }
 
-export function getOrCreateChatThread(input: {
-  accountId?: number | null;
-  prospectId?: number | null;
-  perspective: ChatPerspective;
-  title?: string | null;
-}): ChatThread {
-  const existing = getChatThreadByContext(input);
-  if (existing) return existing;
-
+export function upsertAccountOverview(
+  accountId: number,
+  updates: {
+    priorities_json?: string | null;
+    value_drivers_json?: string | null;
+    triggers_json?: string | null;
+    business_model_markdown?: string | null;
+    business_structure_json?: string | null;
+    tech_stack_json?: string | null;
+    pov_markdown?: string | null;
+    generated_at?: string | null;
+    pov_generated_at?: string | null;
+    last_edited_at?: string | null;
+  }
+): AccountOverviewRow {
   const db = getDb();
-  const contextKey = buildChatContextKey(input);
-  const stmt = db.prepare(`
-    INSERT INTO chat_threads (context_key, context_account_id, context_prospect_id, perspective, title)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-  const result = stmt.run(
-    contextKey,
-    input.accountId ?? null,
-    input.prospectId ?? null,
-    input.perspective,
-    input.title ?? null
+  ensureAccountOverview(accountId);
+
+  const fields: string[] = [];
+  const values: Array<string | number | null> = [];
+
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) {
+    return getAccountOverview(accountId) as AccountOverviewRow;
+  }
+
+  fields.push("updated_at = datetime('now')");
+  values.push(accountId);
+
+  db.prepare(`UPDATE account_overviews SET ${fields.join(', ')} WHERE account_id = ?`).run(...values);
+  return db.prepare('SELECT * FROM account_overviews WHERE account_id = ?').get(accountId) as AccountOverviewRow;
+}
+
+// ─── Account Okta Overviews ──────────────────────────────────────────────────
+
+export function getAccountOktaOverview(accountId: number): AccountOktaOverviewRow | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM account_okta_overviews WHERE account_id = ?').get(accountId) as AccountOktaOverviewRow | undefined;
+}
+
+export function ensureAccountOktaOverview(accountId: number): AccountOktaOverviewRow {
+  const db = getDb();
+  db.prepare('INSERT OR IGNORE INTO account_okta_overviews (account_id) VALUES (?)').run(accountId);
+  return db.prepare('SELECT * FROM account_okta_overviews WHERE account_id = ?').get(accountId) as AccountOktaOverviewRow;
+}
+
+export function upsertAccountOktaOverview(
+  accountId: number,
+  updates: {
+    priorities_json?: string | null;
+    value_drivers_json?: string | null;
+    triggers_json?: string | null;
+    business_model_markdown?: string | null;
+    business_structure_json?: string | null;
+    tech_stack_json?: string | null;
+    pov_markdown?: string | null;
+    generated_at?: string | null;
+    pov_generated_at?: string | null;
+    last_edited_at?: string | null;
+  }
+): AccountOktaOverviewRow {
+  const db = getDb();
+  ensureAccountOktaOverview(accountId);
+
+  const fields: string[] = [];
+  const values: Array<string | number | null> = [];
+
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) {
+    return getAccountOktaOverview(accountId) as AccountOktaOverviewRow;
+  }
+
+  fields.push("updated_at = datetime('now')");
+  values.push(accountId);
+
+  db.prepare(`UPDATE account_okta_overviews SET ${fields.join(', ')} WHERE account_id = ?`).run(...values);
+  return db.prepare('SELECT * FROM account_okta_overviews WHERE account_id = ?').get(accountId) as AccountOktaOverviewRow;
+}
+
+// ─── Account Documents ──────────────────────────────────────────────────────
+
+export function getAccountDocuments(accountId: number): AccountDocumentRow[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM account_documents WHERE account_id = ? ORDER BY created_at DESC, id DESC').all(accountId) as AccountDocumentRow[];
+}
+
+export function getAccountDocument(documentId: number): AccountDocumentRow | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM account_documents WHERE id = ?').get(documentId) as AccountDocumentRow | undefined;
+}
+
+export function getAccountDocumentByAccount(accountId: number, documentId: number): AccountDocumentRow | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM account_documents WHERE account_id = ? AND id = ?').get(accountId, documentId) as AccountDocumentRow | undefined;
+}
+
+export function createAccountDocument(data: {
+  account_id: number;
+  filename: string;
+  storage_path: string;
+  mime_type?: string | null;
+  file_size_bytes: number;
+  openai_file_id?: string | null;
+  context_markdown?: string | null;
+  processing_status?: 'processing' | 'ready' | 'failed';
+  extraction_error?: string | null;
+}): AccountDocumentRow {
+  const db = getDb();
+  const result = db.prepare(`
+    INSERT INTO account_documents (
+      account_id, filename, storage_path, mime_type, file_size_bytes,
+      openai_file_id, context_markdown, processing_status, extraction_error
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    data.account_id,
+    data.filename,
+    data.storage_path,
+    data.mime_type || null,
+    data.file_size_bytes,
+    data.openai_file_id || null,
+    data.context_markdown || null,
+    data.processing_status || 'processing',
+    data.extraction_error || null
   );
 
-  return db.prepare('SELECT * FROM chat_threads WHERE id = ?').get(result.lastInsertRowid) as ChatThread;
+  return db.prepare('SELECT * FROM account_documents WHERE id = ?').get(result.lastInsertRowid) as AccountDocumentRow;
 }
 
-export function listChatThreads(filters?: {
-  accountId?: number | null;
-  prospectId?: number | null;
-  perspective?: ChatPerspective;
-  limit?: number;
-}): ChatThread[] {
+export function updateAccountDocument(
+  documentId: number,
+  updates: {
+    filename?: string;
+    storage_path?: string;
+    mime_type?: string | null;
+    file_size_bytes?: number;
+    openai_file_id?: string | null;
+    context_markdown?: string | null;
+    processing_status?: 'processing' | 'ready' | 'failed';
+    extraction_error?: string | null;
+  }
+): AccountDocumentRow | undefined {
   const db = getDb();
-  let query = 'SELECT * FROM chat_threads WHERE 1=1';
-  const params: any[] = [];
+  const fields: string[] = [];
+  const values: Array<string | number | null> = [];
 
-  if (filters?.accountId !== undefined) {
-    query += filters.accountId === null ? ' AND context_account_id IS NULL' : ' AND context_account_id = ?';
-    if (filters.accountId !== null) params.push(filters.accountId);
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  });
+
+  if (fields.length === 0) {
+    return getAccountDocument(documentId);
   }
 
-  if (filters?.prospectId !== undefined) {
-    query += filters.prospectId === null ? ' AND context_prospect_id IS NULL' : ' AND context_prospect_id = ?';
-    if (filters.prospectId !== null) params.push(filters.prospectId);
-  }
+  fields.push("updated_at = datetime('now')");
+  values.push(documentId);
 
-  if (filters?.perspective) {
-    query += ' AND perspective = ?';
-    params.push(filters.perspective);
-  }
-
-  query += ' ORDER BY updated_at DESC LIMIT ?';
-  params.push(filters?.limit ?? 20);
-
-  return db.prepare(query).all(...params) as ChatThread[];
+  db.prepare(`UPDATE account_documents SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return db.prepare('SELECT * FROM account_documents WHERE id = ?').get(documentId) as AccountDocumentRow | undefined;
 }
 
-export function getChatMessages(threadId: number, limit: number = 200): ChatMessage[] {
+export function deleteAccountDocument(documentId: number): boolean {
   const db = getDb();
-  return db.prepare(`
-    SELECT * FROM chat_messages
-    WHERE thread_id = ?
-    ORDER BY created_at ASC
-    LIMIT ?
-  `).all(threadId, limit) as ChatMessage[];
-}
-
-export function createChatMessage(data: {
-  threadId: number;
-  role: ChatRole;
-  contentMarkdown?: string | null;
-  contentJson?: string | null;
-  toolName?: string | null;
-}): ChatMessage {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO chat_messages (thread_id, role, content_markdown, content_json, tool_name)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-  const result = stmt.run(
-    data.threadId,
-    data.role,
-    data.contentMarkdown ?? null,
-    data.contentJson ?? null,
-    data.toolName ?? null
-  );
-
-  db.prepare(`
-    UPDATE chat_threads
-    SET updated_at = datetime('now')
-    WHERE id = ?
-  `).run(data.threadId);
-
-  return db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(result.lastInsertRowid) as ChatMessage;
-}
-
-export function updateChatThreadTitle(threadId: number, title: string | null): void {
-  const db = getDb();
-  db.prepare(`
-    UPDATE chat_threads
-    SET title = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(title, threadId);
+  const result = db.prepare('DELETE FROM account_documents WHERE id = ?').run(documentId);
+  return result.changes > 0;
 }
 
 // ─── Prospects ──────────────────────────────────────────────────────────────
@@ -2915,10 +3148,14 @@ export interface Prospect {
   last_called_at: string | null;
   prospect_tags: string | null; // JSON array
   contact_readiness: string | null; // dial_ready|email_ready|social_ready|incomplete
+  enriched_mobile: string | null;
   sfdc_id: string | null;
+  sfdc_type: 'lead' | 'contact' | null;
   campaign_name: string | null;
   member_status: string | null;
   account_status_sfdc: string | null;
+  icp_fit: number; // 0/1
+  icp_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -3008,6 +3245,8 @@ export function createProspect(data: {
   campaign_name?: string;
   member_status?: string;
   account_status_sfdc?: string;
+  prospect_status?: string;
+  sfdc_type?: string;
 }): Prospect {
   const db = getDb();
   const stmt = db.prepare(`
@@ -3016,8 +3255,8 @@ export function createProspect(data: {
       department, notes, role_type, relationship_status, source,
       mailing_address, lead_source, last_activity_date, do_not_call,
       description, parent_prospect_id, sort_order,
-      sfdc_id, campaign_name, member_status, account_status_sfdc
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      sfdc_id, campaign_name, member_status, account_status_sfdc, prospect_status, sfdc_type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     data.account_id,
@@ -3043,7 +3282,9 @@ export function createProspect(data: {
     data.sfdc_id || null,
     data.campaign_name || null,
     data.member_status || null,
-    data.account_status_sfdc || null
+    data.account_status_sfdc || null,
+    data.prospect_status || 'active',
+    data.sfdc_type || null
   );
   return db.prepare('SELECT * FROM prospects WHERE id = ?').get(result.lastInsertRowid) as Prospect;
 }
@@ -3116,6 +3357,8 @@ export function getProspectsWithFilters(filters: {
   industry?: string;
   source?: string;
   relationshipStatus?: string;
+  prospectStatus?: string;
+  accountIds?: number[];
   valueTier?: string;
   seniorityLevel?: string;
   departmentTag?: string;
@@ -3175,6 +3418,22 @@ export function getProspectsWithFilters(filters: {
   if (filters.relationshipStatus) {
     query += ' AND p.relationship_status = ?';
     params.push(filters.relationshipStatus);
+  }
+
+  if (filters.prospectStatus) {
+    const statuses = filters.prospectStatus.split(',').map(s => s.trim()).filter(Boolean);
+    if (statuses.length === 1) {
+      query += ' AND p.prospect_status = ?';
+      params.push(statuses[0]);
+    } else if (statuses.length > 1) {
+      query += ` AND p.prospect_status IN (${statuses.map(() => '?').join(',')})`;
+      params.push(...statuses);
+    }
+  }
+
+  if (filters.accountIds && filters.accountIds.length > 0) {
+    query += ` AND p.account_id IN (${filters.accountIds.map(() => '?').join(',')})`;
+    params.push(...filters.accountIds);
   }
 
   if (filters.valueTier) {
@@ -3295,14 +3554,17 @@ export function bulkCreateProspects(prospects: Array<{
   last_activity_date?: string;
   do_not_call?: number;
   description?: string;
+  sfdc_id?: string;
+  sfdc_type?: string;
 }>): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO prospects (
       account_id, first_name, last_name, title, email, phone, mobile, linkedin_url,
       department, notes, role_type, relationship_status, source,
-      mailing_address, lead_source, last_activity_date, do_not_call, description
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      mailing_address, lead_source, last_activity_date, do_not_call, description,
+      sfdc_id, sfdc_type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const transaction = db.transaction(() => {
@@ -3326,7 +3588,9 @@ export function bulkCreateProspects(prospects: Array<{
         p.lead_source || null,
         p.last_activity_date || null,
         p.do_not_call || 0,
-        p.description || null
+        p.description || null,
+        p.sfdc_id || null,
+        p.sfdc_type || null
       );
       count++;
     }
@@ -3789,6 +4053,11 @@ export function mergeAccounts(keepId: number, deleteId: number): { prospectsTran
       'UPDATE account_notes SET account_id = ? WHERE account_id = ?'
     ).run(keepId, deleteId);
 
+    // Transfer attached documents
+    db.prepare(
+      'UPDATE account_documents SET account_id = ?, updated_at = datetime(\'now\') WHERE account_id = ?'
+    ).run(keepId, deleteId);
+
     // Delete the merged account (CASCADE will clean up remaining foreign-key refs)
     db.prepare('DELETE FROM accounts WHERE id = ?').run(deleteId);
 
@@ -3919,6 +4188,8 @@ export function updateProspectAIData(
     department_tag?: string;
     prospect_tags?: string; // JSON array string
     contact_readiness?: string;
+    icp_fit?: number; // 0/1
+    icp_reason?: string;
   }
 ): Prospect | undefined {
   const db = getDb();

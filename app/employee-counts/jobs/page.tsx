@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { capitalize, downloadFile } from '@/lib/utils';
+import { useToast } from '@/lib/toast-context';
 
 interface EmployeeCountJob {
   id: number;
@@ -18,6 +19,7 @@ interface EmployeeCountJob {
 
 export default function EmployeeCountJobsPage() {
   const router = useRouter();
+  const toast = useToast();
   const [jobs, setJobs] = useState<EmployeeCountJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +54,7 @@ export default function EmployeeCountJobsPage() {
       downloadFile(blob, `employee-counts-job-${jobId}.csv`);
     } catch (err) {
       console.error('Download error:', err);
-      alert(err instanceof Error ? err.message : 'Failed to download CSV');
+      toast.error(err instanceof Error ? err.message : 'Failed to download CSV');
     } finally {
       setDownloadingJobId(null);
     }

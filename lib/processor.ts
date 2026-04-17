@@ -23,6 +23,7 @@ import { buildOpportunityContext } from './opportunity-context';
 import { buildActivityContext } from './activity-context';
 import { logWorkerError, sleep } from './worker-error-utils';
 import { indexAccountResearchVectorsBestEffort } from './account-vectors';
+import { generateOverviewsBestEffort } from './generate-account-overviews';
 
 // Global processing state to prevent concurrent processing
 const activeJobs = new Set<number>();
@@ -315,6 +316,15 @@ export async function processJobSequential(
       }
 
       await indexAccountResearchVectorsBestEffort(account.id);
+
+      // Generate overview drafts for both Auth0 and Okta (best-effort, non-fatal)
+      insertJobEvent(jobId, 'processing', 'research_step', {
+        accountId: account.id,
+        companyName: account.company_name,
+        message: 'Generating account overview...',
+      });
+      updateJobCurrentStep(jobId, 'Generating overview...');
+      await generateOverviewsBestEffort(account.id);
 
       // Emit account_complete event
       insertJobEvent(jobId, 'processing', 'account_complete', {

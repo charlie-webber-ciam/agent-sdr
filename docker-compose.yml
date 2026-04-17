@@ -14,6 +14,8 @@ services:
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
       - QDRANT_COLLECTION_PREFIX=${QDRANT_COLLECTION_PREFIX:-agent_sdr}
+      - VECTOR_PROFILE_VERSION=${VECTOR_PROFILE_VERSION:-v2}
+      - VECTOR_READ_PROFILE_VERSION=${VECTOR_READ_PROFILE_VERSION:-v2}
     volumes:
       - ./data:/app/data
     restart: unless-stopped

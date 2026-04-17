@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
+import { CUSTOMER_STATUS_FILTER_OPTIONS, customerStatusLabel } from '@/lib/customer-status';
 import AccountCard from '@/components/AccountCard';
 import AccountSimilarityGraph from '@/components/account-map/AccountSimilarityGraph';
 import type {
@@ -63,6 +64,7 @@ function toAccountCardModel(record: MapNodeRecord) {
     companyName: record.companyName,
     domain: record.domain || '',
     industry: record.industry,
+    customerStatus: record.customerStatus,
     status: 'completed',
     researchSummary: record.summarySnippet || null,
     processedAt: record.processedAt,
@@ -84,6 +86,7 @@ function buildMapParams(options: {
   limit: string;
   debouncedSearch: string;
   selectedId: number | null;
+  customerStatusFilter: string;
   tierFilter: string;
   ownerFilter: string;
 }): URLSearchParams {
@@ -94,6 +97,7 @@ function buildMapParams(options: {
 
   if (options.debouncedSearch) params.set('search', options.debouncedSearch);
   if (options.selectedId) params.set('selectedAccountId', String(options.selectedId));
+  if (options.customerStatusFilter) params.set('customerStatus', options.customerStatusFilter);
 
   if (options.perspective === 'okta') {
     if (options.tierFilter) params.set('oktaTier', options.tierFilter);
@@ -110,6 +114,7 @@ export default function AccountSimilarityMap() {
   const [perspective, setPerspective] = useState<Perspective>('overall');
   const [viewMode, setViewMode] = useState<ViewMode>('focus');
   const [search, setSearch] = useState('');
+  const [customerStatusFilter, setCustomerStatusFilter] = useState('');
   const [tierFilter, setTierFilter] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
   const [limit, setLimit] = useState(String(DEFAULT_LIMIT));
@@ -120,6 +125,7 @@ export default function AccountSimilarityMap() {
   const [mapData, setMapData] = useState<MapResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [inspectedAccountId, setInspectedAccountId] = useState<number | null>(null);
   const [backfillJob, setBackfillJob] = useState<BackfillJob | null>(null);
@@ -133,12 +139,14 @@ export default function AccountSimilarityMap() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
+    setErrorDetail(null);
 
     const params = buildMapParams({
       perspective,
       limit,
       debouncedSearch,
       selectedId: selectedAccountId,
+      customerStatusFilter,
       tierFilter,
       ownerFilter,
     });
@@ -150,7 +158,11 @@ export default function AccountSimilarityMap() {
       .then(async (response) => {
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
-          throw new Error(payload.error || 'Failed to load account similarity.');
+          const message = typeof payload.error === 'string' ? payload.error : 'Failed to load account similarity.';
+          const detail = typeof payload.detail === 'string' ? payload.detail : null;
+          const enrichedError = new Error(message) as Error & { detail?: string | null };
+          enrichedError.detail = detail;
+          throw enrichedError;
         }
         return response.json() as Promise<MapResponse>;
       })
@@ -165,13 +177,16 @@ export default function AccountSimilarityMap() {
       .catch((fetchError) => {
         if (fetchError.name === 'AbortError') return;
         setError(fetchError instanceof Error ? fetchError.message : 'Failed to load account similarity.');
+        setErrorDetail(fetchError instanceof Error && 'detail' in fetchError && typeof fetchError.detail === 'string'
+          ? fetchError.detail
+          : null);
       })
       .finally(() => {
         setLoading(false);
       });
 
     return () => controller.abort();
-  }, [debouncedSearch, limit, ownerFilter, perspective, selectedAccountId, tierFilter]);
+  }, [customerStatusFilter, debouncedSearch, limit, ownerFilter, perspective, selectedAccountId, tierFilter]);
 
   useEffect(() => {
     setTierFilter('');
@@ -202,6 +217,7 @@ export default function AccountSimilarityMap() {
           limit,
           debouncedSearch,
           selectedId: selectedAccountId,
+          customerStatusFilter,
           tierFilter,
           ownerFilter,
         });
@@ -219,7 +235,7 @@ export default function AccountSimilarityMap() {
     }, 2000);
 
     return () => window.clearInterval(interval);
-  }, [backfillJob, debouncedSearch, limit, ownerFilter, perspective, selectedAccountId, tierFilter]);
+  }, [backfillJob, customerStatusFilter, debouncedSearch, limit, ownerFilter, perspective, selectedAccountId, tierFilter]);
 
   const accountById = useMemo(() => {
     const records = [
@@ -248,6 +264,8 @@ export default function AccountSimilarityMap() {
       result.push({
         rank: index + 1,
         record,
+        semanticScore: neighbor.semanticScore,
+        hybridScore: neighbor.hybridScore,
         rawScore: neighbor.rawScore,
         relativeScore: neighbor.spreadScore,
       });
@@ -324,6 +342,9 @@ export default function AccountSimilarityMap() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="border-stone-300 bg-stone-50 text-stone-700">
+            {mapData?.profileVersion ? `Profile ${mapData.profileVersion}` : 'Profile unavailable'}
+          </Badge>
           <Button onClick={handleStartBackfill} disabled={backfillStarting}>
             {backfillStarting ? 'Starting backfill...' : 'Backfill Vectors'}
           </Button>
@@ -334,7 +355,7 @@ export default function AccountSimilarityMap() {
       </div>
 
       <Card>
-        <CardContent className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-6">
+        <CardContent className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-7">
           <div className="space-y-2 xl:col-span-2">
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Search</label>
             <Input
@@ -357,6 +378,25 @@ export default function AccountSimilarityMap() {
                 <SelectItem value="overall">Overall</SelectItem>
                 <SelectItem value="auth0">Auth0</SelectItem>
                 <SelectItem value="okta">Okta</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Customer status</label>
+            <Select value={customerStatusFilter || '__all__'} onValueChange={(value) => {
+              setSelectedAccountId(null);
+              setInspectedAccountId(null);
+              setCustomerStatusFilter(value === '__all__' ? '' : value);
+            }}>
+              <SelectTrigger>
+                <SelectValue placeholder="Filter by customer status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All statuses</SelectItem>
+                <SelectItem value="unassigned">Blank</SelectItem>
+                {CUSTOMER_STATUS_FILTER_OPTIONS.map((status) => (
+                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -456,7 +496,7 @@ export default function AccountSimilarityMap() {
               <div className="flex min-h-[640px] flex-col items-center justify-center gap-3 p-6 text-center">
                 <p className="text-sm font-medium text-rose-700">{error}</p>
                 <p className="max-w-md text-sm text-slate-500">
-                  Ensure Qdrant is running and the embedding endpoint is configured before loading similarity results.
+                  {errorDetail || 'Ensure Qdrant is running and the embedding endpoint is configured before loading similarity results.'}
                 </p>
               </div>
             ) : mapData && mapData.nodes.length > 0 ? (
@@ -657,7 +697,8 @@ export default function AccountSimilarityMap() {
                   <div className="flex flex-wrap gap-2">
                     {inspectedScore && (
                       <>
-                        <Badge variant="secondary">Raw {formatPercent(inspectedScore.rawScore)}</Badge>
+                        <Badge variant="secondary">Hybrid {formatPercent(inspectedScore.hybridScore)}</Badge>
+                        <Badge variant="outline">Semantic {formatPercent(inspectedScore.semanticScore)}</Badge>
                         <Badge variant="outline">Relative {formatPercent(inspectedScore.relativeScore)}</Badge>
                       </>
                     )}
@@ -669,6 +710,10 @@ export default function AccountSimilarityMap() {
                     {getPerspectiveOwner(inspectedRecord, perspective) && (
                       <Badge variant="outline">{getPerspectiveOwner(inspectedRecord, perspective)}</Badge>
                     )}
+                    {inspectedRecord.customerStatus && (
+                      <Badge variant="secondary">{customerStatusLabel(inspectedRecord.customerStatus)}</Badge>
+                    )}
+                    <Badge variant="outline">Profile {inspectedRecord.profileVersion}</Badge>
                     {selectedInAnchorList && selectedRecord?.accountId === inspectedRecord.accountId && inspectedRecord.clusterId > 0 && (
                       <Badge variant="outline">Cluster {inspectedRecord.clusterId}</Badge>
                     )}

@@ -94,12 +94,12 @@ export default function QuickResearchProgressPage({
         }
         if (data.company_name) setCompanyName(data.company_name);
       } else if (data.event_type === 'research_step') {
-        // Auth0: 7 sequential steps, Okta: 8 steps (6 parallel + 2 sequential) = 15 total
+        // Auth0: 8 sequential steps, Okta: 8 steps (6 parallel + 2 sequential) = 16 total
         // Use a simple counter — progress is monotonically increasing regardless of which
         // agent emits the step
         stepCountRef.current++;
         setCurrentStep(data.message);
-        setProgressPct(Math.min(89, Math.round(5 + (stepCountRef.current / 15) * 84)));
+        setProgressPct(Math.min(89, Math.round(5 + (stepCountRef.current / 16) * 84)));
       } else if (data.event_type === 'categorizing') {
         setCurrentStep(data.message);
         setProgressPct(90);

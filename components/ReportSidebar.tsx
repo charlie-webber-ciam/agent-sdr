@@ -4,6 +4,7 @@ import { ReactNode, useState } from 'react';
 
 const AVAILABLE_MODELS = [
   'gpt-5.2',
+  'gpt-5.4',
   'claude-4-6-opus',
   'claude-4-5-sonnet',
   'gpt-5-nano',

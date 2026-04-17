@@ -4,6 +4,8 @@ export type ViewMode = 'focus' | 'cluster';
 export interface MapNeighbor {
   accountId: number;
   companyName: string;
+  semanticScore: number;
+  hybridScore: number;
   rawScore: number;
   spreadScore: number;
   summarySnippet: string;
@@ -15,7 +17,9 @@ export interface MapNodeRecord {
   companyName: string;
   domain: string | null;
   industry: string;
+  customerStatus: 'auth0_customer' | 'okta_customer' | 'common_customer' | null;
   processedAt: string | null;
+  profileVersion: string;
   tier: string | null;
   oktaTier: string | null;
   priorityScore: number | null;
@@ -31,6 +35,8 @@ export interface MapEdgeRecord {
   id: string;
   source: string;
   target: string;
+  semanticScore: number;
+  hybridScore: number;
   rawScore: number;
   spreadScore: number;
 }
@@ -52,6 +58,7 @@ export interface MapResponse {
   neighborRecords: MapNodeRecord[];
   total: number;
   threshold: number;
+  profileVersion: string;
   normalization: SimilarityNormalization;
   filters: {
     accountOwners: string[];
@@ -63,6 +70,8 @@ export interface MapResponse {
 export interface SimilarAccountView {
   rank: number;
   record: MapNodeRecord;
+  semanticScore: number;
+  hybridScore: number;
   rawScore: number;
   relativeScore: number;
 }

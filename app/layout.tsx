@@ -5,7 +5,6 @@ import AppShell from "@/components/AppShell";
 import { PageTransition } from "@/components/PageTransition";
 import { PerspectiveProvider } from "@/lib/perspective-context";
 import { ToastProvider } from "@/lib/toast-context";
-import { PageChatContextProvider } from "@/lib/page-chat-context";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,15 +32,13 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <PerspectiveProvider>
-          <PageChatContextProvider>
-            <ToastProvider>
-              <AppShell>
-                <PageTransition>
-                  {children}
-                </PageTransition>
-              </AppShell>
-            </ToastProvider>
-          </PageChatContextProvider>
+          <ToastProvider>
+            <AppShell>
+              <PageTransition>
+                {children}
+              </PageTransition>
+            </AppShell>
+          </ToastProvider>
         </PerspectiveProvider>
       </body>
     </html>

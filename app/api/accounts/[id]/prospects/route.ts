@@ -104,6 +104,8 @@ export async function POST(
       description: body.description,
       parent_prospect_id: body.parent_prospect_id,
       sort_order: body.sort_order,
+      prospect_status: body.prospect_status,
+      sfdc_type: body.sfdc_type,
     });
 
     const readiness = assessContactReadiness(prospect);

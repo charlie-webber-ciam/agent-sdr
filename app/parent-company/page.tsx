@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useToast } from '@/lib/toast-context';
 
 interface ParentCompanyStats {
   totalCompleted: number;
@@ -13,6 +14,7 @@ interface ParentCompanyStats {
 
 export default function ParentCompanyPage() {
   const router = useRouter();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<ParentCompanyStats | null>(null);
   const [unprocessedOnly, setUnprocessedOnly] = useState(true);
@@ -52,14 +54,14 @@ export default function ParentCompanyPage() {
 
       if (!createRes.ok) {
         const error = await createRes.json();
-        alert(error.error || 'Failed to create job');
+        toast.error(error.error || 'Failed to create job');
         return;
       }
 
       const createData = await createRes.json();
 
       if (createData.totalAccounts === 0) {
-        alert('No accounts found matching the specified filters');
+        toast.info('No accounts found matching the specified filters');
         return;
       }
 
@@ -73,11 +75,11 @@ export default function ParentCompanyPage() {
       if (startRes.ok) {
         router.push(`/parent-company/progress/${createData.jobId}`);
       } else {
-        alert('Failed to start parent company finder job');
+        toast.error('Failed to start parent company finder job');
       }
     } catch (error) {
       console.error('Failed to start parent company finder:', error);
-      alert('An error occurred while starting the job');
+      toast.error('An error occurred while starting the job');
     } finally {
       setLoading(false);
     }

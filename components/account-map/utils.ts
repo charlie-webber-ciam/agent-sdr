@@ -73,7 +73,7 @@ export function findScoreBetweenAccounts(
   selectedRecord: MapNodeRecord | null,
   inspectedRecord: MapNodeRecord | null,
   edges: MapEdgeRecord[]
-): { rawScore: number; relativeScore: number } | null {
+): { semanticScore: number; hybridScore: number; relativeScore: number } | null {
   if (!selectedRecord || !inspectedRecord || selectedRecord.accountId === inspectedRecord.accountId) {
     return null;
   }
@@ -83,7 +83,8 @@ export function findScoreBetweenAccounts(
   );
   if (directNeighbor) {
     return {
-      rawScore: directNeighbor.rawScore,
+      semanticScore: directNeighbor.semanticScore,
+      hybridScore: directNeighbor.hybridScore,
       relativeScore: directNeighbor.spreadScore,
     };
   }
@@ -98,7 +99,8 @@ export function findScoreBetweenAccounts(
   if (!graphEdge) return null;
 
   return {
-    rawScore: graphEdge.rawScore,
+    semanticScore: graphEdge.semanticScore,
+    hybridScore: graphEdge.hybridScore,
     relativeScore: graphEdge.spreadScore,
   };
 }

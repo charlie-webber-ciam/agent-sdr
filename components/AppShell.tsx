@@ -1,65 +1,19 @@
 'use client';
 
-import type { ComponentType, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  Briefcase,
-  Building2,
-  ChevronLeft,
-  ChevronRight,
-  Gauge,
-  Menu,
-  Search,
-  Users,
-  Upload,
-  Download,
-  Database,
-  FolderSync,
-  MapPinned,
-  Activity,
-  FlaskConical,
-  Building,
-  Mail,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, Menu } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { primaryLinks, toolLinks } from '@/lib/nav-links';
+import type { NavItem } from '@/lib/nav-links';
 import { usePerspective, OktaPatch } from '@/lib/perspective-context';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Separator } from '@/components/ui/separator';
-import GlobalChatDock from '@/components/GlobalChatDock';
-
-interface NavItem {
-  href: string;
-  label: string;
-  activePath?: string;
-  icon: ComponentType<{ className?: string }>;
-}
-
-const primaryLinks: NavItem[] = [
-  { href: '/', label: 'Dashboard', icon: Gauge },
-  { href: '/accounts', label: 'Accounts', icon: Building2 },
-  { href: '/prospects', label: 'Prospects', icon: Users },
-  { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
-  { href: '/triage', label: 'Triage', icon: Search },
-];
-
-const toolLinks: NavItem[] = [
-  { href: '/accounts/map', label: 'Account Map', activePath: '/accounts/map', icon: MapPinned },
-  { href: '/email-writer', label: 'Email Writer', icon: Mail },
-  { href: '/quick-research', label: 'Quick Research', icon: Search },
-  { href: '/upload', label: 'Upload CSV', icon: Upload },
-  { href: '/import-opportunities', label: 'Import Opportunities', icon: Download },
-  { href: '/import-activities', label: 'Import Activities', icon: Activity },
-  { href: '/ql-import', label: 'Bulk HVT Writing', icon: Database },
-  { href: '/employee-counts/jobs', label: 'Employee Counts', activePath: '/employee-counts', icon: Users },
-  { href: '/summarize-activities', label: 'Summarize Activities', icon: FolderSync },
-  { href: '/parent-company', label: 'Parent Company Finder', icon: Building },
-  { href: '/hq-state', label: 'HQ State Assignment', activePath: '/hq-state', icon: MapPinned },
-  { href: '/test', label: 'System Diagnostics', icon: FlaskConical },
-];
+import CommandPalette from '@/components/CommandPalette';
 
 const PATCH_OPTIONS: { value: OktaPatch; label: string; shortLabel: string }[] = [
   { value: 'emerging', label: 'Emerging', shortLabel: 'EM' },
@@ -211,6 +165,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <CommandPalette />
       <div className="flex min-h-screen">
         <aside
           className={cn(
@@ -286,7 +241,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <main className="w-full flex-1 px-4 py-5 md:px-8 md:py-7">{children}</main>
         </div>
       </div>
-      <GlobalChatDock />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAccount } from '@/lib/db';
+import { getAccount, getAccountNotes, getAccountOverview } from '@/lib/db';
+import { buildOverviewRecordFromStorage } from '@/lib/account-overview';
 import { generateSequence, SequenceRequest } from '@/lib/sequence-writer-agent';
 import { z } from 'zod';
 
@@ -9,6 +10,7 @@ const requestSchema = z.object({
   researchContext: z.enum(['auth0', 'okta']).default('auth0'),
   customInstructions: z.string().optional(),
   sequenceLength: z.number().min(3).max(5).default(5),
+  model: z.string().optional(),
 });
 
 export async function POST(
@@ -44,6 +46,12 @@ export async function POST(
       );
     }
 
+    // Fetch overview and notes for enhanced context
+    const overviewRow = getAccountOverview(accountId);
+    const overview = overviewRow ? buildOverviewRecordFromStorage(overviewRow) : null;
+    const dbNotes = getAccountNotes(accountId);
+    const notes = dbNotes.map((n) => ({ content: n.content, createdAt: n.created_at }));
+
     const sequenceRequest: SequenceRequest = {
       recipientName: validatedData.recipientName,
       recipientPersona: validatedData.recipientPersona,
@@ -51,6 +59,9 @@ export async function POST(
       customInstructions: validatedData.customInstructions,
       sequenceLength: validatedData.sequenceLength,
       accountData: account,
+      overview,
+      notes,
+      model: validatedData.model,
     };
 
     const sequenceResult = await generateSequence(sequenceRequest);

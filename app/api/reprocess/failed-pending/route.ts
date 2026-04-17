@@ -21,12 +21,14 @@ export async function POST(request: Request) {
       statuses?: string[];
       industry?: string;
       limit?: number;
+      model?: string;
     }>(request);
     const {
       action,
       statuses = ['failed'],
       industry,
       limit,
+      model,
     } = body;
 
     if (!action || !['research', 'categorize'].includes(action)) {
@@ -75,7 +77,7 @@ export async function POST(request: Request) {
       });
 
       // Fire and forget
-      runInBackground(`reprocess/research job ${newJobId}`, () => processJob(newJobId));
+      runInBackground(`reprocess/research job ${newJobId}`, () => processJob(newJobId, { model: model || undefined }));
 
       return NextResponse.json({
         success: true,

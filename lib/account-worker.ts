@@ -24,6 +24,7 @@ import { PROCESSING_CONFIG } from './config';
 import { buildOpportunityContext } from './opportunity-context';
 import { logWorkerError, sleep } from './worker-error-utils';
 import { indexAccountResearchVectorsBestEffort } from './account-vectors';
+import { generateOverviewsBestEffort } from './generate-account-overviews';
 
 export interface AccountProcessingResult {
   accountId: number;
@@ -169,6 +170,9 @@ export async function processAccountWithRetry(
       }
 
       await indexAccountResearchVectorsBestEffort(account.id);
+
+      // Generate overview drafts for both Auth0 and Okta (best-effort, non-fatal)
+      await generateOverviewsBestEffort(account.id);
 
       console.log(`[Account ${account.id}] ✓ Completed processing for ${account.company_name}`);
 

@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { getQdrantCollectionName } from './vector-profile';
 
 /**
  * Migration helper to add new columns to existing database
@@ -17,6 +18,8 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'last_edited_at', type: 'TEXT' },
     { name: 'ai_suggestions', type: 'TEXT' },
     { name: 'auth0_account_owner', type: 'TEXT' },
+    { name: 'customer_status', type: 'TEXT', constraint: "CHECK(customer_status IN ('auth0_customer', 'okta_customer', 'common_customer', NULL))" },
+    { name: 'command_of_message', type: 'TEXT' },
     // Okta Workforce Identity Research Fields
     { name: 'okta_current_iam_solution', type: 'TEXT' },
     { name: 'okta_workforce_info', type: 'TEXT' },
@@ -43,6 +46,9 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'okta_patch', type: 'TEXT', constraint: "CHECK(okta_patch IN ('emerging','crp','ent','stg','pubsec', NULL))" },
     // Research model tracking
     { name: 'research_model', type: 'TEXT' },
+    // Spreadsheet workspace fields
+    { name: 'spreadsheet_perspective', type: 'TEXT' },
+    { name: 'spreadsheet_messaging', type: 'TEXT' },
     // Triage fields
     { name: 'triage_auth0_tier', type: 'TEXT', constraint: "CHECK(triage_auth0_tier IN ('A', 'B', 'C', NULL))" },
     { name: 'triage_okta_tier', type: 'TEXT', constraint: "CHECK(triage_okta_tier IN ('A', 'B', 'C', 'DQ', NULL))" },
@@ -54,6 +60,9 @@ export function migrateDatabase(db: Database.Database) {
     { name: 'parent_company_region', type: 'TEXT', constraint: "CHECK(parent_company_region IN ('australia', 'global', NULL))" },
     // HQ State assignment
     { name: 'hq_state', type: 'TEXT' },
+    // Review workflow status
+    { name: 'review_status', type: 'TEXT', default: "'new'" },
+    { name: 'review_status_updated_at', type: 'TEXT' },
   ];
 
   // Get existing columns
@@ -84,6 +93,7 @@ export function migrateDatabase(db: Database.Database) {
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_tier ON accounts(tier)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_priority ON accounts(priority_score)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_customer_status ON accounts(customer_status)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_processed ON accounts(okta_processed_at)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_tier ON accounts(okta_tier)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_triage_auth0_tier ON accounts(triage_auth0_tier)');
@@ -91,7 +101,8 @@ export function migrateDatabase(db: Database.Database) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_okta_patch ON accounts(okta_patch)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_parent_company_region ON accounts(parent_company_region)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_hq_state ON accounts(hq_state)');
-    console.log('✓ Added indexes for tier, priority_score, okta_processed_at, okta_tier, okta_patch, triage tiers, parent_company_region, and hq_state');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_accounts_review_status ON accounts(review_status)');
+    console.log('✓ Added indexes for tier, priority_score, customer_status, okta_processed_at, okta_tier, okta_patch, triage tiers, parent_company_region, hq_state, and review_status');
   } catch (error) {
     console.error('Failed to add indexes:', error);
   }
@@ -252,6 +263,84 @@ export function migrateDatabase(db: Database.Database) {
     console.log('✓ Ensured account_notes table exists');
   } catch (error) {
     console.error('Failed to create account_notes table:', error);
+  }
+
+  // Add account_overviews table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_overviews (
+        account_id INTEGER PRIMARY KEY,
+        priorities_json TEXT,
+        value_drivers_json TEXT,
+        triggers_json TEXT,
+        business_model_markdown TEXT,
+        business_structure_json TEXT,
+        tech_stack_json TEXT,
+        pov_markdown TEXT,
+        generated_at TEXT,
+        pov_generated_at TEXT,
+        last_edited_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_overviews_updated_at ON account_overviews(updated_at)');
+    console.log('✓ Ensured account_overviews table exists');
+  } catch (error) {
+    console.error('Failed to create account_overviews table:', error);
+  }
+
+  // Add account_okta_overviews table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_okta_overviews (
+        account_id INTEGER PRIMARY KEY,
+        priorities_json TEXT,
+        value_drivers_json TEXT,
+        triggers_json TEXT,
+        business_model_markdown TEXT,
+        business_structure_json TEXT,
+        tech_stack_json TEXT,
+        pov_markdown TEXT,
+        generated_at TEXT,
+        pov_generated_at TEXT,
+        last_edited_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_okta_overviews_updated_at ON account_okta_overviews(updated_at)');
+    console.log('✓ Ensured account_okta_overviews table exists');
+  } catch (error) {
+    console.error('Failed to create account_okta_overviews table:', error);
+  }
+
+  // Add account_documents table if it doesn't exist
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        filename TEXT NOT NULL,
+        storage_path TEXT NOT NULL,
+        mime_type TEXT,
+        file_size_bytes INTEGER NOT NULL DEFAULT 0,
+        openai_file_id TEXT,
+        context_markdown TEXT,
+        processing_status TEXT NOT NULL DEFAULT 'processing' CHECK(processing_status IN ('processing', 'ready', 'failed')),
+        extraction_error TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_documents_account_id ON account_documents(account_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_documents_status ON account_documents(processing_status)');
+    console.log('✓ Ensured account_documents table exists');
+  } catch (error) {
+    console.error('Failed to create account_documents table:', error);
   }
 
   // Add prospects table if it doesn't exist
@@ -622,6 +711,8 @@ export function migrateDatabase(db: Database.Database) {
       { name: 'campaign_name', type: 'TEXT' },
       { name: 'member_status', type: 'TEXT' },
       { name: 'account_status_sfdc', type: 'TEXT' },
+      { name: 'icp_fit', type: 'INTEGER', default: '0' },
+      { name: 'icp_reason', type: 'TEXT' },
     ];
 
     for (const col of prospectNewColumns) {
@@ -971,29 +1062,119 @@ export function migrateDatabase(db: Database.Database) {
 
   // Add account_vector_index table for embedding metadata
   try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS account_vector_index (
-        account_id INTEGER NOT NULL,
-        perspective TEXT NOT NULL CHECK(perspective IN ('auth0', 'okta', 'overall')),
-        qdrant_point_id TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        vector_status TEXT NOT NULL DEFAULT 'pending' CHECK(vector_status IN ('pending', 'indexed', 'failed')),
-        last_indexed_at TEXT,
-        last_error TEXT,
-        embedding_model TEXT,
-        dimensions INTEGER,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        PRIMARY KEY (account_id, perspective),
-        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-      )
-    `);
+    const vectorIndexColumns = db.prepare('PRAGMA table_info(account_vector_index)').all() as Array<{ name: string; pk: number }>;
+    const vectorIndexColumnNames = new Set(vectorIndexColumns.map((column) => column.name));
+    const needsVectorIndexRebuild = vectorIndexColumns.length > 0 && (
+      !vectorIndexColumnNames.has('profile_version')
+      || !vectorIndexColumnNames.has('collection_name')
+      || vectorIndexColumns.filter((column) => Number(column.pk) > 0).length < 3
+    );
+
+    if (needsVectorIndexRebuild) {
+      const legacyCollectionName = getQdrantCollectionName('v1').replace(/'/g, "''");
+      db.exec(`
+        ALTER TABLE account_vector_index RENAME TO account_vector_index_legacy;
+
+        CREATE TABLE account_vector_index (
+          account_id INTEGER NOT NULL,
+          perspective TEXT NOT NULL CHECK(perspective IN ('auth0', 'okta', 'overall')),
+          profile_version TEXT NOT NULL DEFAULT 'v1',
+          qdrant_point_id TEXT NOT NULL,
+          collection_name TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          vector_status TEXT NOT NULL DEFAULT 'pending' CHECK(vector_status IN ('pending', 'indexed', 'failed')),
+          last_indexed_at TEXT,
+          last_error TEXT,
+          embedding_model TEXT,
+          dimensions INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (account_id, perspective, profile_version),
+          FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO account_vector_index (
+          account_id,
+          perspective,
+          profile_version,
+          qdrant_point_id,
+          collection_name,
+          content_hash,
+          vector_status,
+          last_indexed_at,
+          last_error,
+          embedding_model,
+          dimensions,
+          created_at,
+          updated_at
+        )
+        SELECT
+          account_id,
+          perspective,
+          'v1',
+          qdrant_point_id,
+          '${legacyCollectionName}',
+          content_hash,
+          vector_status,
+          last_indexed_at,
+          last_error,
+          embedding_model,
+          dimensions,
+          created_at,
+          updated_at
+        FROM account_vector_index_legacy;
+
+        DROP TABLE account_vector_index_legacy;
+      `);
+      console.log('✓ Rebuilt account_vector_index table for profile-versioned metadata');
+    } else {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS account_vector_index (
+          account_id INTEGER NOT NULL,
+          perspective TEXT NOT NULL CHECK(perspective IN ('auth0', 'okta', 'overall')),
+          profile_version TEXT NOT NULL DEFAULT 'v1',
+          qdrant_point_id TEXT NOT NULL,
+          collection_name TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          vector_status TEXT NOT NULL DEFAULT 'pending' CHECK(vector_status IN ('pending', 'indexed', 'failed')),
+          last_indexed_at TEXT,
+          last_error TEXT,
+          embedding_model TEXT,
+          dimensions INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (account_id, perspective, profile_version),
+          FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        )
+      `);
+    }
     db.exec('CREATE INDEX IF NOT EXISTS idx_account_vector_index_status ON account_vector_index(vector_status)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_account_vector_index_perspective ON account_vector_index(perspective)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_vector_index_profile_version ON account_vector_index(profile_version)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_account_vector_index_indexed_at ON account_vector_index(last_indexed_at DESC)');
     console.log('✓ Ensured account_vector_index table exists');
   } catch (error) {
     console.error('Failed to create account_vector_index table:', error);
+  }
+
+  // Add prospect_status and enriched_mobile columns to prospects table if missing
+  try {
+    const prospectCols3 = db.prepare('PRAGMA table_info(prospects)').all() as any[];
+    const prospectColNames3 = new Set(prospectCols3.map((col: any) => col.name));
+    if (!prospectColNames3.has('prospect_status')) {
+      db.exec("ALTER TABLE prospects ADD COLUMN prospect_status TEXT DEFAULT 'active'");
+      console.log('✓ Added prospect_status column to prospects');
+    }
+    if (!prospectColNames3.has('enriched_mobile')) {
+      db.exec('ALTER TABLE prospects ADD COLUMN enriched_mobile TEXT');
+      console.log('✓ Added enriched_mobile column to prospects');
+    }
+    if (!prospectColNames3.has('sfdc_type')) {
+      db.exec('ALTER TABLE prospects ADD COLUMN sfdc_type TEXT');
+      console.log('✓ Added sfdc_type column to prospects');
+    }
+  } catch (error) {
+    console.error('Failed to add prospect columns:', error);
   }
 
   // Add vector_index_jobs table for manual backfill/rebuild jobs

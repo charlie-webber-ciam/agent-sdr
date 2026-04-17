@@ -2,10 +2,12 @@ import { NextResponse } from 'next/server';
 import { parse } from 'csv-parse/sync';
 import {
   findAccountByDomainOrName,
+  findAccountFuzzy,
   bulkCreateProspects,
   createProspectImportJob,
   updateProspectImportJob,
   getProspectsByAccount,
+  updateProspect,
   getDb,
 } from '@/lib/db';
 
@@ -42,6 +44,32 @@ const COLUMN_ALIASES: Record<string, string> = {
   'linkedin': 'linkedin_url',
   'linkedin url': 'linkedin_url',
   'linkedin_url': 'linkedin_url',
+  // Salesforce ID fields
+  'contact id': 'sfdc_id',
+  'contact_id': 'sfdc_id',
+  'lead id': 'sfdc_id',
+  'lead_id': 'sfdc_id',
+  'sfdc_id': 'sfdc_id',
+  // Lead-specific fields
+  'reporting matched account': 'matched_account',
+  'reporting matched account owner': 'matched_account_owner',
+  'company / account': 'company_account',
+  // Address parts (contact reports)
+  'mailing street': 'mailing_street',
+  'mailing city': 'mailing_city',
+  'mailing state/province': 'mailing_state',
+  'mailing zip/postal code': 'mailing_zip',
+  'mailing country': 'mailing_country',
+  // Address parts (lead reports)
+  'street': 'street',
+  'country': 'country',
+  'region': 'region',
+  // Enriched data
+  'enriched mobile': 'enriched_mobile',
+  'enriched phone': 'enriched_mobile',
+  'enriched phone number': 'enriched_mobile',
+  // Owner
+  'account owner': 'account_owner',
 };
 
 function normalizeHeaders(headers: string[]): Record<string, string> {
@@ -55,10 +83,35 @@ function normalizeHeaders(headers: string[]): Record<string, string> {
   return mapping;
 }
 
+/**
+ * Resolve the account name from a normalized record.
+ * Leads: prefer "Reporting Matched Account", fall back to "Company / Account"
+ * Contacts: use "Account Name"
+ */
+function resolveAccountName(record: Record<string, string>): string {
+  return record.matched_account || record.account_name || record.company_account || '';
+}
+
+/**
+ * Resolve the mailing address from separate fields or a combined field.
+ */
+function resolveMailingAddress(record: Record<string, string>): string {
+  if (record.mailing_address) return record.mailing_address;
+  const parts = [
+    record.mailing_street || record.street,
+    record.mailing_city,
+    record.mailing_state,
+    record.mailing_zip,
+    record.mailing_country || record.country,
+  ].filter(Boolean);
+  return parts.join(', ');
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
+    const sfdcType = (formData.get('sfdc_type') as string) || null; // 'lead' or 'contact'
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
@@ -103,6 +156,24 @@ export async function POST(request: Request) {
 
     const jobId = createProspectImportJob(file.name, normalizedRecords.length);
 
+    // Cache account lookups to avoid repeated DB queries for the same name
+    const accountCache = new Map<string, { id: number; name: string } | null>();
+    function findAccount(name: string): { id: number; name: string } | null {
+      if (!name) return null;
+      const cacheKey = name.toLowerCase();
+      if (accountCache.has(cacheKey)) return accountCache.get(cacheKey)!;
+
+      // Try exact match first, then fuzzy
+      let account = findAccountByDomainOrName(null, name);
+      if (!account) {
+        const fuzzy = findAccountFuzzy(name);
+        account = fuzzy.exact || fuzzy.fuzzy[0] || undefined;
+      }
+      const result = account ? { id: account.id, name: account.company_name } : null;
+      accountCache.set(cacheKey, result);
+      return result;
+    }
+
     const matched: Array<{
       account_id: number;
       first_name: string;
@@ -117,19 +188,40 @@ export async function POST(request: Request) {
       lead_source?: string;
       do_not_call?: number;
       description?: string;
+      notes?: string;
       source?: string;
+      sfdc_id?: string;
+      sfdc_type?: string;
+      _enriched_mobile?: string; // stored separately after bulk insert
     }> = [];
-    const unmatched: Array<Record<string, string>> = [];
+    const unmatched: Array<{ name: string; company: string }> = [];
+
+    // Track which accounts received prospects
+    const affectedAccounts = new Map<number, { name: string; count: number }>();
 
     for (const record of normalizedRecords) {
       if (!record.first_name || !record.last_name) continue;
 
-      const accountName = record.account_name || '';
-      const account = accountName ? findAccountByDomainOrName(null, accountName) : undefined;
+      const accountName = resolveAccountName(record);
+      const accountMatch = findAccount(accountName);
 
-      if (account) {
+      if (accountMatch) {
+        const accountId = accountMatch.id;
+        // Build notes for leads: include matched account owner (Okta owner)
+        let notes: string | undefined;
+        if (sfdcType === 'lead' && record.matched_account_owner) {
+          notes = `Okta Owner: ${record.matched_account_owner}`;
+        }
+
+        const existing = affectedAccounts.get(accountId);
+        if (existing) {
+          existing.count++;
+        } else {
+          affectedAccounts.set(accountId, { name: accountMatch.name, count: 1 });
+        }
+
         matched.push({
-          account_id: account.id,
+          account_id: accountId,
           first_name: record.first_name,
           last_name: record.last_name,
           title: record.title || undefined,
@@ -138,14 +230,21 @@ export async function POST(request: Request) {
           mobile: record.mobile || undefined,
           linkedin_url: record.linkedin_url || undefined,
           department: record.department || undefined,
-          mailing_address: record.mailing_address || undefined,
+          mailing_address: resolveMailingAddress(record) || undefined,
           lead_source: record.lead_source || undefined,
           do_not_call: record.do_not_call === 'true' || record.do_not_call === '1' ? 1 : 0,
           description: record.description || undefined,
+          notes,
           source: 'salesforce_import',
+          sfdc_id: record.sfdc_id || undefined,
+          sfdc_type: sfdcType || undefined,
+          _enriched_mobile: record.enriched_mobile || undefined,
         });
       } else {
-        unmatched.push(record);
+        unmatched.push({
+          name: `${record.first_name} ${record.last_name}`,
+          company: accountName,
+        });
       }
     }
 
@@ -158,11 +257,19 @@ export async function POST(request: Request) {
 
     const dedupedMatched: typeof matched = [];
     let skippedCount = 0;
+    let updatedCount = 0;
+
+    // Fields that can be backfilled on existing prospects
+    const MERGE_FIELDS = [
+      'title', 'email', 'phone', 'mobile', 'linkedin_url', 'department',
+      'mailing_address', 'lead_source', 'description', 'sfdc_id', 'sfdc_type',
+      'notes', '_enriched_mobile',
+    ] as const;
 
     for (const [accountId, prospects] of byAccount) {
       const existing = getProspectsByAccount(accountId);
       for (const p of prospects) {
-        const isDup = existing.some(e => {
+        const dupMatch = existing.find(e => {
           if (p.email && e.email) {
             return e.email.toLowerCase() === p.email.toLowerCase();
           }
@@ -174,11 +281,30 @@ export async function POST(request: Request) {
           }
           return false;
         });
-        if (isDup) {
+        if (dupMatch) {
+          // Merge: fill in any fields that are missing on the existing prospect
+          const updates: Record<string, any> = {};
+          for (const field of MERGE_FIELDS) {
+            const newVal = (p as any)[field];
+            if (!newVal) continue;
+            // _enriched_mobile is handled separately after insert
+            if (field === '_enriched_mobile') {
+              const existingVal = (dupMatch as any).enriched_mobile;
+              if (!existingVal) updates.enriched_mobile = newVal;
+              continue;
+            }
+            const existingVal = (dupMatch as any)[field];
+            if (!existingVal) {
+              updates[field] = newVal;
+            }
+          }
+          if (Object.keys(updates).length > 0) {
+            updateProspect(dupMatch.id, updates);
+            updatedCount++;
+          }
           skippedCount++;
         } else {
           dedupedMatched.push(p);
-          // Add to local existing list so same CSV doesn't create intra-file dups
           existing.push({ first_name: p.first_name, last_name: p.last_name, email: p.email } as any);
         }
       }
@@ -186,9 +312,18 @@ export async function POST(request: Request) {
 
     let createdCount = 0;
     if (dedupedMatched.length > 0) {
-      createdCount = bulkCreateProspects(dedupedMatched);
+      // Strip _enriched_mobile before bulk insert (not a standard prospect column)
+      const enrichedMobileMap = new Map<string, string>();
+      const toInsert = dedupedMatched.map(({ _enriched_mobile, ...rest }) => {
+        if (_enriched_mobile && rest.email) {
+          enrichedMobileMap.set(rest.email.toLowerCase(), _enriched_mobile);
+        }
+        return rest;
+      });
 
-      // Set contact_readiness for newly imported rows
+      createdCount = bulkCreateProspects(toInsert);
+
+      // Set contact_readiness, sfdc_type, and enriched_mobile for newly imported rows
       const db = getDb();
       db.prepare(`
         UPDATE prospects SET contact_readiness = CASE
@@ -198,6 +333,18 @@ export async function POST(request: Request) {
           ELSE 'incomplete'
         END WHERE contact_readiness IS NULL
       `).run();
+
+      // Update enriched_mobile for prospects that have it (column may not exist on older DBs)
+      if (enrichedMobileMap.size > 0) {
+        try {
+          const updateStmt = db.prepare('UPDATE prospects SET enriched_mobile = ? WHERE LOWER(email) = ? AND enriched_mobile IS NULL');
+          for (const [email, enrichedMobile] of enrichedMobileMap) {
+            updateStmt.run(enrichedMobile, email);
+          }
+        } catch {
+          // Column may not exist yet — migration runs on next restart
+        }
+      }
     }
 
     updateProspectImportJob(jobId, {
@@ -208,6 +355,11 @@ export async function POST(request: Request) {
       completed_at: new Date().toISOString(),
     });
 
+    // Build affected accounts list sorted by count desc
+    const affectedAccountsList = Array.from(affectedAccounts.entries())
+      .map(([id, { name, count }]) => ({ id, name, count }))
+      .sort((a, b) => b.count - a.count);
+
     return NextResponse.json({
       jobId,
       totalContacts: normalizedRecords.length,
@@ -215,7 +367,9 @@ export async function POST(request: Request) {
       unmatchedCount: unmatched.length,
       createdCount,
       skippedCount,
-      unmatchedContacts: unmatched.slice(0, 100), // Limit unmatched preview
+      updatedCount,
+      unmatchedContacts: unmatched.slice(0, 100),
+      affectedAccounts: affectedAccountsList,
     });
   } catch (error) {
     console.error('Error importing prospects:', error);

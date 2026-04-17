@@ -4,6 +4,7 @@ import { getProspectsWithFilters } from '@/lib/db';
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
+    const accountIdsParam = url.searchParams.get('accountIds');
     const filters = {
       search: url.searchParams.get('search') || undefined,
       tier: url.searchParams.get('tier') || undefined,
@@ -12,6 +13,8 @@ export async function GET(request: Request) {
       industry: url.searchParams.get('industry') || undefined,
       source: url.searchParams.get('source') || undefined,
       relationshipStatus: url.searchParams.get('relationshipStatus') || undefined,
+      prospectStatus: url.searchParams.get('prospectStatus') || undefined,
+      accountIds: accountIdsParam ? accountIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined,
       valueTier: url.searchParams.get('valueTier') || undefined,
       seniorityLevel: url.searchParams.get('seniorityLevel') || undefined,
       departmentTag: url.searchParams.get('departmentTag') || undefined,

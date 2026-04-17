@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { use } from 'react';
 import { useSearchParams } from 'next/navigation';
 import MarkdownSection from '@/components/MarkdownSection';
+import AccountOverviewTab from '@/components/AccountOverviewTab';
 import ProspectTab from '@/components/prospects/ProspectTab';
 import ProspectMap from '@/components/prospects/ProspectMap';
 import ProspectDetailModal from '@/components/prospects/ProspectDetailModal';
@@ -26,14 +27,16 @@ import ReportSidebar, { SidebarSection } from '@/components/ReportSidebar';
 import OpportunitiesSection from '@/components/OpportunitiesSection';
 import ActivitiesSection from '@/components/ActivitiesSection';
 import { usePerspective } from '@/lib/perspective-context';
-import { usePageChatContext } from '@/lib/page-chat-context';
+import { useToast } from '@/lib/toast-context';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
+import type { AccountOverviewRecord } from '@/lib/account-overview';
 
 interface AccountDetail {
   id: number;
@@ -42,6 +45,7 @@ interface AccountDetail {
   industry: string;
   status: string;
   // Auth0 CIAM Research
+  commandOfMessage: string | null;
   currentAuthSolution: string | null;
   customerBaseInfo: string | null;
   securityIncidents: string | null;
@@ -108,11 +112,41 @@ interface AccountDetail {
     key_signals: string[];
   } | null;
   triagedAt: string | null;
+  // Review workflow status
+  reviewStatus: 'new' | 'reviewed' | 'working' | 'dismissed';
+  reviewStatusUpdatedAt: string | null;
   // Enrichment data
   tags: Array<{ id: number; tag: string; tagType: string; createdAt: string }>;
   sectionComments: Record<string, string>;
   notes: Array<{ id: number; content: string; createdAt: string; updatedAt: string }>;
+  documents: Array<{
+    id: number;
+    filename: string;
+    mimeType: string | null;
+    fileSizeBytes: number;
+    processingStatus: 'processing' | 'ready' | 'failed';
+    extractionError: string | null;
+    contextMarkdown: string | null;
+    uploadedAt: string;
+    updatedAt: string;
+    downloadUrl: string;
+  }>;
   prospectCount: number;
+  overview: AccountOverviewRecord;
+  keyPeople: Array<{
+    id: number;
+    first_name: string;
+    last_name: string;
+    title: string | null;
+    email: string | null;
+    linkedin_url: string | null;
+    department: string | null;
+    notes: string | null;
+    role_type: 'decision_maker' | 'champion' | 'influencer' | 'blocker' | 'end_user' | 'unknown' | null;
+    relationship_status: 'new' | 'engaged' | 'warm' | 'cold';
+    source: 'manual' | 'salesforce_import' | 'ai_research';
+    updated_at: string;
+  }>;
 }
 
 // Icon components
@@ -149,6 +183,12 @@ const LightningIcon = () => (
 const TargetIcon = () => (
   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+  </svg>
+);
+
+const MessageIcon = () => (
+  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h8M8 14h5m7-3c0 4.418-3.582 8-8 8a8.96 8.96 0 01-4.126-.998L4 19l1.082-3.245A7.965 7.965 0 014 11c0-4.418 3.582-8 8-8s8 3.582 8 8z" />
   </svg>
 );
 
@@ -189,11 +229,31 @@ const SmallTargetIcon = () => (
   </svg>
 );
 
+const SmallMessageIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h8M8 14h5m7-3c0 4.418-3.582 8-8 8a8.96 8.96 0 01-4.126-.998L4 19l1.082-3.245A7.965 7.965 0 014 11c0-4.418 3.582-8 8-8s8 3.582 8 8z" />
+  </svg>
+);
+
 const SmallProspectsIcon = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
   </svg>
 );
+
+function getInitialActiveTab(tab: string | null): 'overview' | 'research' | 'prospects' | 'map' | 'opportunities' | 'activities' {
+  switch (tab) {
+    case 'research':
+    case 'prospects':
+    case 'map':
+    case 'opportunities':
+    case 'activities':
+    case 'overview':
+      return tab;
+    default:
+      return 'overview';
+  }
+}
 
 export default function AccountDetailPage({
   params,
@@ -204,14 +264,14 @@ export default function AccountDetailPage({
   const router = useRouter();
   const searchParams = useSearchParams();
   const { perspective, oktaPatch } = usePerspective();
-  const { setActiveProspect, clearActiveProspect } = usePageChatContext();
+  const toast = useToast();
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Top-level tab: Research, Prospects, Map, Opportunities, or Activities
-  const [activeTab, setActiveTab] = useState<'research' | 'prospects' | 'map' | 'opportunities' | 'activities'>(
-    searchParams.get('tab') === 'prospects' ? 'prospects' : searchParams.get('tab') === 'map' ? 'map' : searchParams.get('tab') === 'opportunities' ? 'opportunities' : searchParams.get('tab') === 'activities' ? 'activities' : 'research'
+  // Top-level tab: Overview, Research, Prospects, Map, Opportunities, or Activities
+  const [activeTab, setActiveTab] = useState<'overview' | 'research' | 'prospects' | 'map' | 'opportunities' | 'activities'>(
+    getInitialActiveTab(searchParams.get('tab'))
   );
 
   // Perspective state for research view (local to this page, initialized from global)
@@ -257,23 +317,15 @@ export default function AccountDetailPage({
   const [mapEmailingProspect, setMapEmailingProspect] = useState<Prospect | null>(null);
   const [mapProspects, setMapProspects] = useState<Prospect[]>([]);
 
-  useEffect(() => {
-    const activeMapProspect = mapEmailingProspect || mapSelectedProspect;
-    if (activeMapProspect) {
-      setActiveProspect(activeMapProspect.id, activeMapProspect.account_id);
-      return;
-    }
-
-    if (activeTab === 'map') {
-      clearActiveProspect();
-    }
-  }, [activeTab, mapEmailingProspect, mapSelectedProspect, setActiveProspect, clearActiveProspect]);
-
   // Enrichment state
   const [tags, setTags] = useState<AccountDetail['tags']>([]);
   const [sectionComments, setSectionComments] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<AccountDetail['notes']>([]);
-  const [rerunningSection, setRerunningSection] = useState<string | null>(null);
+  const [runningSections, setRunningSections] = useState<Set<string>>(new Set());
+
+  // Unsaved changes confirmation modal
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
+  const pendingNavigationRef = useRef<string | null>(null);
 
   // Auth0 edit data
   const [auth0EditData, setAuth0EditData] = useState({
@@ -296,50 +348,197 @@ export default function AccountDetailPage({
     oktaSdrNotes: '',
   });
 
+  // ─── Unsaved Changes Detection ──────────────────────────────────────
+  const hasUnsavedChanges = useMemo(() => {
+    if (!account) return false;
+    if (isEditingAuth0) {
+      return (
+        auth0EditData.tier !== (account.tier || null) ||
+        auth0EditData.estimatedAnnualRevenue !== (account.estimatedAnnualRevenue || '') ||
+        auth0EditData.estimatedUserVolume !== (account.estimatedUserVolume || '') ||
+        auth0EditData.sdrNotes !== (account.sdrNotes || '') ||
+        auth0EditData.priorityScore !== (account.priorityScore || 5) ||
+        JSON.stringify(auth0EditData.useCases) !== JSON.stringify(account.useCases || []) ||
+        JSON.stringify(auth0EditData.auth0Skus) !== JSON.stringify(account.auth0Skus || [])
+      );
+    }
+    if (isEditingOkta) {
+      return (
+        oktaEditData.oktaTier !== (account.oktaTier || null) ||
+        oktaEditData.oktaEstimatedAnnualRevenue !== (account.oktaEstimatedAnnualRevenue || '') ||
+        oktaEditData.oktaEstimatedUserVolume !== (account.oktaEstimatedUserVolume || '') ||
+        oktaEditData.oktaSdrNotes !== (account.oktaSdrNotes || '') ||
+        JSON.stringify(oktaEditData.oktaUseCases) !== JSON.stringify(account.oktaUseCases || []) ||
+        JSON.stringify(oktaEditData.oktaSkus) !== JSON.stringify(account.oktaSkus || [])
+      );
+    }
+    return false;
+  }, [account, isEditingAuth0, isEditingOkta, auth0EditData, oktaEditData]);
+
+  // Warn on browser navigation (refresh, close tab) when edits are pending
   useEffect(() => {
-    const fetchAccount = async () => {
-      try {
-        const res = await fetch(`/api/accounts/${id}`);
-        if (!res.ok) {
-          throw new Error('Failed to fetch account');
-        }
-        const data = await res.json();
-        setAccount(data);
-
-        // Initialize Auth0 edit data
-        setAuth0EditData({
-          tier: data.tier || null,
-          estimatedAnnualRevenue: data.estimatedAnnualRevenue || '',
-          estimatedUserVolume: data.estimatedUserVolume || '',
-          useCases: data.useCases || [],
-          auth0Skus: data.auth0Skus || [],
-          sdrNotes: data.sdrNotes || '',
-          priorityScore: data.priorityScore || 5,
-        });
-
-        // Initialize enrichment data
-        setTags(data.tags || []);
-        setSectionComments(data.sectionComments || {});
-        setNotes(data.notes || []);
-
-        // Initialize Okta edit data
-        setOktaEditData({
-          oktaTier: data.oktaTier || null,
-          oktaEstimatedAnnualRevenue: data.oktaEstimatedAnnualRevenue || '',
-          oktaEstimatedUserVolume: data.oktaEstimatedUserVolume || '',
-          oktaUseCases: data.oktaUseCases || [],
-          oktaSkus: data.oktaSkus || [],
-          oktaSdrNotes: data.oktaSdrNotes || '',
-        });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load account');
-      } finally {
-        setLoading(false);
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
       }
     };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
-    fetchAccount();
+  // Preserve the list filter params so "Back" and prev/next retain filter context.
+  // These params were forwarded from the accounts list page URL.
+  const listFilterQuery = useMemo(() => {
+    const DETAIL_ONLY_KEYS = new Set(['tab']);
+    const params = new URLSearchParams();
+    searchParams.forEach((value, key) => {
+      if (!DETAIL_ONLY_KEYS.has(key)) {
+        params.set(key, value);
+      }
+    });
+    return params.toString();
+  }, [searchParams]);
+
+  const backToListUrl = listFilterQuery
+    ? `/accounts?${listFilterQuery}`
+    : '/accounts';
+
+  const buildDetailUrl = useCallback((accountId: number) => {
+    return listFilterQuery
+      ? `/accounts/${accountId}?${listFilterQuery}`
+      : `/accounts/${accountId}`;
+  }, [listFilterQuery]);
+
+  // Navigation guard: intercept in-app navigation when there are unsaved changes
+  const guardedNavigate = useCallback((url: string) => {
+    if (hasUnsavedChanges) {
+      pendingNavigationRef.current = url;
+      setShowUnsavedModal(true);
+    } else {
+      router.push(url);
+    }
+  }, [hasUnsavedChanges, router]);
+
+  const handleConfirmDiscard = useCallback(() => {
+    setShowUnsavedModal(false);
+    // Reset edit states
+    setIsEditingAuth0(false);
+    setIsEditingOkta(false);
+    if (pendingNavigationRef.current) {
+      router.push(pendingNavigationRef.current);
+      pendingNavigationRef.current = null;
+    }
+  }, [router]);
+
+  const handleCancelNavigation = useCallback(() => {
+    setShowUnsavedModal(false);
+    pendingNavigationRef.current = null;
+  }, []);
+
+  // ─── Prev/Next Navigation ────────────────────────────────────────────
+  const [neighbors, setNeighbors] = useState<{
+    prevId: number | null;
+    prevName: string | null;
+    nextId: number | null;
+    nextName: string | null;
+    position: number;
+    total: number;
+  } | null>(null);
+
+  // Fetch prev/next neighbors based on the referring page's filters
+  const fetchNeighbors = useCallback(async () => {
+    try {
+      // Carry over the filter params from the accounts list URL
+      const params = new URLSearchParams(window.location.search);
+      // Also pass the referring page's search params if stored
+      const referrer = document.referrer;
+      if (referrer && referrer.includes('/accounts')) {
+        try {
+          const refUrl = new URL(referrer);
+          refUrl.searchParams.forEach((value, key) => {
+            if (key !== 'page' && !params.has(key)) {
+              params.set(key, value);
+            }
+          });
+        } catch {}
+      }
+      params.set('currentId', id);
+      const res = await fetch(`/api/accounts/neighbors?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNeighbors(data);
+      }
+    } catch {}
   }, [id]);
+
+  useEffect(() => {
+    fetchNeighbors();
+  }, [fetchNeighbors]);
+
+  // Keyboard shortcuts: left/right arrow for prev/next
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't navigate if user is typing in an input/textarea
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement).isContentEditable) return;
+
+      if (e.key === 'ArrowLeft' && neighbors?.prevId) {
+        e.preventDefault();
+        guardedNavigate(buildDetailUrl(neighbors.prevId));
+      } else if (e.key === 'ArrowRight' && neighbors?.nextId) {
+        e.preventDefault();
+        guardedNavigate(buildDetailUrl(neighbors.nextId));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [neighbors, guardedNavigate, buildDetailUrl]);
+
+  const loadAccount = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/accounts/${id}`);
+      if (!res.ok) {
+        throw new Error('Failed to fetch account');
+      }
+      const data = await res.json();
+      setAccount(data);
+      setError(null);
+
+      // Initialize Auth0 edit data
+      setAuth0EditData({
+        tier: data.tier || null,
+        estimatedAnnualRevenue: data.estimatedAnnualRevenue || '',
+        estimatedUserVolume: data.estimatedUserVolume || '',
+        useCases: data.useCases || [],
+        auth0Skus: data.auth0Skus || [],
+        sdrNotes: data.sdrNotes || '',
+        priorityScore: data.priorityScore || 5,
+      });
+
+      // Initialize enrichment data
+      setTags(data.tags || []);
+      setSectionComments(data.sectionComments || {});
+      setNotes(data.notes || []);
+
+      // Initialize Okta edit data
+      setOktaEditData({
+        oktaTier: data.oktaTier || null,
+        oktaEstimatedAnnualRevenue: data.oktaEstimatedAnnualRevenue || '',
+        oktaEstimatedUserVolume: data.oktaEstimatedUserVolume || '',
+        oktaUseCases: data.oktaUseCases || [],
+        oktaSkus: data.oktaSkus || [],
+        oktaSdrNotes: data.oktaSdrNotes || '',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load account');
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    loadAccount();
+  }, [loadAccount]);
 
   // Fetch prospects for the map tab modals
   const fetchMapProspects = useCallback(async () => {
@@ -355,7 +554,7 @@ export default function AccountDetailPage({
   // Scroll-spy with IntersectionObserver
   useEffect(() => {
     const sectionIds = [
-      'section-summary', 'section-auth', 'section-users', 'section-security',
+      'section-command', 'section-summary', 'section-auth', 'section-users', 'section-security',
       'section-news', 'section-tech', 'section-ecosystem', 'section-prospects',
       'section-notes', 'section-email', 'section-sequence', 'section-pov',
     ];
@@ -396,6 +595,7 @@ export default function AccountDetailPage({
 
     if (activePerspective === 'auth0') {
       return [
+        { id: 'section-command', label: 'Command Of Message', icon: <SmallMessageIcon /> },
         { id: 'section-summary', label: 'Executive Summary', icon: <SmallTargetIcon /> },
         { id: 'section-auth', label: 'Auth Solution', icon: <SmallLockIcon /> },
         { id: 'section-users', label: 'Customer Base', icon: <SmallUsersIcon /> },
@@ -462,13 +662,10 @@ export default function AccountDetailPage({
         throw new Error('Failed to save Auth0 changes');
       }
 
-      // Refresh account data
-      const updatedRes = await fetch(`/api/accounts/${id}`);
-      const updatedData = await updatedRes.json();
-      setAccount(updatedData);
+      await loadAccount();
       setIsEditingAuth0(false);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to save Auth0 changes');
+      toast.error(err instanceof Error ? err.message : 'Failed to save Auth0 changes');
     } finally {
       setSavingAuth0(false);
     }
@@ -528,13 +725,10 @@ export default function AccountDetailPage({
         throw new Error('Failed to save Okta changes');
       }
 
-      // Refresh account data
-      const updatedRes = await fetch(`/api/accounts/${id}`);
-      const updatedData = await updatedRes.json();
-      setAccount(updatedData);
+      await loadAccount();
       setIsEditingOkta(false);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to save Okta changes');
+      toast.error(err instanceof Error ? err.message : 'Failed to save Okta changes');
     } finally {
       setSavingOkta(false);
     }
@@ -569,10 +763,12 @@ export default function AccountDetailPage({
         throw new Error('Failed to delete account');
       }
 
-      // Redirect to accounts list after successful deletion
-      router.push('/accounts?deleted=true');
+      // Redirect to accounts list after successful deletion, preserving filter context
+      const deleteParams = new URLSearchParams(listFilterQuery);
+      deleteParams.set('deleted', 'true');
+      router.push(`/accounts?${deleteParams.toString()}`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete account');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete account');
       setIsDeleting(false);
       setShowDeleteModal(false);
     }
@@ -594,7 +790,7 @@ export default function AccountDetailPage({
       // Redirect to processing page
       router.push(data.redirectUrl);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to retry account');
+      toast.error(err instanceof Error ? err.message : 'Failed to retry account');
       setIsRetrying(false);
     }
   };
@@ -619,7 +815,7 @@ export default function AccountDetailPage({
       // Redirect to processing page
       router.push(data.redirectUrl);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to reprocess account');
+      toast.error(err instanceof Error ? err.message : 'Failed to reprocess account');
       setIsReprocessing(false);
     }
   };
@@ -654,7 +850,7 @@ export default function AccountDetailPage({
   // ─── Section Re-run Handler ──────────────────────────────────────────────
   const handleSectionRerun = useCallback(async (sections: string[], additionalContext: string) => {
     if (!account) return;
-    setRerunningSection(sections[0]);
+    setRunningSections(prev => new Set([...prev, ...sections]));
     try {
       const res = await fetch(`/api/accounts/${id}/rerun-section`, {
         method: 'POST',
@@ -666,36 +862,110 @@ export default function AccountDetailPage({
         }),
       });
       if (res.ok) {
-        // Refresh account data to get updated sections
-        const updatedRes = await fetch(`/api/accounts/${id}`);
-        const updatedData = await updatedRes.json();
-        setAccount(updatedData);
-        setTags(updatedData.tags || []);
-        setSectionComments(updatedData.sectionComments || {});
-        setNotes(updatedData.notes || []);
+        await loadAccount();
       } else {
         const errData = await res.json();
-        alert(errData.error || 'Failed to re-run section');
+        toast.error(errData.error || 'Failed to re-run section');
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to re-run section');
+      toast.error(err instanceof Error ? err.message : 'Failed to re-run section');
     } finally {
-      setRerunningSection(null);
+      setRunningSections(prev => {
+        const next = new Set(prev);
+        sections.forEach(s => next.delete(s));
+        return next;
+      });
     }
-  }, [id, account, activePerspective]);
+  }, [id, account, activePerspective, loadAccount]);
 
   // Section key maps for re-run
-  const auth0SectionKeys = ['current_auth_solution', 'customer_base_info', 'security_incidents', 'news_and_funding', 'tech_transformation', 'prospects'];
+  const auth0SectionKeys = ['command_of_message', 'current_auth_solution', 'customer_base_info', 'security_incidents', 'news_and_funding', 'tech_transformation', 'prospects'];
   const oktaSectionKeys = ['okta_current_iam_solution', 'okta_workforce_info', 'okta_security_incidents', 'okta_news_and_funding', 'okta_tech_transformation', 'okta_ecosystem', 'okta_prospects'];
 
   if (loading) {
     return (
       <main className="mx-auto max-w-7xl">
-        <Card>
-          <CardContent className="py-16 text-center text-xl text-muted-foreground">
-            Loading account...
-          </CardContent>
-        </Card>
+        <div className="mb-8">
+          {/* Back + Prev/Next skeleton */}
+          <div className="mb-4 flex items-center justify-between">
+            <Skeleton className="h-5 w-32" />
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-8 w-20 rounded-md" />
+              <Skeleton className="h-5 w-16" />
+              <Skeleton className="h-8 w-20 rounded-md" />
+            </div>
+          </div>
+
+          {/* Header card skeleton */}
+          <Card className="border-border/70 shadow-lg">
+            <CardContent className="p-8">
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex-1">
+                  <Skeleton className="mb-3 h-10 w-80" />
+                  <div className="mb-3 flex items-center gap-3">
+                    <Skeleton className="h-5 w-40" />
+                    <Skeleton className="h-6 w-24 rounded-full" />
+                  </div>
+                  <div className="mb-3 flex gap-2">
+                    <Skeleton className="h-6 w-16 rounded-full" />
+                    <Skeleton className="h-6 w-16 rounded-full" />
+                    <Skeleton className="h-6 w-16 rounded-full" />
+                    <Skeleton className="h-6 w-20 rounded-full" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Skeleton className="h-7 w-16 rounded-full" />
+                    <Skeleton className="h-7 w-24 rounded-full" />
+                    <Skeleton className="h-7 w-20 rounded-full" />
+                  </div>
+                </div>
+                <Skeleton className="h-9 w-24 rounded-full" />
+              </div>
+              <Skeleton className="h-4 w-64" />
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Tab bar skeleton */}
+        <Skeleton className="mb-6 h-11 w-full rounded-lg" />
+
+        {/* Content skeleton */}
+        <div className="space-y-6">
+          <Card>
+            <CardContent className="p-8">
+              <div className="flex items-center gap-3 mb-4">
+                <Skeleton className="h-10 w-10 rounded-lg" />
+                <Skeleton className="h-8 w-64" />
+              </div>
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="mt-2 h-4 w-5/6" />
+              <Skeleton className="mt-2 h-4 w-4/6" />
+              <Skeleton className="mt-4 h-4 w-full" />
+              <Skeleton className="mt-2 h-4 w-3/4" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-8">
+              <div className="flex items-center gap-3 mb-4">
+                <Skeleton className="h-10 w-10 rounded-lg" />
+                <Skeleton className="h-8 w-56" />
+              </div>
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="mt-2 h-4 w-5/6" />
+              <Skeleton className="mt-2 h-4 w-2/3" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-8">
+              <div className="flex items-center gap-3 mb-4">
+                <Skeleton className="h-10 w-10 rounded-lg" />
+                <Skeleton className="h-8 w-48" />
+              </div>
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="mt-2 h-4 w-4/5" />
+              <Skeleton className="mt-2 h-4 w-3/5" />
+            </CardContent>
+          </Card>
+        </div>
       </main>
     );
   }
@@ -710,7 +980,7 @@ export default function AccountDetailPage({
             <Button
               className="mt-4"
               variant="destructive"
-              onClick={() => router.push('/accounts')}
+              onClick={() => router.push(backToListUrl)}
             >
               Back to Accounts
             </Button>
@@ -739,14 +1009,53 @@ export default function AccountDetailPage({
     <main className="mx-auto max-w-7xl">
       {/* Header — full width above the two columns */}
       <div className="mb-8">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push('/accounts')}
-          className="mb-4 gap-2 px-0 text-primary hover:text-primary"
-        >
-          &larr; Back to Accounts
-        </Button>
+        <div className="mb-4 flex items-center justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => guardedNavigate(backToListUrl)}
+            className="gap-2 px-0 text-primary hover:text-primary"
+          >
+            &larr; Back to Accounts
+          </Button>
+
+          {/* Prev / Next Navigation */}
+          {neighbors && neighbors.total > 1 && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => neighbors.prevId && guardedNavigate(buildDetailUrl(neighbors.prevId))}
+                disabled={!neighbors.prevId}
+                className="gap-1.5"
+                title={neighbors.prevName ? `Previous: ${neighbors.prevName} (←)` : undefined}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+                <span className="hidden sm:inline">Prev</span>
+              </Button>
+
+              <span className="px-2 text-sm text-muted-foreground tabular-nums">
+                {neighbors.position} / {neighbors.total}
+              </span>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => neighbors.nextId && guardedNavigate(buildDetailUrl(neighbors.nextId))}
+                disabled={!neighbors.nextId}
+                className="gap-1.5"
+                title={neighbors.nextName ? `Next: ${neighbors.nextName} (→)` : undefined}
+              >
+                <span className="hidden sm:inline">Next</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </Button>
+            </div>
+          )}
+        </div>
 
         <Card className="border-border/70 bg-gradient-to-br from-card to-muted/20 shadow-lg">
           <CardContent className="p-8">
@@ -775,6 +1084,44 @@ export default function AccountDetailPage({
               {/* Account Tags */}
               <div className="mb-3">
                 <AccountTags accountId={account.id} tags={tags} onTagsChange={setTags} />
+              </div>
+
+              {/* Review Status Selector */}
+              <div className="mb-3 flex items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Review:</span>
+                {(['new', 'working', 'reviewed', 'dismissed'] as const).map((rs) => {
+                  const isActive = (account.reviewStatus || 'new') === rs;
+                  const styles: Record<string, string> = {
+                    new: isActive ? 'border-zinc-400 bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300' : 'hover:bg-zinc-50 dark:hover:bg-zinc-900',
+                    working: isActive ? 'border-amber-400 bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' : 'hover:bg-amber-50 dark:hover:bg-amber-950',
+                    reviewed: isActive ? 'border-emerald-400 bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200' : 'hover:bg-emerald-50 dark:hover:bg-emerald-950',
+                    dismissed: isActive ? 'border-red-300 bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' : 'hover:bg-red-50 dark:hover:bg-red-950',
+                  };
+                  const labels: Record<string, string> = { new: 'New', working: 'Working', reviewed: 'Reviewed', dismissed: 'Dismissed' };
+                  return (
+                    <button
+                      key={rs}
+                      className={cn(
+                        'rounded-full border px-3 py-0.5 text-xs font-medium transition-colors cursor-pointer',
+                        isActive ? styles[rs] : `border-border text-muted-foreground ${styles[rs]}`
+                      )}
+                      onClick={async () => {
+                        try {
+                          const res = await fetch(`/api/accounts/${account.id}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ reviewStatus: rs }),
+                          });
+                          if (res.ok) {
+                            setAccount((prev) => prev ? { ...prev, reviewStatus: rs, reviewStatusUpdatedAt: new Date().toISOString() } : prev);
+                          }
+                        } catch { /* ignore */ }
+                      }}
+                    >
+                      {labels[rs]}
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Tier, SKU, Priority Badges + Research Status Indicators */}
@@ -893,10 +1240,11 @@ export default function AccountDetailPage({
       {/* Research / Prospects Tab Bar */}
       <Tabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as 'research' | 'prospects' | 'map' | 'opportunities' | 'activities')}
+        onValueChange={(value) => setActiveTab(value as 'overview' | 'research' | 'prospects' | 'map' | 'opportunities' | 'activities')}
         className="mb-6"
       >
         <TabsList className="h-auto w-full justify-start rounded-lg border border-border bg-muted/30 p-1">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="research">Research</TabsTrigger>
           <TabsTrigger value="prospects" className="gap-2">
             Prospects
@@ -919,7 +1267,19 @@ export default function AccountDetailPage({
       </Tabs>
 
       {/* Tab Content */}
-      {activeTab === 'prospects' ? (
+      {activeTab === 'overview' ? (
+        <AccountOverviewTab
+          accountId={account.id}
+          accountName={account.companyName}
+          overview={account.overview}
+          notes={notes}
+          documents={account.documents}
+          keyPeople={account.keyPeople}
+          onNotesChange={setNotes}
+          onRefresh={loadAccount}
+          onOpenProspects={() => setActiveTab('prospects')}
+        />
+      ) : activeTab === 'prospects' ? (
         <ProspectTab accountId={account.id} />
       ) : activeTab === 'map' ? (
         <>
@@ -1089,6 +1449,12 @@ export default function AccountDetailPage({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                   <span className="text-lg font-bold">SDR Categorization</span>
+                  {/* Unsaved changes indicator */}
+                  {hasUnsavedChanges && (
+                    <Badge variant="outline" className="border-amber-300 bg-amber-100 text-xs font-semibold text-amber-700 animate-pulse">
+                      Unsaved
+                    </Badge>
+                  )}
                   {/* Inline badges when collapsed */}
                   {!showCategorization && (
                     <div className="flex gap-2 ml-4">
@@ -1520,7 +1886,7 @@ export default function AccountDetailPage({
                             const data = await res.json();
                             handleAcceptOktaAISuggestions(data.suggestions);
                           } catch (err) {
-                            alert(err instanceof Error ? err.message : 'Failed to generate suggestions');
+                            toast.error(err instanceof Error ? err.message : 'Failed to generate suggestions');
                           }
                         }}
                         className="bg-purple-600 font-semibold text-white hover:bg-purple-700"
@@ -1613,6 +1979,25 @@ export default function AccountDetailPage({
             {/* Research Sections — Auth0 Perspective */}
             {activePerspective === 'auth0' && (
               <>
+                {/* Command of the Message */}
+                {account.commandOfMessage && (
+                  <div id="section-command" className="scroll-mt-24 bg-gradient-to-br from-emerald-50 to-teal-50 border-2 border-emerald-200 rounded-xl p-8 mb-8 shadow-md">
+                    <MarkdownSection
+                      title="Command of the Message: Auth0 Value Framework"
+                      content={account.commandOfMessage}
+                      icon={<MessageIcon />}
+                      sectionKey="command_of_message"
+                      perspective="auth0"
+                      allSectionKeys={auth0SectionKeys}
+                      onRerun={handleSectionRerun}
+                      isRerunning={runningSections.has('command_of_message')}
+                      comment={sectionComments['auth0:command_of_message']}
+                      onCommentSave={(content) => handleCommentSave('auth0', 'command_of_message', content)}
+                      onCommentDelete={() => handleCommentDelete('auth0', 'command_of_message')}
+                    />
+                  </div>
+                )}
+
                 {/* Executive Summary */}
                 {account.researchSummary && (
                   <div id="section-summary" className="scroll-mt-24 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-8 mb-8 shadow-md">
@@ -1641,7 +2026,7 @@ export default function AccountDetailPage({
                     perspective="auth0"
                     allSectionKeys={auth0SectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'current_auth_solution'}
+                    isRerunning={runningSections.has('current_auth_solution')}
                     comment={sectionComments['auth0:current_auth_solution']}
                     onCommentSave={(content) => handleCommentSave('auth0', 'current_auth_solution', content)}
                     onCommentDelete={() => handleCommentDelete('auth0', 'current_auth_solution')}
@@ -1657,7 +2042,7 @@ export default function AccountDetailPage({
                     perspective="auth0"
                     allSectionKeys={auth0SectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'customer_base_info'}
+                    isRerunning={runningSections.has('customer_base_info')}
                     comment={sectionComments['auth0:customer_base_info']}
                     onCommentSave={(content) => handleCommentSave('auth0', 'customer_base_info', content)}
                     onCommentDelete={() => handleCommentDelete('auth0', 'customer_base_info')}
@@ -1673,7 +2058,7 @@ export default function AccountDetailPage({
                     perspective="auth0"
                     allSectionKeys={auth0SectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'security_incidents'}
+                    isRerunning={runningSections.has('security_incidents')}
                     comment={sectionComments['auth0:security_incidents']}
                     onCommentSave={(content) => handleCommentSave('auth0', 'security_incidents', content)}
                     onCommentDelete={() => handleCommentDelete('auth0', 'security_incidents')}
@@ -1689,7 +2074,7 @@ export default function AccountDetailPage({
                     perspective="auth0"
                     allSectionKeys={auth0SectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'news_and_funding'}
+                    isRerunning={runningSections.has('news_and_funding')}
                     comment={sectionComments['auth0:news_and_funding']}
                     onCommentSave={(content) => handleCommentSave('auth0', 'news_and_funding', content)}
                     onCommentDelete={() => handleCommentDelete('auth0', 'news_and_funding')}
@@ -1705,7 +2090,7 @@ export default function AccountDetailPage({
                     perspective="auth0"
                     allSectionKeys={auth0SectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'tech_transformation'}
+                    isRerunning={runningSections.has('tech_transformation')}
                     comment={sectionComments['auth0:tech_transformation']}
                     onCommentSave={(content) => handleCommentSave('auth0', 'tech_transformation', content)}
                     onCommentDelete={() => handleCommentDelete('auth0', 'tech_transformation')}
@@ -1832,7 +2217,7 @@ export default function AccountDetailPage({
                     perspective="okta"
                     allSectionKeys={oktaSectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'okta_current_iam_solution'}
+                    isRerunning={runningSections.has('okta_current_iam_solution')}
                     comment={sectionComments['okta:okta_current_iam_solution']}
                     onCommentSave={(content) => handleCommentSave('okta', 'okta_current_iam_solution', content)}
                     onCommentDelete={() => handleCommentDelete('okta', 'okta_current_iam_solution')}
@@ -1848,7 +2233,7 @@ export default function AccountDetailPage({
                     perspective="okta"
                     allSectionKeys={oktaSectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'okta_workforce_info'}
+                    isRerunning={runningSections.has('okta_workforce_info')}
                     comment={sectionComments['okta:okta_workforce_info']}
                     onCommentSave={(content) => handleCommentSave('okta', 'okta_workforce_info', content)}
                     onCommentDelete={() => handleCommentDelete('okta', 'okta_workforce_info')}
@@ -1864,7 +2249,7 @@ export default function AccountDetailPage({
                     perspective="okta"
                     allSectionKeys={oktaSectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'okta_security_incidents'}
+                    isRerunning={runningSections.has('okta_security_incidents')}
                     comment={sectionComments['okta:okta_security_incidents']}
                     onCommentSave={(content) => handleCommentSave('okta', 'okta_security_incidents', content)}
                     onCommentDelete={() => handleCommentDelete('okta', 'okta_security_incidents')}
@@ -1880,7 +2265,7 @@ export default function AccountDetailPage({
                     perspective="okta"
                     allSectionKeys={oktaSectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'okta_news_and_funding'}
+                    isRerunning={runningSections.has('okta_news_and_funding')}
                     comment={sectionComments['okta:okta_news_and_funding']}
                     onCommentSave={(content) => handleCommentSave('okta', 'okta_news_and_funding', content)}
                     onCommentDelete={() => handleCommentDelete('okta', 'okta_news_and_funding')}
@@ -1896,7 +2281,7 @@ export default function AccountDetailPage({
                     perspective="okta"
                     allSectionKeys={oktaSectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'okta_tech_transformation'}
+                    isRerunning={runningSections.has('okta_tech_transformation')}
                     comment={sectionComments['okta:okta_tech_transformation']}
                     onCommentSave={(content) => handleCommentSave('okta', 'okta_tech_transformation', content)}
                     onCommentDelete={() => handleCommentDelete('okta', 'okta_tech_transformation')}
@@ -1912,7 +2297,7 @@ export default function AccountDetailPage({
                     perspective="okta"
                     allSectionKeys={oktaSectionKeys}
                     onRerun={handleSectionRerun}
-                    isRerunning={rerunningSection === 'okta_ecosystem'}
+                    isRerunning={runningSections.has('okta_ecosystem')}
                     comment={sectionComments['okta:okta_ecosystem']}
                     onCommentSave={(content) => handleCommentSave('okta', 'okta_ecosystem', content)}
                     onCommentDelete={() => handleCommentDelete('okta', 'okta_ecosystem')}
@@ -2153,7 +2538,7 @@ export default function AccountDetailPage({
           <div className="flex gap-4">
             <Button
               variant="secondary"
-              onClick={() => router.push('/accounts')}
+              onClick={() => guardedNavigate(backToListUrl)}
             >
               Back to Accounts
             </Button>
@@ -2181,6 +2566,42 @@ export default function AccountDetailPage({
         onCancel={() => setShowDeleteModal(false)}
         isDeleting={isDeleting}
       />
+
+      {/* Unsaved Changes Confirmation Modal */}
+      {showUnsavedModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={handleCancelNavigation} />
+          <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background p-6 shadow-2xl">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100">
+                <svg className="h-5 w-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold">Unsaved Changes</h3>
+            </div>
+            <p className="mb-6 text-sm text-muted-foreground">
+              You have unsaved edits in the {isEditingAuth0 ? 'Auth0' : 'Okta'} categorization panel. Navigating away will discard these changes.
+            </p>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={handleCancelNavigation}
+                className="flex-1"
+              >
+                Keep Editing
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleConfirmDiscard}
+                className="flex-1"
+              >
+                Discard & Leave
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Spinner } from '@/components/Spinner';
 import { useJobPolling } from '@/lib/hooks/useJobPolling';
 import { downloadFile } from '@/lib/utils';
+import { useToast } from '@/lib/toast-context';
 import { ProgressBar } from '@/components/ProgressBar';
 
 interface JobStatus {
@@ -36,6 +37,7 @@ export default function PreprocessProgressPage({
   const { jobId } = use(params);
   const router = useRouter();
 
+  const toast = useToast();
   const [job, setJob] = useState<JobStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -60,7 +62,7 @@ export default function PreprocessProgressPage({
       downloadFile(blob, job?.output_filename || `cleaned_accounts_${jobId}.csv`);
     } catch (err) {
       console.error('Download error:', err);
-      alert('Failed to download file');
+      toast.error('Failed to download file');
     } finally {
       setDownloading(false);
     }
@@ -74,7 +76,7 @@ export default function PreprocessProgressPage({
       await refetch();
     } catch (err) {
       console.error('Pause error:', err);
-      alert('Failed to pause job');
+      toast.error('Failed to pause job');
     } finally {
       setActionLoading(false);
     }
@@ -88,7 +90,7 @@ export default function PreprocessProgressPage({
       await refetch();
     } catch (err) {
       console.error('Resume error:', err);
-      alert('Failed to resume job');
+      toast.error('Failed to resume job');
     } finally {
       setActionLoading(false);
     }
@@ -106,7 +108,7 @@ export default function PreprocessProgressPage({
       await refetch();
     } catch (err) {
       console.error('Cancel error:', err);
-      alert('Failed to cancel job');
+      toast.error('Failed to cancel job');
     } finally {
       setActionLoading(false);
     }
@@ -125,7 +127,7 @@ export default function PreprocessProgressPage({
       router.push('/');
     } catch (err) {
       console.error('Delete error:', err);
-      alert('Failed to delete job');
+      toast.error('Failed to delete job');
       setActionLoading(false);
     }
   };

@@ -8,6 +8,8 @@ interface SimilarityGraphNodeData {
   companyName: string;
   industry: string;
   domain: string | null;
+  customerLabel: string | null;
+  isCustomer: boolean;
   scoreLabel: string | null;
   strengthLabel: string | null;
   isCenter: boolean;
@@ -59,6 +61,23 @@ export default function SimilarityGraphNode({ data, selected }: NodeProps) {
 
         {(node.showLabels || node.isCenter) && (
           <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  'rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]',
+                  node.isCustomer
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-stone-200 text-stone-700'
+                )}
+              >
+                {node.isCustomer ? 'Customer' : 'Non-customer'}
+              </span>
+              {node.customerLabel && (
+                <span className="truncate text-[11px] font-medium text-slate-600">
+                  {node.customerLabel}
+                </span>
+              )}
+            </div>
             <p className="truncate text-xs text-slate-500">
               {node.domain || 'No domain'}
             </p>

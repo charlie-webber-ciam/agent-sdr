@@ -4,6 +4,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { UserRound } from 'lucide-react';
 
+import { customerStatusLabel } from '@/lib/customer-status';
 import { usePerspective } from '@/lib/perspective-context';
 import { formatDomain, capitalize, cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +18,7 @@ interface AccountCardProps {
     companyName: string;
     domain: string;
     industry: string;
+    customerStatus?: 'auth0_customer' | 'okta_customer' | 'common_customer' | null;
     status: string;
     researchSummary: string | null;
     processedAt: string | null;
@@ -28,6 +30,8 @@ interface AccountCardProps {
     oktaSkus?: string[];
     oktaPriorityScore?: number | null;
     oktaAccountOwner?: string | null;
+    oktaPatch?: string | null;
+    reviewStatus?: 'new' | 'reviewed' | 'working' | 'dismissed';
   };
   selectable?: boolean;
   selected?: boolean;
@@ -36,6 +40,8 @@ interface AccountCardProps {
   footerActionLabel?: string;
   onFooterActionClick?: (id: number) => void;
   displayPerspective?: 'auth0' | 'okta';
+  /** Query string from the accounts list to preserve filter context on navigation */
+  listQuery?: string;
 }
 
 function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
@@ -50,6 +56,14 @@ function statusVariant(status: string): 'default' | 'secondary' | 'destructive' 
       return 'outline';
   }
 }
+
+const PATCH_LABELS: Record<string, string> = {
+  emerging: 'Emerging',
+  crp: 'Corporate',
+  ent: 'Enterprise',
+  stg: 'Strategic',
+  pubsec: 'Public Sector',
+};
 
 function tierBadgeClass(tier: 'A' | 'B' | 'C' | 'DQ' | null | undefined): string {
   if (tier === 'A') return 'border-emerald-300 bg-emerald-100 text-emerald-800';
@@ -68,6 +82,7 @@ function AccountCardInner({
   footerActionLabel,
   onFooterActionClick,
   displayPerspective,
+  listQuery,
 }: AccountCardProps) {
   const router = useRouter();
   const { perspective } = usePerspective();
@@ -107,6 +122,7 @@ function AccountCardInner({
   };
 
   const stalenessInfo = getStalenessInfo(account.processedAt);
+  const customerStatus = customerStatusLabel(account.customerStatus);
 
   const handleCardClick = () => {
     if (onCardClick) {
@@ -114,7 +130,10 @@ function AccountCardInner({
       return;
     }
 
-    router.push(`/accounts/${account.id}`);
+    const detailUrl = listQuery
+      ? `/accounts/${account.id}?${listQuery}`
+      : `/accounts/${account.id}`;
+    router.push(detailUrl);
   };
 
   const tierAccent =
@@ -161,9 +180,17 @@ function AccountCardInner({
             )}
 
             <div className="mt-3 flex flex-wrap gap-2">
+              {customerStatus && (
+                <Badge variant="secondary">{customerStatus}</Badge>
+              )}
               {displayTier && (
                 <Badge variant="outline" className={cn('font-semibold', tierBadgeClass(displayTier))}>
                   {displayTier === 'DQ' ? 'DQ' : `Tier ${displayTier}`}
+                </Badge>
+              )}
+              {activePerspective === 'okta' && account.oktaPatch && (
+                <Badge variant="outline" className="border-purple-300 bg-purple-50 text-purple-700 font-medium">
+                  {PATCH_LABELS[account.oktaPatch] || account.oktaPatch}
                 </Badge>
               )}
               {displaySkus?.map((sku) => (
@@ -177,7 +204,23 @@ function AccountCardInner({
             </div>
           </div>
 
-          <Badge variant={statusVariant(account.status)}>{capitalize(account.status)}</Badge>
+          <div className="flex flex-col items-end gap-1.5">
+            <Badge variant={statusVariant(account.status)}>{capitalize(account.status)}</Badge>
+            {account.reviewStatus && account.reviewStatus !== 'new' && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  'text-[10px] px-1.5 py-0',
+                  account.reviewStatus === 'working' && 'border-amber-300 bg-amber-50 text-amber-700',
+                  account.reviewStatus === 'reviewed' && 'border-emerald-300 bg-emerald-50 text-emerald-700',
+                  account.reviewStatus === 'dismissed' && 'border-red-200 bg-red-50 text-red-600',
+                )}
+              >
+                {account.reviewStatus === 'working' ? 'Working' :
+                 account.reviewStatus === 'reviewed' ? 'Reviewed' : 'Dismissed'}
+              </Badge>
+            )}
+          </div>
         </div>
 
         {account.researchSummary && (
@@ -201,7 +244,10 @@ function AccountCardInner({
               return;
             }
 
-            router.push(`/accounts/${account.id}`);
+            const detailUrl = listQuery
+              ? `/accounts/${account.id}?${listQuery}`
+              : `/accounts/${account.id}`;
+            router.push(detailUrl);
           }}
         >
           {footerActionLabel || 'View Details'}

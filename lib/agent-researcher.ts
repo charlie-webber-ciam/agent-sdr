@@ -1,5 +1,9 @@
 import { Agent, run, webSearchTool, setDefaultOpenAIClient, setTracingDisabled } from '@openai/agents';
 import OpenAI from 'openai';
+import {
+  AUTH0_COMMAND_OF_MESSAGE_OUTPUT_GUIDANCE,
+  AUTH0_VALUE_FRAMEWORK_PROMPT_GUIDANCE,
+} from './auth0-value-framework';
 import { logDetailedError } from './error-logger';
 
 // Disable tracing — it tries to hit api.openai.com directly, which fails with a custom base URL
@@ -16,6 +20,7 @@ setDefaultOpenAIClient(openai);
 
 
 export interface ResearchResult {
+  command_of_message: string;
   current_auth_solution: string;
   customer_base_info: string;
   security_incidents: string;
@@ -55,7 +60,14 @@ const AUTH0_AGENT_INSTRUCTIONS = `You are an expert SDR (Sales Development Repre
 - Note if company has ANZ headquarters or significant regional presence
 - Identify regional pain points that Auth0 CIAM could address
 - Always provide factual, detailed findings with specific data points and sources
+- Run focused web research for each section. Prefer official company, investor, trust, help, documentation, engineering, and careers pages before secondary sources.
+- Preserve clickable markdown links to the strongest sources. Do not strip URLs out of the answer.
+- Distinguish observed fact from inference. If you are inferring, say so directly.
+- Include dates or timing windows whenever they are available and material.
 - Be thorough and professional; if information is not publicly available, state that clearly
+
+**Auth0 Value Framework Messaging Lens:**
+${AUTH0_VALUE_FRAMEWORK_PROMPT_GUIDANCE}
 
 Format all responses in markdown with bold text, bullet points, and links to sources.`;
 
@@ -66,6 +78,45 @@ export const AUTH0_RESEARCH_SECTIONS: Record<string, {
   dbColumn: string;
   buildPrompt: (companyIdentifier: string, companyName: string, industry: string, extraContext?: string) => string;
 }> = {
+  command_of_message: {
+    label: 'Command of the Message: Auth0 Value Framework',
+    dbColumn: 'command_of_message',
+    buildPrompt: (companyIdentifier, companyName, industry, extraContext) => {
+      let prompt = `Research ${companyIdentifier} and build a seller-ready **Command of the Message: Auth0 Value Framework** section for Auth0 CIAM outreach.
+
+Search plan:
+- Search the official site for product pages, signup/login flows, trust/security pages, investor or annual-report content, and help/docs pages.
+- Search recent press releases, interviews, annual reports, and reputable news from the last 12-18 months.
+- Search engineering, developer, careers, and documentation pages for platform, identity, developer-velocity, and modernisation clues.
+- Use reputable secondary sources only to fill gaps or validate what first-party sources suggest.
+
+Focus on:
+- The most likely company objectives and priorities visible in public signals
+- What those objectives imply about identity, customer experience, security, scale, or developer velocity
+- Which Auth0 value drivers, differentiators, capabilities, and proof points fit best
+- Messaging angles an SDR can use immediately
+
+Company context:
+- Company name: ${companyName}
+- Industry: ${industry}
+
+${AUTH0_VALUE_FRAMEWORK_PROMPT_GUIDANCE}
+
+Rules:
+- Run enough targeted searches to support each major claim with evidence.
+- Tie recommendations to public evidence. Do not invent internal priorities or metrics.
+- Prefer business outcomes and execution pressure over generic Auth0 copy.
+- If evidence is thin, say that clearly and lower confidence in the wording.
+- Keep the messaging practical for SDR outreach and early discovery.
+- Preserve clickable markdown links inline where they sharpen the point.
+- In Core Messaging Pieces, explicitly follow: observed signal -> likely problem -> business impact -> Auth0 angle.
+- In Source Links, favour first-party sources when available.
+
+${AUTH0_COMMAND_OF_MESSAGE_OUTPUT_GUIDANCE}`;
+      if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
+      return prompt;
+    },
+  },
   current_auth_solution: {
     label: 'Current Auth Solution',
     dbColumn: 'current_auth_solution',
@@ -76,11 +127,23 @@ export const AUTH0_RESEARCH_SECTIONS: Record<string, {
 - Any public information about their identity infrastructure
 - Tech stack mentions that indicate their auth approach
 
-**Return your findings in MARKDOWN format with:**
-- Use **bold** for important terms and platform names
-- Use bullet points for multiple findings
-- Include [links](url) to sources when available
-- Organize with clear sections if helpful
+Search plan:
+- Search the public login, signup, support, documentation, status, or help surfaces.
+- Search engineering blogs, API docs, release notes, mobile app listings, and careers pages for auth stack clues.
+- Search third-party tech-detection or partner references only if first-party evidence is thin.
+
+Return your findings in MARKDOWN using these exact headings:
+## Likely Current Approach
+## Evidence
+## Gaps / Unknowns
+## Identity Implications
+
+Rules:
+- Put the strongest observed conclusion in Likely Current Approach, and clearly mark any inference.
+- In Evidence, use bullets and end each substantive bullet with a clickable markdown link.
+- In Gaps / Unknowns, say exactly what could not be verified.
+- In Identity Implications, connect the evidence to what it likely means for identity complexity or pain.
+- Use **bold** for important platform names, standards, or login patterns.
 
 Provide detailed, well-formatted findings.`;
       if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
@@ -98,10 +161,22 @@ Provide detailed, well-formatted findings.`;
 - Geographic reach
 - Any public metrics about their user scale
 
-**Return your findings in MARKDOWN format with:**
-- Use **bold** for key numbers and metrics
-- Use bullet points to organize different aspects
-- Include [links](url) to sources when available
+Search plan:
+- Search the official site, investor materials, annual reports, press releases, and app-store profiles for user or customer metrics.
+- Search product, pricing, customer, or case-study pages for who they serve and how they monetise.
+- Search recent news or interviews for growth signals, regional expansion, or customer-scale commentary.
+
+Return your findings in MARKDOWN using these exact headings:
+## Customer / User Scale
+## Business Model / Customer Motion
+## Growth / Geography Signals
+## Identity Implications
+
+Rules:
+- Use **bold** for key numbers, percentages, revenue clues, and scale metrics.
+- End each substantive bullet with a clickable markdown link.
+- If scale is unclear, provide a bounded hypothesis and label it as inference.
+- In Identity Implications, explain what their scale or motion suggests about signup, login, or customer identity complexity.
 
 Provide specific, well-formatted findings with data.`;
       if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
@@ -120,11 +195,23 @@ Provide specific, well-formatted findings with data.`;
 - Recent security-related news
 - ANZ-specific data sovereignty or regulatory requirements
 
-**Return your findings in MARKDOWN format with:**
-- Use **bold** for dates, certifications, and compliance standards
-- Use bullet points for incidents and requirements
-- Include [links](url) to news sources and reports
-- Highlight ANZ-relevant compliance and security considerations
+Search plan:
+- Search trust centres, security pages, privacy policies, annual reports, and compliance pages on the official site.
+- Search recent news, regulatory notices, and reputable coverage for incidents or security pressure.
+- Search region-specific privacy or sovereignty references that affect ANZ operations.
+
+Return your findings in MARKDOWN using these exact headings:
+## Security / Compliance Signals
+## Incidents / Risk Events
+## Current Pressure
+## Identity Implications
+
+Rules:
+- Use **bold** for dates, standards, certifications, incidents, and regulatory references.
+- End each substantive bullet with a clickable markdown link.
+- Keep incidents chronological when possible.
+- If no public incidents are found, say that clearly instead of implying one.
+- In Identity Implications, explain what the security or compliance pressure likely means for customer identity, fraud, or access controls.
 
 Provide detailed, chronological findings from an Auth0 ANZ SDR perspective.`;
       if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
@@ -144,11 +231,23 @@ Provide detailed, chronological findings from an Auth0 ANZ SDR perspective.`;
 - Strategic partnerships
 Focus on news from the last 12-18 months, with emphasis on ANZ market presence.
 
-**Return your findings in MARKDOWN format with:**
-- Use **bold** for funding amounts, dates, and key announcements
-- Use bullet points to organize different news items
-- Include [links](url) to news sources
-- Highlight ANZ-specific news and regional relevance
+Search plan:
+- Search press releases, investor pages, annual reports, and newsroom content on the official site first.
+- Search reputable business/news coverage for funding, acquisitions, launches, and regional expansion.
+- Search for ANZ-specific partnerships, hiring, product rollout, or transformation announcements.
+
+Return your findings in MARKDOWN using these exact headings:
+## Timeline
+## Strategic Moves
+## Why It Matters Now
+## Source Links
+
+Rules:
+- Use **bold** for funding amounts, dates, product launches, and partnership names.
+- In Timeline, keep items in reverse chronological order and end each bullet with a clickable markdown link.
+- In Strategic Moves, explain the most commercially relevant moves, not every minor announcement.
+- In Why It Matters Now, connect the timeline to possible identity urgency, customer experience change, or platform pressure.
+- In Source Links, list the strongest 2-5 markdown links used in the section.
 
 Provide chronological, well-formatted news with sources from an Auth0 ANZ SDR perspective.`;
       if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
@@ -167,10 +266,22 @@ Provide chronological, well-formatted news with sources from an Auth0 ANZ SDR pe
 - Engineering culture and tech blog insights
 - Developer-facing products or APIs
 
-**Return your findings in MARKDOWN format with:**
-- Use **bold** for technology names and platforms
-- Use bullet points for different initiatives
-- Include [links](url) to blog posts and announcements
+Search plan:
+- Search engineering blogs, developer docs, release notes, API or platform pages, and careers pages for architecture clues.
+- Search official press releases or annual reports for transformation, cloud, platform, or digital program references.
+- Search reputable coverage for modernisation initiatives if first-party sources are sparse.
+
+Return your findings in MARKDOWN using these exact headings:
+## Modernisation Signals
+## Platform / Architecture Clues
+## Customer Experience / Developer Motion
+## Identity Implications
+
+Rules:
+- Use **bold** for technology names, clouds, developer platforms, and initiatives.
+- End each substantive bullet with a clickable markdown link.
+- Prefer concrete examples over vague claims about transformation.
+- In Identity Implications, explain what these initiatives likely mean for login, customer identity, extensibility, or developer velocity.
 
 Provide specific, well-formatted examples.`;
       if (extraContext) prompt += `\n\n**Additional context from user:** ${extraContext}`;
@@ -184,6 +295,11 @@ Provide specific, well-formatted examples.`;
       let prompt = `Find key decision-makers at ${companyName} for Auth0 CIAM sales outreach in the ANZ market.
 
 **CRITICAL REQUIREMENT: You MUST provide EXACTLY 5 entries.**
+
+Search plan:
+- Search leadership, management, careers, newsroom, and team pages on the official site.
+- Search public bios, conference pages, and reputable business profiles for current titles.
+- Prioritise people with explicit ANZ, APAC, Australia, or New Zealand scope when available.
 
 **Prioritize ANZ-based decision makers** (Australia/New Zealand offices). If you cannot find 5 specific named individuals, fill remaining slots with IDEAL PERSONAS based on the company's industry, size, and ANZ presence.
 
@@ -253,7 +369,7 @@ export async function researchCompany(company: CompanyInfo, model?: string, oppo
 
   try {
     const companyIdentifier = company.domain ? `${company.company_name} (${company.domain})` : company.company_name;
-    const TOTAL_STEPS = 7;
+    const TOTAL_STEPS = 8;
     const fallbackOutput: string | undefined = 'Research agent failed — no data available for this section.';
 
     // Helper to run a section with error handling so one failure doesn't crash all research
@@ -276,30 +392,83 @@ export async function researchCompany(company: CompanyInfo, model?: string, oppo
     const techResult = await runSection('tech_transformation', 'Tech Transformation', 5);
     const prospectsResult = await runSection('prospects', 'Prospects', 6);
 
+    const synthesisInput = [
+      `Company: ${company.company_name}`,
+      `Industry: ${company.industry}`,
+      '',
+      '## Current Auth Solution',
+      authResult.finalOutput || fallbackOutput,
+      '',
+      '## Customer Base',
+      customerResult.finalOutput || fallbackOutput,
+      '',
+      '## Security & Compliance',
+      securityResult.finalOutput || fallbackOutput,
+      '',
+      '## News & Funding',
+      newsResult.finalOutput || fallbackOutput,
+      '',
+      '## Tech Transformation',
+      techResult.finalOutput || fallbackOutput,
+      '',
+      '## Prospects',
+      prospectsResult.finalOutput || fallbackOutput,
+    ].join('\n');
+
+    const commandPrompt = `You already have the research findings below for ${company.company_name}. Synthesize them into a seller-ready **Command of the Message: Auth0 Value Framework** section for an Auth0 SDR in the ANZ market.
+
+${AUTH0_VALUE_FRAMEWORK_PROMPT_GUIDANCE}
+
+Rules:
+- Use only the findings below. Do not introduce fresh claims unless you can clearly infer them from the provided research.
+- Tie the company's likely objectives to the best-fit Auth0 value drivers.
+- Make the messaging immediately usable in outreach.
+- Keep proof points and differentiators tightly relevant.
+
+${AUTH0_COMMAND_OF_MESSAGE_OUTPUT_GUIDANCE}
+
+## Research Findings
+${synthesisInput}`;
+
+    onStep?.('Command of the Message', 7, TOTAL_STEPS);
+    let commandResult: { finalOutput: string | undefined } = { finalOutput: fallbackOutput };
+    try {
+      commandResult = await run(agent, commandPrompt);
+    } catch (err) {
+      console.error(`[Auth0 SDR] Command of the Message agent failed for ${company.company_name}:`, err);
+    }
+
     // Generate summary
-    const summaryPrompt = `Based on all the research about ${company.company_name}, create a concise 2-3 paragraph executive summary for an Auth0 SDR in the ANZ market.
+    const summaryPrompt = `Based on the research findings below, create a concise executive summary for an Auth0 SDR in the ANZ market.
 
-**Focus on:**
-1. Why they might need Auth0 CIAM (current solution gaps, scale challenges, security/compliance needs)
-2. ANZ-specific opportunities (regional compliance, data sovereignty, local growth)
-3. Key timing indicators (funding, growth, transformation initiatives)
-4. Primary decision-makers to target (prioritize ANZ-based contacts)
+Focus on:
+1. Why they might need Auth0 CIAM now, based on current solution gaps, scale challenges, customer experience pressure, or security/compliance needs.
+2. ANZ-specific opportunities such as regional compliance, data sovereignty, or local growth.
+3. Key timing indicators such as funding, launches, transformation work, or organisational change.
+4. Primary decision-makers to target, prioritising ANZ-based contacts where possible.
+5. The highest-conviction narrative from the Command of the Message section without repeating it verbatim.
 
-**Consider ANZ context:**
-- Regional compliance requirements (Australian Privacy Act, NZ Privacy Act)
-- ANZ market presence and expansion plans
-- Local customer base and growth trajectory
-- Time zone and regional business practices
+Return in MARKDOWN using these exact headings:
+## What Matters Now
+## Why Auth0 Has a POV Here
+## Who To Target
+## Source Links
 
-**Return in MARKDOWN format with:**
-- Use **bold** for key insights and pain points
-- Use bullet points for action items
-- Make it actionable and sales-focused for ANZ market
-- Include specific Auth0 CIAM value propositions for this account
+Rules:
+- Use **bold** for key insights, pain points, dates, or metrics.
+- Keep the summary practical and sales-useful, not generic.
+- In Source Links, list the strongest 2-4 clickable markdown links already reflected in the research.
+- If evidence is thin, lower confidence instead of overstating certainty.
 
-Provide a compelling, well-formatted summary from an Auth0 ANZ SDR perspective.`;
+Provide a compelling, well-formatted summary from an Auth0 ANZ SDR perspective.
 
-    onStep?.('Executive Summary', 7, TOTAL_STEPS);
+## Research Findings
+${synthesisInput}
+
+## Command of the Message
+${commandResult.finalOutput || fallbackOutput}`;
+
+    onStep?.('Executive Summary', 8, TOTAL_STEPS);
     let summaryResult: { finalOutput: string | undefined } = { finalOutput: fallbackOutput };
     try {
       summaryResult = await run(agent, summaryPrompt);
@@ -354,6 +523,7 @@ Provide a compelling, well-formatted summary from an Auth0 ANZ SDR perspective.`
     prospectsList = prospectsList.slice(0, 5);
 
     return {
+      command_of_message: commandResult.finalOutput || 'No command of message available',
       current_auth_solution: authResult.finalOutput || 'No information found',
       customer_base_info: customerResult.finalOutput || 'No information found',
       security_incidents: securityResult.finalOutput || 'No information found',

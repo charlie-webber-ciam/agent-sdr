@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePerspective, OktaPatch } from '@/lib/perspective-context';
+import { useToast } from '@/lib/toast-context';
 
 const PATCH_OPTIONS: { value: OktaPatch; label: string; desc: string }[] = [
   { value: 'emerging', label: 'Emerging', desc: '<300 employees' },
@@ -44,6 +45,7 @@ const PATCH_TIER_DEFS: Record<OktaPatch, { a: string; b: string; c: string; dq?:
 export default function CategorizePage() {
   const router = useRouter();
   const { perspective, oktaPatch } = usePerspective();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
   const [recentJobs, setRecentJobs] = useState<any[]>([]);
@@ -116,14 +118,14 @@ export default function CategorizePage() {
 
       if (!createRes.ok) {
         const error = await createRes.json();
-        alert(error.message || 'Failed to create categorization job');
+        toast.error(error.message || 'Failed to create categorization job');
         return;
       }
 
       const createData = await createRes.json();
 
       if (createData.totalAccounts === 0) {
-        alert('No accounts found matching the specified filters');
+        toast.info('No accounts found matching the specified filters');
         return;
       }
 
@@ -138,11 +140,11 @@ export default function CategorizePage() {
         // Redirect to progress page
         router.push(`/categorize/progress/${createData.jobId}`);
       } else {
-        alert('Failed to start categorization job');
+        toast.error('Failed to start categorization job');
       }
     } catch (error) {
       console.error('Failed to start categorization:', error);
-      alert('An error occurred while starting categorization');
+      toast.error('An error occurred while starting categorization');
     } finally {
       setLoading(false);
     }
@@ -165,13 +167,13 @@ export default function CategorizePage() {
 
       if (!bulkRes.ok) {
         const error = await bulkRes.json();
-        alert(error.details || 'Failed to prepare Okta categorization');
+        toast.error(error.details || 'Failed to prepare Okta categorization');
         return;
       }
 
       const bulkData = await bulkRes.json();
       if (!bulkData.success || bulkData.totalAccounts === 0) {
-        alert(bulkData.message || 'No accounts found matching the specified filters');
+        toast.info(bulkData.message || 'No accounts found matching the specified filters');
         return;
       }
 
@@ -195,11 +197,11 @@ export default function CategorizePage() {
       }
 
       setOktaProgress({ total: ids.length, done, running: false });
-      alert(`Okta categorization complete! Processed ${done} of ${ids.length} accounts.`);
+      toast.success(`Okta categorization complete! Processed ${done} of ${ids.length} accounts.`);
       fetchData(); // Refresh stats
     } catch (error) {
       console.error('Failed to start Okta categorization:', error);
-      alert('An error occurred while starting Okta categorization');
+      toast.error('An error occurred while starting Okta categorization');
     } finally {
       setLoading(false);
       setOktaProgress(prev => ({ ...prev, running: false }));

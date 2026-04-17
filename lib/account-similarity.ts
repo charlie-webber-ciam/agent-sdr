@@ -7,10 +7,14 @@ import {
   getVectorDistanceThreshold,
   retrieveVectorPoints,
 } from './account-vectors';
+import { isMissingVectorCollectionError } from './vector-service-errors';
+import { getVectorReadProfileVersion, getVectorWriteProfileVersion } from './vector-profile';
 
 export interface MapNeighbor {
   accountId: number;
   companyName: string;
+  semanticScore: number;
+  hybridScore: number;
   rawScore: number;
   spreadScore: number;
   summarySnippet: string;
@@ -22,7 +26,9 @@ export interface AccountMapNode {
   companyName: string;
   domain: string | null;
   industry: string;
+  customerStatus: Account['customer_status'];
   processedAt: string | null;
+  profileVersion: string;
   tier: string | null;
   oktaTier: string | null;
   priorityScore: number | null;
@@ -38,6 +44,8 @@ export interface AccountMapEdge {
   id: string;
   source: string;
   target: string;
+  semanticScore: number;
+  hybridScore: number;
   rawScore: number;
   spreadScore: number;
 }
@@ -60,8 +68,50 @@ interface AccountMapRecord {
 interface RawNeighbor {
   accountId: number;
   companyName: string;
-  rawScore: number;
+  semanticScore: number;
+  hybridScore: number;
   summarySnippet: string;
+}
+
+interface EdgeScore {
+  source: string;
+  target: string;
+  semanticScore: number;
+  hybridScore: number;
+}
+
+interface AccountSimilarityMapFilters {
+  perspective: VectorPerspective;
+  search?: string;
+  customerStatus?: string;
+  tier?: string | 'unassigned';
+  oktaTier?: string | 'unassigned';
+  accountOwner?: string;
+  oktaAccountOwner?: string;
+  includeGlobalParent?: boolean;
+  hqState?: string;
+  sortBy?: string;
+  limit?: number;
+  selectedAccountId?: number;
+}
+
+export interface AccountSimilarityMapResult {
+  nodes: AccountMapNode[];
+  edges: AccountMapEdge[];
+  selectedRecord: AccountMapNode | null;
+  neighborRecords: AccountMapNode[];
+  total: number;
+  threshold: number;
+  profileVersion: string;
+  normalization: SimilarityNormalization;
+  filters: ReturnType<typeof getFilterMetadata>;
+}
+
+interface AccountComparisonResult {
+  left: ReturnType<typeof buildComparisonAccount>;
+  right: ReturnType<typeof buildComparisonAccount>;
+  profileVersion: string;
+  scores: Record<VectorPerspective, { semanticScore: number | null; hybridScore: number | null }>;
 }
 
 const DISPLAY_NEIGHBOR_LIMIT = 12;
@@ -146,27 +196,127 @@ function buildRecordMap(
   return records;
 }
 
+function jaccardSimilarity(left: string[], right: string[]): number {
+  const leftSet = new Set(left.map((value) => value.toLowerCase()));
+  const rightSet = new Set(right.map((value) => value.toLowerCase()));
+
+  if (leftSet.size === 0 || rightSet.size === 0) return 0;
+
+  let intersection = 0;
+  for (const value of leftSet) {
+    if (rightSet.has(value)) intersection += 1;
+  }
+
+  const union = new Set([...leftSet, ...rightSet]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function normalizeCloseness(left: number | null, right: number | null, maxDifference: number): number {
+  if (left === null || right === null || maxDifference <= 0) return 0;
+  return Math.max(1 - (Math.abs(left - right) / maxDifference), 0);
+}
+
+function getRelevantUseCases(payload: AccountVectorPayload, perspective: VectorPerspective): string[] {
+  if (perspective === 'auth0') return payload.useCases;
+  if (perspective === 'okta') return payload.oktaUseCases;
+  return Array.from(new Set([...payload.useCases, ...payload.oktaUseCases]));
+}
+
+function getRelevantSkus(payload: AccountVectorPayload, perspective: VectorPerspective): string[] {
+  if (perspective === 'auth0') return payload.auth0Skus;
+  if (perspective === 'okta') return payload.oktaSkus;
+  return Array.from(new Set([...payload.auth0Skus, ...payload.oktaSkus]));
+}
+
+function getPriorityCloseness(
+  left: AccountVectorPayload,
+  right: AccountVectorPayload,
+  perspective: VectorPerspective
+): number {
+  if (perspective === 'auth0') {
+    return normalizeCloseness(left.priorityScore, right.priorityScore, 9);
+  }
+
+  if (perspective === 'okta') {
+    return normalizeCloseness(left.oktaPriorityScore, right.oktaPriorityScore, 100);
+  }
+
+  return Math.max(
+    normalizeCloseness(left.priorityScore, right.priorityScore, 9),
+    normalizeCloseness(left.oktaPriorityScore, right.oktaPriorityScore, 100)
+  );
+}
+
+function hasTierMatch(
+  left: AccountVectorPayload,
+  right: AccountVectorPayload,
+  perspective: VectorPerspective
+): boolean {
+  if (perspective === 'auth0') {
+    return !!left.tier && left.tier === right.tier;
+  }
+
+  if (perspective === 'okta') {
+    return !!left.oktaTier && left.oktaTier === right.oktaTier;
+  }
+
+  return (!!left.tier && left.tier === right.tier) || (!!left.oktaTier && left.oktaTier === right.oktaTier);
+}
+
+function buildHybridScore(
+  left: AccountVectorPayload,
+  right: AccountVectorPayload,
+  perspective: VectorPerspective,
+  semanticScore: number
+): number {
+  let boost = 0;
+
+  if (hasTierMatch(left, right, perspective)) {
+    boost += 0.015;
+  }
+
+  boost += 0.02 * getPriorityCloseness(left, right, perspective);
+  boost += 0.025 * jaccardSimilarity(getRelevantUseCases(left, perspective), getRelevantUseCases(right, perspective));
+  boost += 0.02 * jaccardSimilarity(getRelevantSkus(left, perspective), getRelevantSkus(right, perspective));
+
+  if (left.customerStatus && right.customerStatus && left.customerStatus === right.customerStatus) {
+    boost += 0.01;
+  }
+
+  if ((perspective === 'okta' || perspective === 'overall')
+    && left.oktaOpportunityType
+    && left.oktaOpportunityType === right.oktaOpportunityType) {
+    boost += 0.01;
+  }
+
+  const boundedBoost = Math.min(boost, 0.08);
+  return Number(Math.min(Math.max(semanticScore + boundedBoost, -1), 1).toFixed(4));
+}
+
 function buildRawNeighborsForRecord(
   source: AccountMapRecord,
-  candidates: AccountMapRecord[]
+  candidates: AccountMapRecord[],
+  perspective: VectorPerspective
 ): RawNeighbor[] {
   const neighbors: RawNeighbor[] = [];
 
   for (const candidate of candidates) {
     if (candidate.account.id === source.account.id) continue;
 
-    const score = cosineSimilarity(source.point.vector, candidate.point.vector);
-    if (!Number.isFinite(score)) continue;
+    const semanticScore = cosineSimilarity(source.point.vector, candidate.point.vector);
+    if (!Number.isFinite(semanticScore)) continue;
 
+    const hybridScore = buildHybridScore(source.point.payload, candidate.point.payload, perspective, semanticScore);
     neighbors.push({
       accountId: candidate.account.id,
       companyName: candidate.account.company_name,
-      rawScore: score,
+      semanticScore,
+      hybridScore,
       summarySnippet: candidate.point.payload.summarySnippet,
     });
   }
 
-  neighbors.sort((left, right) => right.rawScore - left.rawScore);
+  neighbors.sort((left, right) => right.hybridScore - left.hybridScore || right.semanticScore - left.semanticScore);
   return neighbors;
 }
 
@@ -182,7 +332,9 @@ function buildNode(
     companyName: record.account.company_name,
     domain: record.account.domain,
     industry: record.account.industry,
+    customerStatus: record.account.customer_status,
     processedAt: record.account.processed_at,
+    profileVersion: record.point.payload.profileVersion,
     tier: record.account.tier,
     oktaTier: record.account.okta_tier,
     priorityScore: record.account.priority_score,
@@ -195,8 +347,10 @@ function buildNode(
       .slice(0, DISPLAY_NEIGHBOR_LIMIT)
       .map((neighbor) => ({
         ...neighbor,
-        rawScore: Number(neighbor.rawScore.toFixed(4)),
-        spreadScore: normalizeSimilarityScore(neighbor.rawScore, normalization),
+        semanticScore: Number(neighbor.semanticScore.toFixed(4)),
+        hybridScore: Number(neighbor.hybridScore.toFixed(4)),
+        rawScore: Number(neighbor.hybridScore.toFixed(4)),
+        spreadScore: normalizeSimilarityScore(neighbor.hybridScore, normalization),
       })),
   };
 }
@@ -241,55 +395,74 @@ function computeClusters(nodeIds: string[], edges: AccountMapEdge[]): Map<string
   return clusters;
 }
 
-export async function buildAccountSimilarityMap(filters: {
-  perspective: VectorPerspective;
-  search?: string;
-  tier?: string | 'unassigned';
-  oktaTier?: string | 'unassigned';
-  accountOwner?: string;
-  oktaAccountOwner?: string;
-  includeGlobalParent?: boolean;
-  hqState?: string;
-  sortBy?: string;
-  limit?: number;
-  selectedAccountId?: number;
-}): Promise<{
-  nodes: AccountMapNode[];
-  edges: AccountMapEdge[];
-  selectedRecord: AccountMapNode | null;
-  neighborRecords: AccountMapNode[];
-  total: number;
-  threshold: number;
-  normalization: SimilarityNormalization;
-  filters: ReturnType<typeof getFilterMetadata>;
-}> {
+function buildEmptySimilarityMap(profileVersion: string, total: number, threshold: number): AccountSimilarityMapResult {
+  return {
+    nodes: [],
+    edges: [],
+    selectedRecord: null,
+    neighborRecords: [],
+    total,
+    threshold,
+    profileVersion,
+    normalization: buildSimilarityNormalization([]),
+    filters: getFilterMetadata(),
+  };
+}
+
+function getSimilarityProfileCandidates(perspective: VectorPerspective): string[] {
+  const preferredProfileVersion = getVectorReadProfileVersion();
+  const writeProfileVersion = getVectorWriteProfileVersion();
+
+  if (preferredProfileVersion === writeProfileVersion) {
+    return [preferredProfileVersion];
+  }
+
+  const preferredHasIndexedAccounts = getIndexedAccountsForMap({
+    perspective,
+    profileVersion: preferredProfileVersion,
+    limit: 1,
+    offset: 0,
+  }).total > 0;
+  const writeHasIndexedAccounts = getIndexedAccountsForMap({
+    perspective,
+    profileVersion: writeProfileVersion,
+    limit: 1,
+    offset: 0,
+  }).total > 0;
+
+  if (!preferredHasIndexedAccounts && writeHasIndexedAccounts) {
+    return [writeProfileVersion, preferredProfileVersion];
+  }
+
+  return writeHasIndexedAccounts
+    ? [preferredProfileVersion, writeProfileVersion]
+    : [preferredProfileVersion];
+}
+
+async function buildAccountSimilarityMapForProfile(
+  filters: AccountSimilarityMapFilters,
+  profileVersion: string
+): Promise<AccountSimilarityMapResult> {
   const threshold = getVectorDistanceThreshold();
   const { accounts: filteredAccounts, total } = getIndexedAccountsForMap({
     ...filters,
+    profileVersion,
     limit: filters.limit ?? 200,
     offset: 0,
   });
 
   if (filteredAccounts.length === 0) {
-    return {
-      nodes: [],
-      edges: [],
-      selectedRecord: null,
-      neighborRecords: [],
-      total,
-      threshold,
-      normalization: buildSimilarityNormalization([]),
-      filters: getFilterMetadata(),
-    };
+    return buildEmptySimilarityMap(profileVersion, total, threshold);
   }
 
   const { accounts: candidateAccounts } = getIndexedAccountsForMap({
     perspective: filters.perspective,
+    profileVersion,
     includeGlobalParent: filters.includeGlobalParent,
   });
 
   const pointIds = candidateAccounts.map((account) => getAccountVectorPointId(account.id, filters.perspective));
-  const payloadMap = buildPayloadMap(await retrieveVectorPoints(pointIds));
+  const payloadMap = buildPayloadMap(await retrieveVectorPoints(pointIds, { profileVersion }));
   const candidateRecordMap = buildRecordMap(candidateAccounts, payloadMap, filters.perspective);
   const candidateRecords = Array.from(candidateRecordMap.values());
   const anchorRecords = filteredAccounts.reduce<AccountMapRecord[]>((result, account) => {
@@ -301,20 +474,11 @@ export async function buildAccountSimilarityMap(filters: {
   }, []);
 
   if (anchorRecords.length === 0) {
-    return {
-      nodes: [],
-      edges: [],
-      selectedRecord: null,
-      neighborRecords: [],
-      total,
-      threshold,
-      normalization: buildSimilarityNormalization([]),
-      filters: getFilterMetadata(),
-    };
+    return buildEmptySimilarityMap(profileVersion, total, threshold);
   }
 
   const neighborMap = new Map<number, RawNeighbor[]>();
-  const edgeScores = new Map<string, { source: string; target: string; rawScore: number }>();
+  const edgeScores = new Map<string, EdgeScore>();
   const allScores: number[] = [];
 
   for (let leftIndex = 0; leftIndex < anchorRecords.length; leftIndex += 1) {
@@ -322,15 +486,18 @@ export async function buildAccountSimilarityMap(filters: {
 
     for (let rightIndex = leftIndex + 1; rightIndex < anchorRecords.length; rightIndex += 1) {
       const right = anchorRecords[rightIndex];
-      const score = cosineSimilarity(left.point.vector, right.point.vector);
-      if (!Number.isFinite(score)) continue;
-      allScores.push(score);
+      const semanticScore = cosineSimilarity(left.point.vector, right.point.vector);
+      if (!Number.isFinite(semanticScore)) continue;
+
+      const hybridScore = buildHybridScore(left.point.payload, right.point.payload, filters.perspective, semanticScore);
+      allScores.push(hybridScore);
 
       const leftNeighbors = neighborMap.get(left.account.id) || [];
       leftNeighbors.push({
         accountId: right.account.id,
         companyName: right.account.company_name,
-        rawScore: score,
+        semanticScore,
+        hybridScore,
         summarySnippet: right.point.payload.summarySnippet,
       });
       neighborMap.set(left.account.id, leftNeighbors);
@@ -339,7 +506,8 @@ export async function buildAccountSimilarityMap(filters: {
       rightNeighbors.push({
         accountId: left.account.id,
         companyName: left.account.company_name,
-        rawScore: score,
+        semanticScore,
+        hybridScore,
         summarySnippet: left.point.payload.summarySnippet,
       });
       neighborMap.set(right.account.id, rightNeighbors);
@@ -349,8 +517,8 @@ export async function buildAccountSimilarityMap(filters: {
   const normalization = buildSimilarityNormalization(allScores);
 
   for (const [accountId, neighbors] of neighborMap.entries()) {
-    neighbors.sort((left, right) => right.rawScore - left.rawScore);
-    const topNeighbors = neighbors.filter((neighbor) => neighbor.rawScore >= threshold).slice(0, 3);
+    neighbors.sort((left, right) => right.hybridScore - left.hybridScore || right.semanticScore - left.semanticScore);
+    const topNeighbors = neighbors.filter((neighbor) => neighbor.hybridScore >= threshold).slice(0, 3);
 
     for (const neighbor of topNeighbors) {
       const sourceId = toNodeId(accountId);
@@ -358,11 +526,12 @@ export async function buildAccountSimilarityMap(filters: {
       const key = [sourceId, targetId].sort().join('::');
       const existing = edgeScores.get(key);
 
-      if (!existing || neighbor.rawScore > existing.rawScore) {
+      if (!existing || neighbor.hybridScore > existing.hybridScore) {
         edgeScores.set(key, {
           source: sourceId,
           target: targetId,
-          rawScore: neighbor.rawScore,
+          semanticScore: neighbor.semanticScore,
+          hybridScore: neighbor.hybridScore,
         });
       }
     }
@@ -373,17 +542,19 @@ export async function buildAccountSimilarityMap(filters: {
       id: edge.source < edge.target ? `${edge.source}-${edge.target}` : `${edge.target}-${edge.source}`,
       source: edge.source,
       target: edge.target,
-      rawScore: Number(edge.rawScore.toFixed(4)),
-      spreadScore: normalizeSimilarityScore(edge.rawScore, normalization),
+      semanticScore: Number(edge.semanticScore.toFixed(4)),
+      hybridScore: Number(edge.hybridScore.toFixed(4)),
+      rawScore: Number(edge.hybridScore.toFixed(4)),
+      spreadScore: normalizeSimilarityScore(edge.hybridScore, normalization),
     }))
-    .sort((left, right) => right.rawScore - left.rawScore);
+    .sort((left, right) => right.hybridScore - left.hybridScore || right.semanticScore - left.semanticScore);
 
   const clusterMap = computeClusters(anchorRecords.map((record) => toNodeId(record.account.id)), edges);
 
   const nodes: AccountMapNode[] = anchorRecords.map((record) => buildNode(
     record,
     clusterMap.get(toNodeId(record.account.id)) || 0,
-    buildRawNeighborsForRecord(record, candidateRecords),
+    buildRawNeighborsForRecord(record, candidateRecords, filters.perspective),
     normalization
   ));
   const nodeById = new Map(nodes.map((node) => [node.accountId, node]));
@@ -396,7 +567,7 @@ export async function buildAccountSimilarityMap(filters: {
     || buildNode(
       selectedRecordSource,
       clusterMap.get(toNodeId(selectedRecordSource.account.id)) || 0,
-      buildRawNeighborsForRecord(selectedRecordSource, candidateRecords),
+      buildRawNeighborsForRecord(selectedRecordSource, candidateRecords, filters.perspective),
       normalization
     );
   const neighborRecords = selectedRecord.nearestNeighbors.reduce<AccountMapNode[]>((result, neighbor) => {
@@ -419,12 +590,32 @@ export async function buildAccountSimilarityMap(filters: {
     neighborRecords,
     total,
     threshold,
+    profileVersion,
     normalization,
     filters: getFilterMetadata(),
   };
 }
 
-function buildComparisonAccount(account: Account, overallSnippet: string | null) {
+export async function buildAccountSimilarityMap(filters: AccountSimilarityMapFilters): Promise<AccountSimilarityMapResult> {
+  let lastMissingCollectionError: unknown = null;
+
+  for (const profileVersion of getSimilarityProfileCandidates(filters.perspective)) {
+    try {
+      return await buildAccountSimilarityMapForProfile(filters, profileVersion);
+    } catch (error) {
+      if (isMissingVectorCollectionError(error)) {
+        lastMissingCollectionError = error;
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw lastMissingCollectionError || new Error('Failed to build account similarity map.');
+}
+
+function buildComparisonAccount(account: Account, overallSnippet: string | null, profileVersion: string | null) {
   return {
     id: account.id,
     companyName: account.company_name,
@@ -437,14 +628,63 @@ function buildComparisonAccount(account: Account, overallSnippet: string | null)
     researchSummary: account.research_summary,
     oktaResearchSummary: account.okta_research_summary,
     overallSummarySnippet: overallSnippet,
+    profileVersion,
   };
 }
 
-export async function compareAccounts(leftAccountId: number, rightAccountId: number): Promise<{
-  left: ReturnType<typeof buildComparisonAccount>;
-  right: ReturnType<typeof buildComparisonAccount>;
-  scores: Record<VectorPerspective, number | null>;
-}> {
+async function compareAccountsForProfile(
+  leftAccount: Account,
+  rightAccount: Account,
+  profileVersion: string
+): Promise<AccountComparisonResult> {
+  const overallPointKey = {
+    left: getAccountVectorPointId(leftAccount.id, 'overall'),
+    right: getAccountVectorPointId(rightAccount.id, 'overall'),
+  };
+  const pointIds = (['auth0', 'okta', 'overall'] as VectorPerspective[]).flatMap((perspective) => [
+    getAccountVectorPointId(leftAccount.id, perspective),
+    getAccountVectorPointId(rightAccount.id, perspective),
+  ]);
+
+  const points = await retrieveVectorPoints(pointIds, { profileVersion });
+  const pointMap = new Map(points.map((point) => [point.id, point]));
+
+  const scores = {
+    auth0: { semanticScore: null, hybridScore: null },
+    okta: { semanticScore: null, hybridScore: null },
+    overall: { semanticScore: null, hybridScore: null },
+  } as Record<VectorPerspective, { semanticScore: number | null; hybridScore: number | null }>;
+
+  for (const perspective of ['auth0', 'okta', 'overall'] as VectorPerspective[]) {
+    const leftPoint = pointMap.get(getAccountVectorPointId(leftAccount.id, perspective));
+    const rightPoint = pointMap.get(getAccountVectorPointId(rightAccount.id, perspective));
+
+    if (leftPoint && rightPoint) {
+      const semanticScore = cosineSimilarity(leftPoint.vector, rightPoint.vector);
+      scores[perspective] = {
+        semanticScore: Number(semanticScore.toFixed(4)),
+        hybridScore: buildHybridScore(leftPoint.payload, rightPoint.payload, perspective, semanticScore),
+      };
+    }
+  }
+
+  return {
+    left: buildComparisonAccount(
+      leftAccount,
+      pointMap.get(overallPointKey.left)?.payload.summarySnippet || null,
+      pointMap.get(overallPointKey.left)?.payload.profileVersion || null
+    ),
+    right: buildComparisonAccount(
+      rightAccount,
+      pointMap.get(overallPointKey.right)?.payload.summarySnippet || null,
+      pointMap.get(overallPointKey.right)?.payload.profileVersion || null
+    ),
+    profileVersion,
+    scores,
+  };
+}
+
+export async function compareAccounts(leftAccountId: number, rightAccountId: number): Promise<AccountComparisonResult> {
   const leftAccount = getAccount(leftAccountId);
   const rightAccount = getAccount(rightAccountId);
 
@@ -452,38 +692,20 @@ export async function compareAccounts(leftAccountId: number, rightAccountId: num
     throw new Error('One or both accounts were not found.');
   }
 
-  const pointIds = (['auth0', 'okta', 'overall'] as VectorPerspective[]).flatMap((perspective) => [
-    getAccountVectorPointId(leftAccount.id, perspective),
-    getAccountVectorPointId(rightAccount.id, perspective),
-  ]);
+  let lastMissingCollectionError: unknown = null;
 
-  const points = await retrieveVectorPoints(pointIds);
-  const pointMap = new Map(points.map((point) => [point.id, point]));
+  for (const profileVersion of getSimilarityProfileCandidates('overall')) {
+    try {
+      return await compareAccountsForProfile(leftAccount, rightAccount, profileVersion);
+    } catch (error) {
+      if (isMissingVectorCollectionError(error)) {
+        lastMissingCollectionError = error;
+        continue;
+      }
 
-  const scores = {
-    auth0: null,
-    okta: null,
-    overall: null,
-  } as Record<VectorPerspective, number | null>;
-
-  for (const perspective of ['auth0', 'okta', 'overall'] as VectorPerspective[]) {
-    const leftPoint = pointMap.get(getAccountVectorPointId(leftAccount.id, perspective));
-    const rightPoint = pointMap.get(getAccountVectorPointId(rightAccount.id, perspective));
-
-    if (leftPoint && rightPoint) {
-      scores[perspective] = Number(cosineSimilarity(leftPoint.vector, rightPoint.vector).toFixed(4));
+      throw error;
     }
   }
 
-  return {
-    left: buildComparisonAccount(
-      leftAccount,
-      pointMap.get(getAccountVectorPointId(leftAccount.id, 'overall'))?.payload.summarySnippet || null
-    ),
-    right: buildComparisonAccount(
-      rightAccount,
-      pointMap.get(getAccountVectorPointId(rightAccount.id, 'overall'))?.payload.summarySnippet || null
-    ),
-    scores,
-  };
+  throw lastMissingCollectionError || new Error('Failed to compare accounts.');
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAccount, updateAccountAuth0Research, updateAccountOktaResearch } from '@/lib/db';
+import { buildAttachedAccountDocumentContext } from '@/lib/account-documents';
 import { researchSection as researchAuth0Section, AUTH0_RESEARCH_SECTIONS } from '@/lib/agent-researcher';
 import { researchOktaSection, OKTA_RESEARCH_SECTIONS } from '@/lib/okta-agent-researcher';
 import { indexAccountResearchVectorsBestEffort } from '@/lib/account-vectors';
@@ -37,6 +38,11 @@ export async function POST(
       industry: account.industry,
     };
 
+    const attachedDocumentContext = buildAttachedAccountDocumentContext(accountId);
+    const mergedAdditionalContext = [additionalContext, attachedDocumentContext]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .join('\n\n');
+
     const results: Record<string, string> = {};
 
     if (perspective === 'auth0') {
@@ -52,7 +58,7 @@ export async function POST(
 
       // Run sections sequentially to avoid rate limits
       for (const sectionKey of sections) {
-        const content = await researchAuth0Section(company, sectionKey, additionalContext || undefined, model);
+        const content = await researchAuth0Section(company, sectionKey, mergedAdditionalContext || undefined, model);
         results[sectionKey] = content;
 
         // Update DB column for this section
@@ -73,7 +79,7 @@ export async function POST(
       }
 
       for (const sectionKey of sections) {
-        const content = await researchOktaSection(company, sectionKey, additionalContext || undefined, model);
+        const content = await researchOktaSection(company, sectionKey, mergedAdditionalContext || undefined, model);
         results[sectionKey] = content;
 
         // Map Okta section keys to DB update format

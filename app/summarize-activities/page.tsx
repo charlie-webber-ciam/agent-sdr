@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useToast } from '@/lib/toast-context';
 
 interface SummarizationStats {
   accountsWithActivities: number;
@@ -11,6 +12,7 @@ interface SummarizationStats {
 
 export default function SummarizeActivitiesPage() {
   const router = useRouter();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<SummarizationStats | null>(null);
   const [unsummarizedOnly, setUnsummarizedOnly] = useState(true);
@@ -50,14 +52,14 @@ export default function SummarizeActivitiesPage() {
 
       if (!createRes.ok) {
         const error = await createRes.json();
-        alert(error.error || 'Failed to create job');
+        toast.error(error.error || 'Failed to create job');
         return;
       }
 
       const createData = await createRes.json();
 
       if (createData.totalAccounts === 0) {
-        alert('No accounts found with activities matching the specified filters');
+        toast.info('No accounts found with activities matching the specified filters');
         return;
       }
 
@@ -71,11 +73,11 @@ export default function SummarizeActivitiesPage() {
       if (startRes.ok) {
         router.push(`/summarize-activities/progress/${createData.jobId}`);
       } else {
-        alert('Failed to start activity summarization job');
+        toast.error('Failed to start activity summarization job');
       }
     } catch (error) {
       console.error('Failed to start summarization:', error);
-      alert('An error occurred while starting summarization');
+      toast.error('An error occurred while starting summarization');
     } finally {
       setLoading(false);
     }

@@ -46,9 +46,10 @@ export async function PATCH(
 
     const body = await request.json();
     const allowedFields = [
-      'first_name', 'last_name', 'title', 'email', 'phone', 'linkedin_url',
-      'department', 'notes', 'role_type', 'relationship_status', 'source',
-      'mailing_address', 'lead_source', 'last_activity_date', 'do_not_call',
+      'first_name', 'last_name', 'title', 'email', 'phone', 'mobile', 'enriched_mobile',
+      'linkedin_url', 'department', 'notes', 'role_type', 'relationship_status', 'prospect_status',
+      'sfdc_id', 'sfdc_type',
+      'source', 'mailing_address', 'lead_source', 'last_activity_date', 'do_not_call',
       'description', 'parent_prospect_id', 'sort_order',
       'value_tier', 'seniority_level', 'ai_summary', 'ai_processed_at',
       'department_tag', 'prospect_tags',

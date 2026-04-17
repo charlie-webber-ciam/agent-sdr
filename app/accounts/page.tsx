@@ -1,16 +1,19 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import AccountCard from '@/components/AccountCard';
+import AccountTable from '@/components/AccountTable';
 import SearchBar, { FilterState } from '@/components/SearchBar';
 import ExportModal from '@/components/ExportModal';
 import { usePerspective } from '@/lib/perspective-context';
+import { useToast } from '@/lib/toast-context';
 import { Suspense } from 'react';
+import { customerStatusLabel } from '@/lib/customer-status';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -20,12 +23,24 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface Account {
   id: number;
   companyName: string;
   domain: string;
   industry: string;
+  customerStatus?: 'auth0_customer' | 'okta_customer' | 'common_customer' | null;
   status: string;
   researchSummary: string | null;
   processedAt: string | null;
@@ -40,16 +55,20 @@ interface Account {
   oktaPatch?: string | null;
   parentCompany?: string | null;
   parentCompanyRegion?: 'australia' | 'global' | null;
+  reviewStatus?: 'new' | 'reviewed' | 'working' | 'dismissed';
 }
 
 const DEFAULT_FILTERS: FilterState = {
   search: '',
   status: '',
+  customerStatus: '',
   tier: '',
   oktaTier: '',
   accountOwner: '',
   oktaAccountOwner: '',
   hqState: '',
+  oktaPatch: '',
+  reviewStatus: '',
   showGlobalParent: false,
   sortBy: '',
 };
@@ -60,12 +79,15 @@ function AccountsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { perspective } = usePerspective();
+  const toast = useToast();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accountOwners, setAccountOwners] = useState<string[]>([]);
   const [oktaAccountOwners, setOktaAccountOwners] = useState<string[]>([]);
   const [hqStates, setHqStates] = useState<string[]>([]);
+  const [oktaPatches, setOktaPatches] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 
   // Pagination state
@@ -78,18 +100,32 @@ function AccountsPageContent() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [reprocessMode, setReprocessMode] = useState<'both' | 'auth0' | 'okta'>('both');
 
+  // Bulk reprocess confirmation state
+  const [showReprocessConfirm, setShowReprocessConfirm] = useState(false);
+
   // Bulk delete state
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Bulk account owner assignment state
   const [newOwnerName, setNewOwnerName] = useState('');
   const [isAssigningOwner, setIsAssigningOwner] = useState(false);
 
+  // Bulk review status state
+  const [isUpdatingReviewStatus, setIsUpdatingReviewStatus] = useState(false);
+
   // Export modal state
   const [showExportModal, setShowExportModal] = useState(false);
 
+  // View mode state (grid or table)
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+
+  // Search debounce pending state
+  const [searchPending, setSearchPending] = useState(false);
+
   // Track selectable count from IDs endpoint for accurate "Select All" toggle
   const [selectableCount, setSelectableCount] = useState(0);
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
 
   // Initialize filters and page from URL params (URL is source of truth)
   useEffect(() => {
@@ -100,6 +136,8 @@ function AccountsPageContent() {
     searchParams.forEach((value, key) => {
       if (key === 'page') {
         page = Math.max(1, parseInt(value) || 1);
+      } else if (key === 'view') {
+        if (value === 'table' || value === 'grid') setViewMode(value);
       } else if (key === 'showGlobalParent') {
         initFilters.showGlobalParent = value === 'true';
       } else if (key in initFilters) {
@@ -152,6 +190,7 @@ function AccountsPageContent() {
       setAccounts(data.accounts);
       setTotalAccounts(data.total);
       setTotalPages(data.pagination.totalPages);
+      setHasLoadedOnce(true);
 
       // Set available account owners from API
       if (data.filters?.availableAccountOwners) {
@@ -162,6 +201,9 @@ function AccountsPageContent() {
       }
       if (data.filters?.availableHqStates) {
         setHqStates(data.filters.availableHqStates);
+      }
+      if (data.filters?.availableOktaPatches) {
+        setOktaPatches(data.filters.availableOktaPatches);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load accounts');
@@ -175,36 +217,46 @@ function AccountsPageContent() {
     fetchAccounts();
   }, [fetchAccounts]);
 
+  const buildUrlParams = useCallback((overrides: { filters?: FilterState; page?: number; view?: 'grid' | 'table' } = {}) => {
+    const f = overrides.filters ?? filters;
+    const p = overrides.page ?? currentPage;
+    const v = overrides.view ?? viewMode;
+    const params = new URLSearchParams();
+    Object.entries(f).forEach(([key, value]) => {
+      if (value !== null && value !== '' && value !== DEFAULT_FILTERS[key as keyof FilterState]) {
+        params.set(key, String(value));
+      }
+    });
+    params.set('page', String(p));
+    if (v === 'table') params.set('view', 'table');
+    return params;
+  }, [filters, currentPage, viewMode]);
+
+  // Build a query string that detail pages use for "Back to Accounts" and prev/next
+  const listQuery = useMemo(() => {
+    return buildUrlParams().toString();
+  }, [buildUrlParams]);
+
   const handleFiltersChange = useCallback((newFilters: FilterState) => {
     setFilters(newFilters);
     setSelectedAccountIds(new Set()); // Clear selection when filters change
     setSelectableCount(0);
 
-    // Update URL params (reset to page 1 when filters change)
-    const params = new URLSearchParams();
-    Object.entries(newFilters).forEach(([key, value]) => {
-      if (value !== null && value !== '' && value !== DEFAULT_FILTERS[key as keyof FilterState]) {
-        params.set(key, String(value));
-      }
-    });
-    params.set('page', '1'); // Reset to first page on filter change
-
+    const params = buildUrlParams({ filters: newFilters, page: 1 });
     const newUrl = params.toString() ? `/accounts?${params.toString()}` : '/accounts';
     router.push(newUrl, { scroll: false });
-  }, [router]);
+  }, [router, buildUrlParams]);
 
   const handlePageChange = useCallback((newPage: number) => {
-    // Update URL with new page number
-    const params = new URLSearchParams();
-    Object.entries(filters).forEach(([key, value]) => {
-      if (value !== null && value !== '' && value !== DEFAULT_FILTERS[key as keyof FilterState]) {
-        params.set(key, String(value));
-      }
-    });
-    params.set('page', String(newPage));
-
+    const params = buildUrlParams({ page: newPage });
     router.push(`/accounts?${params.toString()}`, { scroll: true });
-  }, [filters, router]);
+  }, [router, buildUrlParams]);
+
+  const handleViewModeChange = useCallback((mode: 'grid' | 'table') => {
+    setViewMode(mode);
+    const params = buildUrlParams({ view: mode });
+    router.push(`/accounts?${params.toString()}`, { scroll: false });
+  }, [router, buildUrlParams]);
 
   const handleClearAllFilters = () => {
     handleFiltersChange(DEFAULT_FILTERS);
@@ -231,9 +283,13 @@ function AccountsPageContent() {
     setSelectableCount(0);
   };
 
-  const handleBulkRetry = async () => {
+  const handleBulkRetry = () => {
     if (selectedAccountIds.size === 0) return;
+    setShowReprocessConfirm(true);
+  };
 
+  const executeBulkRetry = async () => {
+    setShowReprocessConfirm(false);
     setIsRetrying(true);
     try {
       const res = await fetch('/api/accounts/reprocess-bulk', {
@@ -255,18 +311,18 @@ function AccountsPageContent() {
       const data = await res.json();
       router.push(data.redirectUrl);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to reprocess accounts');
+      toast.error(err instanceof Error ? err.message : 'Failed to reprocess accounts');
       setIsRetrying(false);
     }
   };
 
   const handleBulkDelete = async () => {
     if (selectedAccountIds.size === 0) return;
+    setShowDeleteConfirm(true);
+  };
 
-    if (!confirm(`Are you sure you want to delete ${selectedAccountIds.size} account(s)? This cannot be undone.`)) {
-      return;
-    }
-
+  const executeBulkDelete = async () => {
+    setShowDeleteConfirm(false);
     setIsDeleting(true);
     try {
       const res = await fetch('/api/accounts/bulk-delete', {
@@ -285,24 +341,49 @@ function AccountsPageContent() {
       }
 
       const data = await res.json();
-      alert(`Successfully deleted ${data.deletedCount} account(s).`);
+      toast.success(`Successfully deleted ${data.deletedCount} account(s).`);
       setSelectedAccountIds(new Set());
       fetchAccounts();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete accounts');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete accounts');
     } finally {
       setIsDeleting(false);
     }
   };
 
+  const handleBulkReviewStatus = async (status: string) => {
+    if (selectedAccountIds.size === 0) return;
+    setIsUpdatingReviewStatus(true);
+    try {
+      const res = await fetch('/api/accounts/bulk-review-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountIds: Array.from(selectedAccountIds), reviewStatus: status }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to update review status');
+      }
+      const data = await res.json();
+      const labels: Record<string, string> = { new: 'New', working: 'Working', reviewed: 'Reviewed', dismissed: 'Dismissed' };
+      toast.success(`Marked ${data.updatedCount} account(s) as "${labels[status] || status}".`);
+      setSelectedAccountIds(new Set());
+      fetchAccounts();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update review status');
+    } finally {
+      setIsUpdatingReviewStatus(false);
+    }
+  };
+
   const handleBulkAssignOwner = async () => {
     if (selectedAccountIds.size === 0) {
-      alert('Please select at least one account');
+      toast.error('Please select at least one account');
       return;
     }
 
     if (!newOwnerName.trim()) {
-      alert('Please enter an account owner name');
+      toast.error('Please enter an account owner name');
       return;
     }
 
@@ -326,14 +407,14 @@ function AccountsPageContent() {
       }
 
       const data = await res.json();
-      alert(`Success! Updated ${data.successCount} account(s) with owner: ${data.accountOwner}`);
+      toast.success(`Updated ${data.successCount} account(s) with owner: ${data.accountOwner}`);
 
       // Refresh the page to show updated data
       setSelectedAccountIds(new Set());
       setNewOwnerName('');
       fetchAccounts();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update account owners');
+      toast.error(err instanceof Error ? err.message : 'Failed to update account owners');
     } finally {
       setIsAssigningOwner(false);
     }
@@ -348,6 +429,13 @@ function AccountsPageContent() {
     if (filters.tier) {
       const tierLabel = filters.tier === 'unassigned' ? 'Unassigned' : `Tier ${filters.tier}`;
       active.push({ key: 'tier', label: 'Auth0 Tier', value: tierLabel });
+    }
+
+    if (filters.customerStatus) {
+      const statusLabel = filters.customerStatus === 'unassigned'
+        ? 'Blank'
+        : customerStatusLabel(filters.customerStatus as Account['customerStatus']) || filters.customerStatus;
+      active.push({ key: 'customerStatus', label: 'Customer Status', value: statusLabel });
     }
 
     if (filters.oktaTier) {
@@ -365,9 +453,26 @@ function AccountsPageContent() {
       active.push({ key: 'oktaAccountOwner', label: 'Okta Owner', value: ownerVal });
     }
 
+    if (filters.oktaPatch) {
+      const patchLabels: Record<string, string> = {
+        emerging: 'Emerging', crp: 'Corporate', ent: 'Enterprise', stg: 'Strategic', pubsec: 'Public Sector', unassigned: 'Unassigned',
+      };
+      active.push({ key: 'oktaPatch', label: 'Okta Patch', value: patchLabels[filters.oktaPatch] || filters.oktaPatch });
+    }
+
     if (filters.hqState) {
       const stateLabel = filters.hqState === 'unassigned' ? 'Unassigned' : filters.hqState;
       active.push({ key: 'hqState', label: 'HQ State', value: stateLabel });
+    }
+
+    if (filters.reviewStatus) {
+      const reviewLabels: Record<string, string> = {
+        new: 'New',
+        working: 'Working',
+        reviewed: 'Reviewed',
+        dismissed: 'Dismissed',
+      };
+      active.push({ key: 'reviewStatus', label: 'Review', value: reviewLabels[filters.reviewStatus] || filters.reviewStatus });
     }
 
     if (filters.status) {
@@ -406,6 +511,7 @@ function AccountsPageContent() {
   const showOwnerMode = ownerFilterActive && noOwnerAccounts.length > 0;
 
   const handleSelectAll = async () => {
+    setIsSelectingAll(true);
     try {
       const params = new URLSearchParams();
       Object.entries(filters).forEach(([key, value]) => {
@@ -426,10 +532,15 @@ function AccountsPageContent() {
       setSelectedAccountIds(new Set(ids));
       setSelectableCount(ids.length);
     } catch {
-      // Fallback to current page selection
+      // Fallback to current page only — but tell the user
       const idsToSelect = accounts.map(a => a.id);
       setSelectedAccountIds(new Set(idsToSelect));
       setSelectableCount(idsToSelect.length);
+      if (totalAccounts > idsToSelect.length) {
+        toast.error(`Could not select all ${totalAccounts} accounts. Selected ${idsToSelect.length} on this page only.`);
+      }
+    } finally {
+      setIsSelectingAll(false);
     }
   };
 
@@ -438,7 +549,7 @@ function AccountsPageContent() {
                        selectedAccountIds.size >= selectableCount;
 
   return (
-    <main className="mx-auto max-w-7xl pb-32">
+    <main className={`mx-auto max-w-7xl ${selectedAccountIds.size > 0 ? 'pb-32' : 'pb-8'}`}>
       <div className="mb-8">
         <div className="flex items-start justify-between mb-4">
           <div>
@@ -458,6 +569,9 @@ function AccountsPageContent() {
         auth0AccountOwners={accountOwners}
         oktaAccountOwners={oktaAccountOwners}
         hqStates={hqStates}
+        oktaPatches={oktaPatches}
+        perspective={perspective}
+        onSearchPendingChange={setSearchPending}
       />
 
       {/* Active Filter Chips */}
@@ -490,12 +604,43 @@ function AccountsPageContent() {
         </div>
       )}
 
-      {loading && (
-        <Card>
-          <CardContent className="py-12 text-center text-xl text-muted-foreground">
-            Loading accounts...
-          </CardContent>
-        </Card>
+      {loading && !hasLoadedOnce && (
+        <>
+          <div className="mb-4 flex items-center justify-between">
+            <Skeleton className="h-5 w-48" />
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-9 w-24 rounded-md" />
+              <Skeleton className="h-9 w-28 rounded-md" />
+              <Skeleton className="h-9 w-36 rounded-md" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <Card key={i} className="border-l-4 border-l-transparent">
+                <CardContent className="p-5">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <Skeleton className="mb-2 h-6 w-3/4" />
+                      <Skeleton className="h-4 w-1/2" />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Skeleton className="h-5 w-14 rounded-full" />
+                        <Skeleton className="h-5 w-20 rounded-full" />
+                      </div>
+                    </div>
+                    <Skeleton className="h-5 w-20 rounded-full" />
+                  </div>
+                  <Skeleton className="mt-2 h-4 w-full" />
+                  <Skeleton className="mt-1 h-4 w-5/6" />
+                  <Skeleton className="mt-1 h-4 w-2/3" />
+                </CardContent>
+                <CardFooter className="flex items-center justify-between border-t px-5 py-3">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-4 w-24" />
+                </CardFooter>
+              </Card>
+            ))}
+          </div>
+        </>
       )}
 
       {error && (
@@ -506,7 +651,7 @@ function AccountsPageContent() {
         </Card>
       )}
 
-      {!loading && !error && accounts.length === 0 && (
+      {(!loading || hasLoadedOnce) && !error && accounts.length === 0 && (
         <Card className="bg-muted/20">
           <CardContent className="p-12 text-center">
             <svg
@@ -547,9 +692,21 @@ function AccountsPageContent() {
         </Card>
       )}
 
-      {!loading && !error && accounts.length > 0 && (
+      {(!loading || hasLoadedOnce) && !error && accounts.length > 0 && (
         <>
-          <div className="mb-4 flex items-center justify-between">
+          {/* Inline loading indicator for re-fetches and search debounce */}
+          {(loading || searchPending) && hasLoadedOnce && (
+            <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
+              <svg className="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              {searchPending ? 'Searching...' : 'Updating results...'}
+            </div>
+          )}
+          <div className={`transition-opacity duration-150 ${(loading || searchPending) && hasLoadedOnce ? 'opacity-60 pointer-events-none' : ''}`}>
+          <div className="sticky top-14 md:top-0 z-30 bg-background pt-2 pb-2">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-y-3">
             <div className="text-sm text-muted-foreground">
               Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}-{Math.min(currentPage * ITEMS_PER_PAGE, totalAccounts)} of {totalAccounts} account{totalAccounts !== 1 ? 's' : ''}
               {selectedAccountIds.size > 0 && (
@@ -558,11 +715,37 @@ function AccountsPageContent() {
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* View mode toggle */}
+              <div className="flex rounded-md border border-border">
+                <Button
+                  variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="rounded-r-none border-0 px-2.5"
+                  onClick={() => handleViewModeChange('grid')}
+                  aria-label="Grid view"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  </svg>
+                </Button>
+                <Button
+                  variant={viewMode === 'table' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="rounded-l-none border-0 px-2.5"
+                  onClick={() => handleViewModeChange('table')}
+                  aria-label="Table view"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                  </svg>
+                </Button>
+              </div>
               <Button
                 onClick={isAllSelected ? handleClearSelection : handleSelectAll}
+                disabled={isSelectingAll}
               >
-                {isAllSelected ? 'Deselect All' : `Select All (${totalAccounts})`}
+                {isSelectingAll ? 'Selecting...' : isAllSelected ? 'Deselect All' : `Select All (${totalAccounts})`}
               </Button>
               <Button asChild variant="outline">
                 <Link href="/accounts/map">Account Map</Link>
@@ -650,18 +833,36 @@ function AccountsPageContent() {
               </Button>
             </div>
           )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {accounts.map((account) => (
-              <AccountCard
-                key={account.id}
-                account={account}
-                selectable
-                selected={selectedAccountIds.has(account.id)}
-                onSelectionChange={handleSelectionChange}
-              />
-            ))}
           </div>
+
+          {viewMode === 'table' ? (
+            <Card>
+              <AccountTable
+                accounts={accounts}
+                selectable
+                selectedIds={selectedAccountIds}
+                onSelectionChange={handleSelectionChange}
+                sortBy={filters.sortBy || effectiveDefaultSortBy}
+                onSortChange={(newSortBy) => {
+                  handleFiltersChange({ ...filters, sortBy: newSortBy === effectiveDefaultSortBy ? '' : newSortBy });
+                }}
+                listQuery={listQuery}
+              />
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {accounts.map((account) => (
+                <AccountCard
+                  key={account.id}
+                  account={account}
+                  selectable
+                  selected={selectedAccountIds.has(account.id)}
+                  onSelectionChange={handleSelectionChange}
+                  listQuery={listQuery}
+                />
+              ))}
+            </div>
+          )}
 
           {/* Pagination Controls - Bottom */}
           {totalPages > 1 && (
@@ -727,41 +928,44 @@ function AccountsPageContent() {
               </Button>
             </div>
           )}
+          </div>
         </>
       )}
 
       {/* Bulk Action Bar */}
       {selectedAccountIds.size > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background shadow-2xl">
-          <div className="mx-auto max-w-7xl px-8 py-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <svg className="h-6 w-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span className="text-lg font-semibold">
-                    {selectedAccountIds.size} account{selectedAccountIds.size !== 1 ? 's' : ''} selected
-                  </span>
-                </div>
-                <Badge variant="secondary" className="text-xs">
-                  Bulk mode
-                </Badge>
+          <div className="mx-auto max-w-7xl px-8 py-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Selection info */}
+              <div className="flex items-center gap-2">
+                <svg className="h-5 w-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="font-semibold">
+                  {selectedAccountIds.size} selected
+                  {selectedAccountIds.size > accounts.length && (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">(across all pages)</span>
+                  )}
+                </span>
                 <Button
                   variant="ghost"
+                  size="sm"
                   onClick={handleClearSelection}
                 >
                   Clear
                 </Button>
               </div>
 
-              <div className="flex items-center gap-3">
-                {/* Reprocess controls */}
+              <Separator orientation="vertical" className="hidden h-7 sm:block" />
+
+              {/* Reprocess controls */}
+              <div className="flex items-center gap-2">
                 <Select
                   value={reprocessMode}
                   onValueChange={(value) => setReprocessMode(value as 'both' | 'auth0' | 'okta')}
                 >
-                  <SelectTrigger className="w-[160px]">
+                  <SelectTrigger className="h-8 w-[130px] text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -771,38 +975,62 @@ function AccountsPageContent() {
                   </SelectContent>
                 </Select>
                 <Button
+                  size="sm"
                   onClick={handleBulkRetry}
                   disabled={isRetrying}
                   className="whitespace-nowrap"
                 >
                   {isRetrying ? 'Starting...' : `Process (${selectedAccountIds.size})`}
                 </Button>
+              </div>
 
-                {/* Owner assignment (only in owner filter mode) */}
-                {showOwnerMode && (
-                  <>
-                    <Separator orientation="vertical" className="h-8" />
+              {/* Owner assignment (only in owner filter mode) */}
+              {showOwnerMode && (
+                <>
+                  <Separator orientation="vertical" className="hidden h-7 sm:block" />
+                  <div className="flex items-center gap-2">
                     <Input
                       type="text"
                       value={newOwnerName}
                       onChange={(e) => setNewOwnerName(e.target.value)}
                       placeholder="Owner name..."
-                      className="min-w-[180px]"
+                      className="h-8 w-[160px] text-sm"
                     />
                     <Button
+                      size="sm"
                       onClick={handleBulkAssignOwner}
                       disabled={isAssigningOwner || !newOwnerName.trim()}
                       className="whitespace-nowrap"
                     >
                       {isAssigningOwner ? 'Assigning...' : 'Assign Owner'}
                     </Button>
-                  </>
-                )}
+                  </div>
+                </>
+              )}
 
-                {/* Delete */}
-                <Separator orientation="vertical" className="h-8" />
+              {/* Review Status */}
+              <Separator orientation="vertical" className="hidden h-7 sm:block" />
+              <Select
+                value=""
+                onValueChange={(value) => handleBulkReviewStatus(value)}
+                disabled={isUpdatingReviewStatus}
+              >
+                <SelectTrigger className="h-8 w-[140px] text-sm">
+                  <SelectValue placeholder={isUpdatingReviewStatus ? 'Updating...' : 'Mark as...'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="new">New</SelectItem>
+                  <SelectItem value="working">Working</SelectItem>
+                  <SelectItem value="reviewed">Reviewed</SelectItem>
+                  <SelectItem value="dismissed">Dismissed</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Delete — pushed to far right on wide screens */}
+              <div className="ml-auto">
                 <Button
                   variant="destructive"
+                  size="sm"
                   onClick={handleBulkDelete}
                   disabled={isDeleting}
                   className="whitespace-nowrap"
@@ -823,6 +1051,93 @@ function AccountsPageContent() {
         currentFilters={filters}
         totalFilteredAccounts={totalAccounts}
       />
+
+      {/* Reprocess Confirmation Dialog */}
+      <AlertDialog open={showReprocessConfirm} onOpenChange={setShowReprocessConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reprocess {selectedAccountIds.size} account{selectedAccountIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  This will run AI research ({reprocessMode === 'both' ? 'Auth0 + Okta' : reprocessMode === 'auth0' ? 'Auth0 only' : 'Okta only'}) on {selectedAccountIds.size === 1 ? 'this account' : `all ${selectedAccountIds.size} selected accounts`}, overwriting existing research data. This may take a while and uses API credits.
+                </p>
+                {(() => {
+                  const selectedNames = accounts
+                    .filter(a => selectedAccountIds.has(a.id))
+                    .map(a => a.companyName);
+                  const maxShow = 5;
+                  const shown = selectedNames.slice(0, maxShow);
+                  const remaining = selectedAccountIds.size - shown.length;
+                  return (
+                    <ul className="rounded-md border bg-muted/50 p-2 text-sm max-h-40 overflow-y-auto space-y-1">
+                      {shown.map((name, i) => (
+                        <li key={i} className="truncate">{name}</li>
+                      ))}
+                      {remaining > 0 && (
+                        <li className="text-muted-foreground italic">
+                          and {remaining} more account{remaining !== 1 ? 's' : ''}{selectedAccountIds.size > accounts.length ? ' (across pages)' : ''}
+                        </li>
+                      )}
+                    </ul>
+                  );
+                })()}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={executeBulkRetry}>
+              Process {selectedAccountIds.size} account{selectedAccountIds.size !== 1 ? 's' : ''}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedAccountIds.size} account{selectedAccountIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  This will permanently delete {selectedAccountIds.size === 1 ? 'this account' : `all ${selectedAccountIds.size} selected accounts`} and their research data, categorization, emails, and notes. This action cannot be undone.
+                </p>
+                {(() => {
+                  const selectedNames = accounts
+                    .filter(a => selectedAccountIds.has(a.id))
+                    .map(a => a.companyName);
+                  const maxShow = 5;
+                  const shown = selectedNames.slice(0, maxShow);
+                  const remaining = selectedAccountIds.size - shown.length;
+                  return (
+                    <ul className="rounded-md border bg-muted/50 p-2 text-sm max-h-40 overflow-y-auto space-y-1">
+                      {shown.map((name, i) => (
+                        <li key={i} className="truncate">{name}</li>
+                      ))}
+                      {remaining > 0 && (
+                        <li className="text-muted-foreground italic">
+                          and {remaining} more account{remaining !== 1 ? 's' : ''}{selectedAccountIds.size > accounts.length ? ' (across pages)' : ''}
+                        </li>
+                      )}
+                    </ul>
+                  );
+                })()}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={executeBulkDelete}
+              className={buttonVariants({ variant: 'destructive' })}
+            >
+              Delete {selectedAccountIds.size} account{selectedAccountIds.size !== 1 ? 's' : ''}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

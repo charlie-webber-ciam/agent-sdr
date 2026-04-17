@@ -47,7 +47,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMAIL_IN_TEXT_RE = /([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i;
 const DATE_TIME_RE = /\b\d{1,2}\/\d{1,2}\/\d{4}\b/;
 const OWNER_COUNT_RE = /^([A-Za-z][A-Za-z\s.'-]+)\((\d+)\)$/;
-const PAREN_NUMBER_RE = /^\(\d+\)$/;
 const HEADER_PATTERNS = [
   /^total records/i,
   /^lead owner\b/i,
@@ -75,6 +74,10 @@ export function parseQlText(rawText: string): ParseResult {
   const classic = parseClassicRowBlockText(rawText);
   const grouped = parseGroupedOwnerReportText(rawText);
   const csv = parseCsvLeadReportText(rawText);
+
+  if (looksLikeGroupedOwnerReport(rawText) && grouped.leads.length > 0) {
+    return grouped;
+  }
 
   const candidates = [classic, grouped, csv];
   let best = candidates[0];
@@ -160,7 +163,6 @@ function parseGroupedOwnerReportText(rawText: string): ParseResult {
   const parseErrors: string[] = [];
 
   let currentOwner = '';
-  let rowNumber = 1;
 
   for (let i = 0; i < allLines.length; i++) {
     const line = allLines[i].trim();
@@ -176,38 +178,13 @@ function parseGroupedOwnerReportText(rawText: string): ParseResult {
       continue;
     }
 
-    const email = extractEmailFromLine(line);
-    if (!email) continue;
+    if (!ROW_NUMBER.test(line)) continue;
 
-    const company = findPreviousCompanyLine(allLines, i);
-    if (!company) {
-      parseErrors.push(`Email ${email}: unable to determine company/account, skipped`);
-      continue;
-    }
+    const parsedRow = parseGroupedOwnerRow(allLines, i, leads.length + 1, currentOwner);
+    if (!parsedRow) continue;
 
-    const metadata = collectNextMetadataLines(allLines, i + 1);
-    const parsedName = splitNameFromEmail(email);
-    const campaignName = metadata.campaignOrDetail || '';
-    const leadSource = metadata.leadSource || '';
-    const leadStatus = metadata.leadStatus || '';
-
-    leads.push({
-      rowNumber,
-      sfdcAccountId: null,
-      sfdcContactId: '',
-      firstName: parsedName.firstName || 'Unknown',
-      lastName: parsedName.lastName || 'Unknown',
-      campaignName,
-      memberStatus: leadStatus,
-      auth0Owner: currentOwner,
-      company,
-      title: '',
-      phone: null,
-      email,
-      accountStatus: leadSource || null,
-    });
-
-    rowNumber++;
+    leads.push(parsedRow.lead);
+    i = parsedRow.nextIndex;
   }
 
   if (leads.length === 0) {
@@ -380,48 +357,58 @@ function parseBlock(rowNumber: number, lines: string[]): ParsedLead {
   };
 }
 
-function findPreviousCompanyLine(allLines: string[], emailIndex: number): string | null {
-  const start = Math.max(0, emailIndex - 14);
-  for (let i = emailIndex - 1; i >= start; i--) {
-    const line = allLines[i].trim();
-    if (!line) continue;
-    if (extractEmailFromLine(line)) continue;
-    if (DATE_TIME_RE.test(line)) continue;
-    if (PAREN_NUMBER_RE.test(line)) continue;
-    if (isReportHeaderOrNoise(line)) continue;
-    return line;
-  }
-  return null;
-}
+function parseGroupedOwnerRow(
+  allLines: string[],
+  rowIndex: number,
+  leadIndex: number,
+  currentOwner: string
+): { lead: ParsedLead; nextIndex: number } | null {
+  const values: Array<{ value: string; index: number }> = [];
 
-function collectNextMetadataLines(allLines: string[], startIndex: number): {
-  campaignOrDetail: string | null;
-  leadSource: string | null;
-  leadStatus: string | null;
-} {
-  const values: string[] = [];
+  for (let i = rowIndex + 1; i < allLines.length && values.length < 8; i++) {
+    const value = allLines[i].trim();
+    if (!value) continue;
+    if (value.toLowerCase().startsWith('subtotal')) break;
 
-  for (let i = startIndex; i < allLines.length && values.length < 5; i++) {
-    const line = allLines[i].trim();
-    if (!line) continue;
-    if (extractEmailFromLine(line)) break;
-    if (line.match(OWNER_COUNT_RE) && !line.toLowerCase().startsWith('subtotal')) break;
-    if (line.toLowerCase().startsWith('subtotal')) break;
-    if (isReportHeaderOrNoise(line)) continue;
-    values.push(line);
+    const ownerMatch = value.match(OWNER_COUNT_RE);
+    if (ownerMatch && !isLikelyCompanyName(ownerMatch[1])) break;
+
+    if (isReportHeaderOrNoise(value)) continue;
+    values.push({ value, index: i });
   }
 
-  let dateIndex = values.findIndex(v => DATE_TIME_RE.test(v));
-  if (dateIndex < 0) dateIndex = -1;
+  if (values.length < 6) return null;
 
-  const campaignOrDetail =
-    dateIndex >= 0 ? values[dateIndex + 1] || null : values[0] || null;
-  const leadSource =
-    dateIndex >= 0 ? values[dateIndex + 2] || null : values[1] || null;
-  const leadStatus =
-    dateIndex >= 0 ? values[dateIndex + 3] || null : values[2] || null;
+  const [firstName, lastName, title, company, emailCandidate, routedDateCandidate] = values;
+  const email = extractEmailFromLine(emailCandidate.value);
+  if (!email || !DATE_TIME_RE.test(routedDateCandidate.value)) {
+    return null;
+  }
 
-  return { campaignOrDetail, leadSource, leadStatus };
+  const campaignName = values[6]?.value || '';
+  const leadSource = values[7]?.value || '';
+  const accountStatusParts: string[] = [];
+  if (leadSource) accountStatusParts.push(`Lead Source: ${leadSource}`);
+  if (routedDateCandidate.value) accountStatusParts.push(`Routed: ${routedDateCandidate.value}`);
+
+  return {
+    lead: {
+      rowNumber: leadIndex,
+      sfdcAccountId: null,
+      sfdcContactId: '',
+      firstName: firstName.value || 'Unknown',
+      lastName: lastName.value || 'Unknown',
+      campaignName,
+      memberStatus: '',
+      auth0Owner: currentOwner,
+      company: company.value,
+      title: title.value || 'Unknown',
+      phone: null,
+      email,
+      accountStatus: accountStatusParts.length > 0 ? accountStatusParts.join(' | ') : null,
+    },
+    nextIndex: values[values.length - 1].index,
+  };
 }
 
 function splitNameFromEmail(email: string): { firstName: string; lastName: string } {
@@ -490,6 +477,16 @@ function looksLikeCsv(rawText: string): boolean {
   return (
     firstLine.includes('company / account') ||
     (firstLine.includes('first name') && firstLine.includes('email'))
+  );
+}
+
+function looksLikeGroupedOwnerReport(rawText: string): boolean {
+  const lower = rawText.toLowerCase();
+  return (
+    lower.includes('report: leads') &&
+    lower.includes('company / account') &&
+    lower.includes('most recent routed date/time') &&
+    lower.includes('lead owner')
   );
 }
 

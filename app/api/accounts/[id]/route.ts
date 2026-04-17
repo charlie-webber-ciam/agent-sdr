@@ -1,5 +1,38 @@
 import { NextResponse } from 'next/server';
-import { getAccount, updateAccountMetadata, updateOktaAccountMetadata, deleteAccount, getAccountTags, getSectionComments, getAccountNotes, getProspectCountByAccount } from '@/lib/db';
+import { getAccount, updateAccountMetadata, updateOktaAccountMetadata, deleteAccount, getAccountTags, getSectionComments, getAccountNotes, getProspectCountByAccount, getAccountOverview, getProspectsByAccount, getAccountDocuments } from '@/lib/db';
+import { serializeAccountDocument } from '@/lib/account-documents';
+import { buildOverviewRecordFromStorage } from '@/lib/account-overview';
+
+const KEY_PERSON_ROLES = new Set(['decision_maker', 'champion', 'influencer', 'blocker']);
+const SENIOR_TITLE_PATTERN = /\b(chief|ceo|cfo|cmo|ciso|cto|cio|coo|founder|president|managing director|general manager|vp|vice president|head|director)\b/i;
+
+function getRoleOrder(roleType: string | null | undefined): number {
+  switch (roleType) {
+    case 'decision_maker':
+      return 0;
+    case 'champion':
+      return 1;
+    case 'influencer':
+      return 2;
+    case 'blocker':
+      return 3;
+    case 'end_user':
+      return 4;
+    case 'unknown':
+      return 5;
+    default:
+      return 6;
+  }
+}
+
+function getTitleOrder(title: string | null | undefined): number {
+  if (!title) return 4;
+  if (/\b(chief|ceo|cfo|cmo|ciso|cto|cio|coo|founder|president)\b/i.test(title)) return 0;
+  if (/\b(vp|vice president|svp|evp|gm|general manager|managing director)\b/i.test(title)) return 1;
+  if (/\b(head|director)\b/i.test(title)) return 2;
+  if (/\b(manager|lead)\b/i.test(title)) return 3;
+  return 4;
+}
 
 export async function GET(
   request: Request,
@@ -105,12 +138,30 @@ export async function GET(
     const sectionCommentsRaw = getSectionComments(accountId);
     const notes = getAccountNotes(accountId);
     const prospectCount = getProspectCountByAccount(accountId);
+    const overviewRow = getAccountOverview(accountId);
+    const documents = getAccountDocuments(accountId);
+    const keyPeople = getProspectsByAccount(accountId)
+      .filter((prospect) => (
+        KEY_PERSON_ROLES.has(prospect.role_type || '') ||
+        SENIOR_TITLE_PATTERN.test(prospect.title || '')
+      ))
+      .sort((a, b) => {
+        const roleDelta = getRoleOrder(a.role_type) - getRoleOrder(b.role_type);
+        if (roleDelta !== 0) return roleDelta;
+
+        const titleDelta = getTitleOrder(a.title) - getTitleOrder(b.title);
+        if (titleDelta !== 0) return titleDelta;
+
+        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+      });
 
     // Build sectionComments as a map keyed by `{perspective}:{sectionKey}`
     const sectionComments: Record<string, string> = {};
     for (const c of sectionCommentsRaw) {
       sectionComments[`${c.perspective}:${c.section_key}`] = c.content;
     }
+
+    const overview = buildOverviewRecordFromStorage(overviewRow);
 
     return NextResponse.json({
       id: account.id,
@@ -119,6 +170,7 @@ export async function GET(
       industry: account.industry,
       status: account.research_status,
       // Auth0 CIAM Research
+      commandOfMessage: account.command_of_message,
       currentAuthSolution: account.current_auth_solution,
       customerBaseInfo: account.customer_base_info,
       securityIncidents: account.security_incidents,
@@ -172,11 +224,20 @@ export async function GET(
       triageSummary: account.triage_summary,
       triageData: account.triage_data ? (() => { try { return JSON.parse(account.triage_data); } catch { return null; } })() : null,
       triagedAt: account.triaged_at,
+      // Spreadsheet workspace
+      spreadsheetPerspective: account.spreadsheet_perspective,
+      spreadsheetMessaging: account.spreadsheet_messaging,
+      // Review workflow status
+      reviewStatus: account.review_status || 'new',
+      reviewStatusUpdatedAt: account.review_status_updated_at,
       // Enrichment data
       tags: tags.map(t => ({ id: t.id, tag: t.tag, tagType: t.tag_type, createdAt: t.created_at })),
       sectionComments,
       notes: notes.map(n => ({ id: n.id, content: n.content, createdAt: n.created_at, updatedAt: n.updated_at })),
+      documents: documents.map((document) => serializeAccountDocument(document, accountId)),
       prospectCount,
+      overview,
+      keyPeople,
     });
   } catch (error) {
     console.error('Error fetching account:', error);
@@ -204,6 +265,18 @@ export async function PATCH(
 
     const body = await request.json();
 
+    // Handle review status update
+    if (body.reviewStatus !== undefined) {
+      const validStatuses = ['new', 'reviewed', 'working', 'dismissed'];
+      if (validStatuses.includes(body.reviewStatus)) {
+        const { updateAccountReviewStatus } = await import('@/lib/db');
+        updateAccountReviewStatus(accountId, body.reviewStatus);
+        if (Object.keys(body).length === 1) {
+          return NextResponse.json({ success: true });
+        }
+      }
+    }
+
     // Handle account owner updates directly
     if (body.auth0AccountOwner !== undefined || body.oktaAccountOwner !== undefined) {
       const { getDb } = await import('@/lib/db');
@@ -218,6 +291,23 @@ export async function PATCH(
       }
       // If only updating owner fields, return early
       if (Object.keys(body).every(k => k === 'auth0AccountOwner' || k === 'oktaAccountOwner')) {
+        return NextResponse.json({ success: true });
+      }
+    }
+
+    // Handle spreadsheet workspace field updates
+    if (body.spreadsheetPerspective !== undefined || body.spreadsheetMessaging !== undefined) {
+      const { getDb } = await import('@/lib/db');
+      const db = getDb();
+      if (body.spreadsheetPerspective !== undefined) {
+        db.prepare("UPDATE accounts SET spreadsheet_perspective = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(body.spreadsheetPerspective, accountId);
+      }
+      if (body.spreadsheetMessaging !== undefined) {
+        db.prepare("UPDATE accounts SET spreadsheet_messaging = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(body.spreadsheetMessaging, accountId);
+      }
+      if (Object.keys(body).every(k => k === 'spreadsheetPerspective' || k === 'spreadsheetMessaging')) {
         return NextResponse.json({ success: true });
       }
     }

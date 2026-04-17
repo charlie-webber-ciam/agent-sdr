@@ -13,6 +13,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+import { customerStatusLabel } from '@/lib/customer-status';
 import SimilarityGraphEdge from '@/components/account-map/SimilarityGraphEdge';
 import SimilarityGraphNode from '@/components/account-map/SimilarityGraphNode';
 import type {
@@ -42,6 +43,8 @@ interface SimilarityNodeData extends Record<string, unknown> {
   companyName: string;
   industry: string;
   domain: string | null;
+  customerLabel: string | null;
+  isCustomer: boolean;
   scoreLabel: string | null;
   strengthLabel: string | null;
   isCenter: boolean;
@@ -104,6 +107,8 @@ function buildFocusGraph(options: {
         companyName: options.selectedRecord.companyName,
         industry: options.selectedRecord.industry,
         domain: options.selectedRecord.domain,
+        customerLabel: customerStatusLabel(options.selectedRecord.customerStatus),
+        isCustomer: !!options.selectedRecord.customerStatus,
         scoreLabel: 'Center account',
         strengthLabel: 'Anchor',
         isCenter: true,
@@ -143,7 +148,9 @@ function buildFocusGraph(options: {
         companyName: account.record.companyName,
         industry: account.record.industry,
         domain: account.record.domain,
-        scoreLabel: `Raw ${formatPercent(account.rawScore)}`,
+        customerLabel: customerStatusLabel(account.record.customerStatus),
+        isCustomer: !!account.record.customerStatus,
+        scoreLabel: `Hybrid ${formatPercent(account.hybridScore)}`,
         strengthLabel: similarityStrengthLabel(account.relativeScore),
         isCenter: false,
         isHighlighted: true,
@@ -159,7 +166,7 @@ function buildFocusGraph(options: {
       target: account.record.id,
       type: 'similarityEdge',
       data: {
-        label: `Raw ${formatPercent(account.rawScore)}`,
+        label: `Hybrid ${formatPercent(account.hybridScore)}`,
         strength: account.relativeScore,
         highlighted: true,
         dimmed: false,
@@ -248,6 +255,8 @@ function buildClusterGraph(options: {
           companyName: record.companyName,
           industry: record.industry,
           domain: record.domain,
+          customerLabel: customerStatusLabel(record.customerStatus),
+          isCustomer: !!record.customerStatus,
           scoreLabel: clusterId > 0 ? `Cluster ${clusterId}` : null,
           strengthLabel: options.selectedRecord?.accountId === record.accountId ? 'Anchor' : null,
           isCenter: options.selectedRecord?.accountId === record.accountId,
@@ -271,7 +280,7 @@ function buildClusterGraph(options: {
         target: edge.target,
         type: 'similarityEdge',
         data: {
-          label: `Raw ${formatPercent(edge.rawScore)}`,
+          label: `Hybrid ${formatPercent(edge.hybridScore)}`,
           strength: edge.spreadScore,
           highlighted,
           dimmed: !!options.selectedRecord && !highlighted,

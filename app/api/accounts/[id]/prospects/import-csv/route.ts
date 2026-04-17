@@ -4,6 +4,7 @@ import {
   getAccount,
   findExistingProspectByEmailOrName,
   createProspect,
+  updateProspect,
   updateProspectAIData,
 } from '@/lib/db';
 import { assessContactReadiness } from '@/lib/prospect-contact-readiness';
@@ -29,6 +30,7 @@ export async function POST(
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const buildHierarchy = formData.get('buildHierarchy') !== 'false';
+    const sfdcType = (formData.get('sfdc_type') as string) || null; // 'lead' or 'contact'
 
     if (!file) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
@@ -80,6 +82,11 @@ export async function POST(
       const roleType = title ? inferRoleType(title) : 'unknown';
       const department = title ? inferDepartment(title) : 'Other';
 
+      // For leads, note the matched account owner (Okta owner) if present
+      const ownerNote = (sfdcType === 'lead' && normalized.account_owner)
+        ? `Okta Owner: ${normalized.account_owner}`
+        : undefined;
+
       const prospect = createProspect({
         account_id: accountId,
         first_name: firstName,
@@ -87,13 +94,18 @@ export async function POST(
         title: title || undefined,
         email: normalized.email || undefined,
         phone: normalized.phone || undefined,
+        mobile: normalized.mobile || undefined,
+        linkedin_url: normalized.linkedin_url || undefined,
+        mailing_address: normalized.mailing_address || undefined,
         department,
+        notes: ownerNote,
         role_type: roleType,
         relationship_status: 'new',
-        source: normalized.source === 'salesforce' ? 'salesforce_import' : 'manual',
+        source: 'salesforce_import',
         lead_source: normalized.lead_source || undefined,
         last_activity_date: normalized.last_activity_date || undefined,
         sfdc_id: normalized.sfdc_id || undefined,
+        sfdc_type: sfdcType || undefined,
       });
 
       try {
@@ -102,6 +114,9 @@ export async function POST(
           seniority_level: seniority,
           contact_readiness: readiness,
         });
+        if (normalized.enriched_mobile) {
+          updateProspect(prospect.id, { enriched_mobile: normalized.enriched_mobile });
+        }
       } catch {
         // non-critical
       }
@@ -145,9 +160,9 @@ function normalizeColumns(row: Record<string, string>): Record<string, string> {
   const result: Record<string, string> = {};
   const keyMap: Record<string, string> = {};
 
-  // Build lowercase lookup
+  // Build lowercase lookup — normalize spaces, underscores, dashes, and slashes to underscores
   for (const key of Object.keys(row)) {
-    keyMap[key.toLowerCase().replace(/[\s_-]+/g, '_')] = row[key];
+    keyMap[key.toLowerCase().replace(/[\s_\-/]+/g, '_')] = row[key];
   }
 
   result.first_name = keyMap.first_name || keyMap.firstname || keyMap.first || '';
@@ -155,11 +170,39 @@ function normalizeColumns(row: Record<string, string>): Record<string, string> {
   result.title = keyMap.title || keyMap.job_title || keyMap.jobtitle || '';
   result.email = keyMap.email || keyMap.email_address || '';
   result.phone = keyMap.phone || keyMap.phone_number || keyMap.business_phone || '';
+  result.mobile = keyMap.mobile || keyMap.mobile_phone || keyMap.cell || keyMap.cell_phone || '';
+  result.enriched_mobile = keyMap.enriched_mobile || keyMap.enriched_phone || keyMap.enriched_phone_number || '';
+  result.linkedin_url = keyMap.linkedin_url || keyMap.linkedin || '';
   result.lead_source = keyMap.lead_source || keyMap.leadsource || '';
   result.last_activity_date = keyMap.last_activity_date || keyMap.last_activity || keyMap.date_added || keyMap.created_date || '';
-  result.sfdc_id = keyMap.contact_id || keyMap.id || keyMap.sfdc_id || '';
-  result.account_name = keyMap.account_name || keyMap.company || keyMap.company_name || '';
+  result.sfdc_id = keyMap.contact_id || keyMap.lead_id || keyMap.id || keyMap.sfdc_id || '';
   result.source = 'salesforce';
+
+  // Account name — contacts use "Account Name", leads use "Reporting Matched Account" or "Company / Account"
+  result.account_name =
+    keyMap.reporting_matched_account  // lead report: formal matched account name
+    || keyMap.account_name
+    || keyMap.company___account       // lead report: "Company / Account" normalizes to this
+    || keyMap.company_account
+    || keyMap.company
+    || keyMap.company_name
+    || '';
+
+  // Account owner — contacts use "Account Owner", leads use "Reporting Matched Account Owner"
+  result.account_owner =
+    keyMap.reporting_matched_account_owner
+    || keyMap.account_owner
+    || '';
+
+  // Combine mailing address parts — contacts have "Mailing Street/City/etc", leads have bare "Street" + "Country"
+  const addrParts = [
+    keyMap.mailing_street || keyMap.street,
+    keyMap.mailing_city || keyMap.city,
+    keyMap.mailing_state_province || keyMap.mailing_state || keyMap.state,
+    keyMap.mailing_zip_postal_code || keyMap.mailing_zip || keyMap.zip,
+    keyMap.mailing_country || keyMap.country,
+  ].filter(Boolean);
+  result.mailing_address = addrParts.join(', ');
 
   return result;
 }

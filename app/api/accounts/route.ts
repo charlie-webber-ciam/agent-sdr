@@ -8,12 +8,15 @@ export async function GET(request: Request) {
     const filters = {
       search: searchParams.get('search') || undefined,
       status: searchParams.get('status') || undefined,
+      customerStatus: searchParams.get('customerStatus') || undefined,
       tier: searchParams.get('tier') || undefined,
       oktaTier: searchParams.get('oktaTier') || undefined,
       accountOwner: searchParams.get('accountOwner') || undefined,
       oktaAccountOwner: searchParams.get('oktaAccountOwner') || undefined,
+      oktaPatch: searchParams.get('oktaPatch') || undefined,
       includeGlobalParent: searchParams.get('includeGlobalParent') === 'true',
       hqState: searchParams.get('hqState') || undefined,
+      reviewStatus: searchParams.get('reviewStatus') || undefined,
       sortBy: searchParams.get('sortBy') || undefined,
       limit: parseInt(searchParams.get('limit') || '100'),
       offset: parseInt(searchParams.get('offset') || '0'),
@@ -69,6 +72,7 @@ export async function GET(request: Request) {
           companyName: acc.company_name,
           domain: acc.domain,
           industry: acc.industry,
+          customerStatus: acc.customer_status,
           status: acc.research_status,
           researchSummary: acc.research_summary,
           processedAt: acc.processed_at,
@@ -101,6 +105,9 @@ export async function GET(request: Request) {
           // Parent company
           parentCompany: acc.parent_company,
           parentCompanyRegion: acc.parent_company_region,
+          // Review status
+          reviewStatus: acc.review_status || 'new',
+          reviewStatusUpdatedAt: acc.review_status_updated_at,
         };
       }),
       total,
@@ -114,6 +121,7 @@ export async function GET(request: Request) {
         availableAccountOwners: filterMetadata.accountOwners,
         availableOktaAccountOwners: filterMetadata.oktaAccountOwners,
         availableHqStates: filterMetadata.availableHqStates,
+        availableOktaPatches: filterMetadata.availableOktaPatches,
       },
     });
   } catch (error) {

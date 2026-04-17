@@ -10,12 +10,31 @@ interface CopyButtonProps {
 
 export function CopyButton({ text, label = 'Copy', className }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(text).then(() => {
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    } catch {
+      // Fallback for non-HTTPS, iframes, or permission-denied contexts
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        setFailed(true);
+        setTimeout(() => setFailed(false), 2000);
+      }
+    }
   };
 
   return (
@@ -29,6 +48,13 @@ export function CopyButton({ text, label = 'Copy', className }: CopyButtonProps)
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
           <span className="text-green-600">Copied</span>
+        </>
+      ) : failed ? (
+        <>
+          <svg className="w-3 h-3 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          <span className="text-red-500">Failed</span>
         </>
       ) : (
         <>

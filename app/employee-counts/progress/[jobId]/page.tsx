@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { use } from 'react';
 import { useJobPolling } from '@/lib/hooks/useJobPolling';
 import { downloadFile } from '@/lib/utils';
+import { useToast } from '@/lib/toast-context';
 import { ProgressBar } from '@/components/ProgressBar';
 import { Spinner } from '@/components/Spinner';
 
@@ -42,6 +43,7 @@ export default function EmployeeCountProgressPage({
 }) {
   const { jobId } = use(params);
   const router = useRouter();
+  const toast = useToast();
   const [data, setData] = useState<JobData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -66,7 +68,7 @@ export default function EmployeeCountProgressPage({
       downloadFile(blob, `employee-counts-job-${jobId}.csv`);
     } catch (err) {
       console.error('Download error:', err);
-      alert(err instanceof Error ? err.message : 'Failed to download CSV');
+      toast.error(err instanceof Error ? err.message : 'Failed to download CSV');
     } finally {
       setDownloading(false);
     }

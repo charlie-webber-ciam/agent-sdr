@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useToast } from '@/lib/toast-context';
 
 interface ReprocessStats {
   completedTotal: number;
@@ -17,6 +18,7 @@ interface FailedPendingStats {
 
 export default function ReprocessPage() {
   const router = useRouter();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<ReprocessStats | null>(null);
   const [industries, setIndustries] = useState<string[]>([]);
@@ -26,6 +28,7 @@ export default function ReprocessPage() {
   const [scope, setScope] = useState<'missing_okta' | 'missing_auth0' | 'all_completed'>('missing_okta');
   const [industry, setIndustry] = useState('');
   const [limit, setLimit] = useState(10000);
+  const [model, setModel] = useState('gpt-5.2');
 
   // Failed/Pending state
   const [failedPendingStats, setFailedPendingStats] = useState<FailedPendingStats | null>(null);
@@ -34,6 +37,7 @@ export default function ReprocessPage() {
   const [fpIndustry, setFpIndustry] = useState('');
   const [fpLimit, setFpLimit] = useState(10000);
   const [fpLoading, setFpLoading] = useState(false);
+  const [fpModel, setFpModel] = useState('gpt-5.2');
 
   useEffect(() => {
     fetchConfig();
@@ -83,12 +87,13 @@ export default function ReprocessPage() {
           scope,
           industry: industry || undefined,
           limit,
+          model,
         }),
       });
 
       if (!res.ok) {
         const data = await res.json();
-        alert(data.error || 'Failed to start reprocessing');
+        toast.error(data.error || 'Failed to start reprocessing');
         return;
       }
 
@@ -96,7 +101,7 @@ export default function ReprocessPage() {
       router.push(data.redirectUrl);
     } catch (error) {
       console.error('Failed to start reprocessing:', error);
-      alert('An error occurred while starting reprocessing');
+      toast.error('An error occurred while starting reprocessing');
     } finally {
       setLoading(false);
     }
@@ -113,7 +118,7 @@ export default function ReprocessPage() {
 
   const handleStartFailedPending = async () => {
     if (fpSelectedStatuses.length === 0) {
-      alert('Select at least one status (Failed or Pending)');
+      toast.error('Select at least one status (Failed or Pending)');
       return;
     }
     setFpLoading(true);
@@ -126,12 +131,13 @@ export default function ReprocessPage() {
           statuses: fpSelectedStatuses,
           industry: fpIndustry || undefined,
           limit: fpLimit,
+          model: fpModel,
         }),
       });
 
       if (!res.ok) {
         const data = await res.json();
-        alert(data.error || 'Failed to start retry');
+        toast.error(data.error || 'Failed to start retry');
         return;
       }
 
@@ -139,7 +145,7 @@ export default function ReprocessPage() {
       router.push(data.redirectUrl);
     } catch (error) {
       console.error('Failed to start retry:', error);
-      alert('An error occurred while starting retry');
+      toast.error('An error occurred while starting retry');
     } finally {
       setFpLoading(false);
     }
@@ -369,6 +375,21 @@ export default function ReprocessPage() {
                 <p className="mt-1 text-sm text-gray-500">
                   Maximum number of accounts to reprocess (1-10,000)
                 </p>
+              </div>
+
+              {/* Model */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Model
+                </label>
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="gpt-5.2">gpt-5.2 (default)</option>
+                  <option value="gpt-5.4">gpt-5.4</option>
+                </select>
               </div>
 
               {/* Matching Count */}
@@ -645,6 +666,21 @@ export default function ReprocessPage() {
                     max="10000"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
+                </div>
+
+                {/* Model */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Model
+                  </label>
+                  <select
+                    value={fpModel}
+                    onChange={(e) => setFpModel(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="gpt-5.2">gpt-5.2 (default)</option>
+                    <option value="gpt-5.4">gpt-5.4</option>
+                  </select>
                 </div>
 
                 {/* Matching Count */}

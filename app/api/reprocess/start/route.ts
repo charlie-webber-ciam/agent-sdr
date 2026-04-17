@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
       scope = 'missing_okta',
       industry,
       limit,
+      model,
     } = body;
 
     // Validate researchType
@@ -68,7 +69,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Start processing in background
-    processJob(newJobId, { researchType }).catch((error) => {
+    processJob(newJobId, { researchType, model: model || undefined }).catch((error) => {
       console.error(`Background reprocessing failed for job ${newJobId}:`, error);
     });
 

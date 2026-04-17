@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useToast } from '@/lib/toast-context';
 
 interface HqStateStats {
   totalCompleted: number;
@@ -11,6 +12,7 @@ interface HqStateStats {
 
 export default function HqStatePage() {
   const router = useRouter();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<HqStateStats | null>(null);
   const [unassignedOnly, setUnassignedOnly] = useState(true);
@@ -50,14 +52,14 @@ export default function HqStatePage() {
 
       if (!createRes.ok) {
         const error = await createRes.json();
-        alert(error.error || 'Failed to create job');
+        toast.error(error.error || 'Failed to create job');
         return;
       }
 
       const createData = await createRes.json();
 
       if (createData.totalAccounts === 0) {
-        alert('No accounts found matching the specified filters');
+        toast.info('No accounts found matching the specified filters');
         return;
       }
 
@@ -71,11 +73,11 @@ export default function HqStatePage() {
       if (startRes.ok) {
         router.push(`/hq-state/progress/${createData.jobId}`);
       } else {
-        alert('Failed to start HQ state assignment job');
+        toast.error('Failed to start HQ state assignment job');
       }
     } catch (error) {
       console.error('Failed to start HQ state assignment:', error);
-      alert('An error occurred while starting the job');
+      toast.error('An error occurred while starting the job');
     } finally {
       setLoading(false);
     }
