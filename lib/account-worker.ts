@@ -18,6 +18,8 @@ import {
   updateAccountResearchModel,
 } from './db';
 import { researchCompanyDual, ResearchMode } from './dual-researcher';
+import { hasSubstantiveResearchData } from './agent-researcher';
+import { hasSubstantiveOktaResearchData } from './okta-agent-researcher';
 import { analyzeAccountData } from './categorizer';
 import { analyzeOktaAccountData, OktaPatch } from './okta-categorizer';
 import { PROCESSING_CONFIG } from './config';
@@ -162,8 +164,16 @@ export async function processAccountWithRetry(
         }
       }
 
-      // Mark account as completed
-      updateAccountStatus(account.id, 'completed');
+      // Validate research quality before marking completed
+      const auth0HasData = dualResearch.auth0 ? hasSubstantiveResearchData(dualResearch.auth0) : false;
+      const oktaHasData = dualResearch.okta ? hasSubstantiveOktaResearchData(dualResearch.okta) : false;
+
+      if (auth0HasData || oktaHasData) {
+        updateAccountStatus(account.id, 'completed');
+      } else {
+        console.warn(`[Account ${account.id}] Research for ${account.company_name} returned no substantive data — marking as failed`);
+        updateAccountStatus(account.id, 'failed', 'Research returned no substantive data — possible token budget exhaustion. Re-process this account.');
+      }
 
       // Record which model was used for research
       if (model) {

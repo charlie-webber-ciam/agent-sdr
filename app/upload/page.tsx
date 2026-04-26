@@ -386,8 +386,7 @@ export default function UploadPage() {
                   Triage First
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Quick triage (~15-20s/account) to categorize into tiers, then selectively run full research.
-                  Best for large lists.
+                  Quick tier categorization (~15-20s/account). Single web search per account to classify as Tier A/B/C. Best for large lists — prioritize before committing to full research.
                 </p>
               </button>
               <button
@@ -404,7 +403,7 @@ export default function UploadPage() {
                   Research All
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Full research (~45-75s/account) on every account immediately. Best for small lists.
+                  Deep research (~45-75s/account). Runs 6 queries per account: auth stack, customers, security, funding, tech initiatives, and key contacts. Includes auto-categorization and executive summary. Best for smaller, targeted lists.
                 </p>
               </button>
             </div>

@@ -30,6 +30,34 @@ export interface ResearchResult {
   research_summary: string;
 }
 
+// Known fallback strings that indicate a research section failed or returned no data
+export const FALLBACK_PATTERNS = [
+  'No information found',
+  'Research agent failed',
+  'No command of message available',
+  'No summary available',
+  'no data available for this section',
+];
+
+/**
+ * Check whether a research result contains at least one field with substantive data.
+ * Returns false when every checked field is null, empty, or matches a known fallback pattern.
+ */
+export function hasSubstantiveResearchData(research: ResearchResult): boolean {
+  const fieldsToCheck = [
+    research.current_auth_solution,
+    research.customer_base_info,
+    research.security_incidents,
+    research.news_and_funding,
+    research.tech_transformation,
+    research.research_summary,
+  ];
+  return fieldsToCheck.some(field => {
+    if (!field) return false;
+    return !FALLBACK_PATTERNS.some(pattern => field.toLowerCase().includes(pattern.toLowerCase()));
+  });
+}
+
 export interface CompanyInfo {
   company_name: string;
   domain: string | null;

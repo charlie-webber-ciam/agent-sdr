@@ -15,7 +15,7 @@ if (!existsSync(dataDir)) {
 const DB_PATH = join(dataDir, 'accounts.db');
 
 // Bump this version whenever migrations change to force re-run in dev mode
-const MIGRATION_VERSION = 16;
+const MIGRATION_VERSION = 17;
 
 // Use globalThis to survive HMR in Next.js dev mode
 const globalDb = globalThis as unknown as {
@@ -48,6 +48,10 @@ export function getDb(): Database.Database {
     // Initialize org chart schema
     const orgChartSchema = readFileSync(join(process.cwd(), 'lib', 'org-chart-schema.sql'), 'utf-8');
     globalDb.__sdr_db.exec(orgChartSchema);
+
+    // Initialize enrichment jobs schema
+    const enrichmentSchema = readFileSync(join(process.cwd(), 'lib', 'enrichment-schema.sql'), 'utf-8');
+    globalDb.__sdr_db.exec(enrichmentSchema);
 
     // Run migrations to add new columns
     migrateDatabase(globalDb.__sdr_db);
@@ -5236,4 +5240,398 @@ export function bulkUpdateProspectParents(
     }
   });
   transaction();
+}
+
+// ─── Enrichment Jobs ────────────────────────────────────────────────────────
+
+export interface EnrichmentJob {
+  id: number;
+  type: string;
+  name: string;
+  total_accounts: number;
+  processed_count: number;
+  failed_count: number;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  current_account_id: number | null;
+  filters: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export function createEnrichmentJob(
+  type: string,
+  name: string,
+  totalAccounts: number,
+  filters?: Record<string, any>
+): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO enrichment_jobs (type, name, total_accounts, filters)
+    VALUES (?, ?, ?, ?)
+  `);
+  const result = stmt.run(type, name, totalAccounts, filters ? JSON.stringify(filters) : null);
+  return result.lastInsertRowid as number;
+}
+
+export function getEnrichmentJob(id: number): EnrichmentJob | undefined {
+  const db = getDb();
+  const stmt = db.prepare('SELECT * FROM enrichment_jobs WHERE id = ?');
+  return stmt.get(id) as EnrichmentJob | undefined;
+}
+
+export function getAllEnrichmentJobs(limit: number = 10, type?: string): EnrichmentJob[] {
+  const db = getDb();
+  if (type) {
+    const stmt = db.prepare(`
+      SELECT * FROM enrichment_jobs WHERE type = ?
+      ORDER BY created_at DESC LIMIT ?
+    `);
+    return stmt.all(type, limit) as EnrichmentJob[];
+  }
+  const stmt = db.prepare(`
+    SELECT * FROM enrichment_jobs
+    ORDER BY created_at DESC LIMIT ?
+  `);
+  return stmt.all(limit) as EnrichmentJob[];
+}
+
+export function updateEnrichmentJobStatus(
+  id: number,
+  status: 'pending' | 'processing' | 'completed' | 'failed',
+  currentAccountId?: number | null
+) {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE enrichment_jobs
+    SET status = ?,
+        current_account_id = ?,
+        updated_at = datetime('now'),
+        completed_at = CASE WHEN ? IN ('completed', 'failed') THEN datetime('now') ELSE completed_at END
+    WHERE id = ?
+  `);
+  stmt.run(status, currentAccountId || null, status, id);
+}
+
+export function updateEnrichmentJobProgress(
+  id: number,
+  processedCount: number,
+  failedCount: number
+) {
+  const db = getDb();
+  const stmt = db.prepare(`
+    UPDATE enrichment_jobs
+    SET processed_count = ?,
+        failed_count = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `);
+  stmt.run(processedCount, failedCount, id);
+}
+
+export function getAccountsForEnrichment(filters: {
+  missingField?: string;
+  industry?: string;
+  limit?: number;
+}): Account[] {
+  const db = getDb();
+  let query = 'SELECT * FROM accounts WHERE research_status = \'completed\'';
+  const params: any[] = [];
+
+  if (filters.missingField === 'domain') {
+    query += ' AND (domain IS NULL OR domain = \'\' OR domain LIKE \'placeholder-%\')';
+  }
+
+  if (filters.industry) {
+    query += ' AND industry = ?';
+    params.push(filters.industry);
+  }
+
+  query += ' ORDER BY id';
+
+  if (filters.limit) {
+    query += ' LIMIT ?';
+    params.push(filters.limit);
+  }
+
+  return db.prepare(query).all(...params) as Account[];
+}
+
+// Allowlist of columns that enrichment agents may update
+const ENRICHMENT_SAFE_COLUMNS = new Set([
+  'domain',
+  'industry',
+  'company_name',
+  'hq_state',
+  'parent_company',
+  'parent_company_region',
+  'customer_status',
+]);
+
+export function updateAccountFields(id: number, updates: Record<string, any>): void {
+  const db = getDb();
+  const safeUpdates = Object.entries(updates).filter(([key]) => ENRICHMENT_SAFE_COLUMNS.has(key));
+  if (safeUpdates.length === 0) return;
+
+  const setClauses = safeUpdates.map(([key]) => `${key} = ?`);
+  setClauses.push('updated_at = datetime(\'now\')');
+
+  const stmt = db.prepare(`
+    UPDATE accounts SET ${setClauses.join(', ')} WHERE id = ?
+  `);
+  stmt.run(...safeUpdates.map(([, v]) => v), id);
+}
+
+// ─── Bulk Email Jobs ────────────────────────────────────────────────────────
+
+export interface BulkEmailJob {
+  id: number;
+  name: string;
+  prospect_ids_json: string;
+  email_type: string;
+  research_context: string;
+  custom_instructions: string | null;
+  status: string;
+  total_prospects: number;
+  overviews_needed: number;
+  overviews_generated: number;
+  overviews_failed: number;
+  emails_generated: number;
+  emails_failed: number;
+  current_stage: string | null;
+  current_prospect_id: number | null;
+  error_log: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export function createBulkEmailJob(data: {
+  name: string;
+  prospectIds: number[];
+  emailType: string;
+  researchContext: string;
+  customInstructions?: string;
+  overviewsNeeded: number;
+}): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO bulk_email_jobs (name, prospect_ids_json, email_type, research_context, custom_instructions, total_prospects, overviews_needed)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.name,
+    JSON.stringify(data.prospectIds),
+    data.emailType,
+    data.researchContext,
+    data.customInstructions || null,
+    data.prospectIds.length,
+    data.overviewsNeeded
+  );
+  return result.lastInsertRowid as number;
+}
+
+export function getBulkEmailJob(id: number): BulkEmailJob | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM bulk_email_jobs WHERE id = ?').get(id) as BulkEmailJob | undefined;
+}
+
+export function getAllBulkEmailJobs(limit: number = 20): BulkEmailJob[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM bulk_email_jobs ORDER BY created_at DESC LIMIT ?').all(limit) as BulkEmailJob[];
+}
+
+export function updateBulkEmailJobStatus(
+  id: number,
+  status: string,
+  currentStage?: string | null,
+  currentProspectId?: number | null
+): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE bulk_email_jobs
+    SET status = ?,
+        current_stage = ?,
+        current_prospect_id = ?,
+        updated_at = datetime('now'),
+        completed_at = CASE WHEN ? IN ('completed', 'failed') THEN datetime('now') ELSE completed_at END
+    WHERE id = ?
+  `).run(status, currentStage ?? null, currentProspectId ?? null, status, id);
+}
+
+export function updateBulkEmailJobProgress(
+  id: number,
+  updates: {
+    overviews_generated?: number;
+    overviews_failed?: number;
+    emails_generated?: number;
+    emails_failed?: number;
+  }
+): void {
+  const db = getDb();
+  const setClauses: string[] = ["updated_at = datetime('now')"];
+  const values: any[] = [];
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (value !== undefined) {
+      setClauses.push(`${key} = ?`);
+      values.push(value);
+    }
+  }
+
+  values.push(id);
+  db.prepare(`UPDATE bulk_email_jobs SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function getBulkEmailJobEmails(jobId: number): (ProspectEmail & {
+  first_name: string;
+  last_name: string;
+  title: string | null;
+  company_name: string;
+  domain: string | null;
+  prospect_email: string | null;
+})[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT pe.*, p.first_name, p.last_name, p.title, p.email as prospect_email,
+           a.company_name, a.domain
+    FROM prospect_emails pe
+    JOIN prospects p ON pe.prospect_id = p.id
+    JOIN accounts a ON pe.account_id = a.id
+    WHERE pe.bulk_job_id = ?
+    ORDER BY a.company_name, p.last_name, p.first_name
+  `).all(jobId) as any[];
+}
+
+export function updateProspectEmailContent(id: number, subject: string, body: string): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE prospect_emails
+    SET subject = ?, body = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(subject, body, id);
+}
+
+export function updateProspectEmailExportStatus(ids: number[], status: string): void {
+  const db = getDb();
+  if (ids.length === 0) return;
+  const placeholders = ids.map(() => '?').join(',');
+  db.prepare(`
+    UPDATE prospect_emails
+    SET export_status = ?, updated_at = datetime('now')
+    WHERE id IN (${placeholders})
+  `).run(status, ...ids);
+}
+
+/**
+ * Get prospect IDs that already have emails for a given research context.
+ * Used by bulk email processor to skip duplicates.
+ */
+export function getProspectIdsWithExistingEmails(
+  prospectIds: number[],
+  researchContext: string
+): Set<number> {
+  if (prospectIds.length === 0) return new Set();
+  const db = getDb();
+  const placeholders = prospectIds.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT DISTINCT prospect_id
+    FROM prospect_emails
+    WHERE prospect_id IN (${placeholders})
+      AND research_context = ?
+  `).all(...prospectIds, researchContext) as Array<{ prospect_id: number }>;
+  return new Set(rows.map(r => r.prospect_id));
+}
+
+/**
+ * Get email counts per prospect for display in the bulk email UI.
+ */
+export function getProspectEmailCounts(prospectIds: number[]): Map<number, number> {
+  if (prospectIds.length === 0) return new Map();
+  const db = getDb();
+  const placeholders = prospectIds.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT prospect_id, COUNT(*) as count
+    FROM prospect_emails
+    WHERE prospect_id IN (${placeholders})
+    GROUP BY prospect_id
+  `).all(...prospectIds) as Array<{ prospect_id: number; count: number }>;
+  const map = new Map<number, number>();
+  for (const r of rows) map.set(r.prospect_id, r.count);
+  return map;
+}
+
+export function createProspectEmailWithJob(data: {
+  prospect_id: number;
+  account_id: number;
+  subject: string;
+  body: string;
+  reasoning?: string;
+  key_insights?: string;
+  email_type?: string;
+  research_context?: string;
+  bulk_job_id?: number;
+}): ProspectEmail {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO prospect_emails (prospect_id, account_id, subject, body, reasoning, key_insights, email_type, research_context, bulk_job_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    data.prospect_id,
+    data.account_id,
+    data.subject,
+    data.body,
+    data.reasoning || null,
+    data.key_insights || null,
+    data.email_type || 'cold',
+    data.research_context || 'auth0',
+    data.bulk_job_id || null
+  );
+  return db.prepare('SELECT * FROM prospect_emails WHERE id = ?').get(result.lastInsertRowid) as ProspectEmail;
+}
+
+// ─── Empty-data account detection & recovery ─────────────────────────────────
+
+const EMPTY_DATA_WHERE = `
+  research_status = 'completed'
+  AND (current_auth_solution IS NULL OR current_auth_solution LIKE '%No information found%' OR current_auth_solution LIKE '%Research agent failed%')
+  AND (customer_base_info IS NULL OR customer_base_info LIKE '%No information found%' OR customer_base_info LIKE '%Research agent failed%')
+  AND (research_summary IS NULL OR research_summary LIKE '%No summary available%' OR research_summary LIKE '%Research agent failed%')
+`;
+
+/**
+ * Count accounts that are marked 'completed' but have no substantive research data.
+ * These were likely affected by token budget exhaustion during processing.
+ */
+export function getEmptyCompletedAccountCount(): number {
+  const db = getDb();
+  const result = db.prepare(`SELECT COUNT(*) as count FROM accounts WHERE ${EMPTY_DATA_WHERE}`).get() as { count: number };
+  return result.count;
+}
+
+/**
+ * Reset empty-completed accounts back to 'pending' so they can be re-processed.
+ * Clears the fallback research data and error state.
+ * Returns the number of accounts reset.
+ */
+export function resetEmptyCompletedAccounts(): number {
+  const db = getDb();
+  const result = db.prepare(`
+    UPDATE accounts
+    SET research_status = 'pending',
+        error_message = NULL,
+        current_auth_solution = NULL,
+        customer_base_info = NULL,
+        security_incidents = NULL,
+        news_and_funding = NULL,
+        tech_transformation = NULL,
+        command_of_message = NULL,
+        research_summary = NULL,
+        prospects = NULL,
+        processed_at = NULL,
+        updated_at = datetime('now')
+    WHERE ${EMPTY_DATA_WHERE}
+  `).run();
+  return result.changes;
 }

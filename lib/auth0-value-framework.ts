@@ -54,5 +54,5 @@ export const AUTH0_VALUE_FRAMEWORK_EMAIL_GUIDANCE = `For Auth0 messaging:
 - Treat the company's objective as the lead idea.
 - Pick one primary Auth0 value driver and keep the copy anchored to it.
 - Use a differentiator only if it sharpens the problem and desired outcome.
-- If a proof point is relevant, reference the business result, not a feature dump.
+- Do NOT reference specific customer proof points by name in outbound emails. Focus on the prospect's own business context instead.
 - If research includes a Command of the Message section, use it as the primary messaging brief and use the rest of the account data as supporting evidence.`;

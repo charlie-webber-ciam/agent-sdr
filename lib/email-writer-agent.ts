@@ -104,6 +104,16 @@ ${AUTH0_VALUE_FRAMEWORK_EMAIL_GUIDANCE}
 - Pick one primary value driver and let it shape the problem, impact, and question.
 - If the account data includes a Command of the Message section, treat it as the message hierarchy.
 - In "reasoning", state the business priority you identified, the persona tier you selected, and the value driver.
+- Do NOT reference specific customer proof points (Cinepolis, Snyk, Wyndham, FloHealth, Finder, Headspace) in emails. We do not have a relevant proof point database for this region.
+
+### TRIGGER RECENCY RULES
+
+The account context may include triggers with recency classifications. Always check today's date (provided in the context) and enforce these rules strictly:
+- **Strong triggers** (marked [STRONG - recent], < 6 months old): Reference prominently as the observation. These are the leading signals for outreach timing.
+- **Supporting context** (marked [supporting context only], 6-12 months old): Use only as corroborating evidence if space permits. Do NOT make them the primary signal.
+- **Excluded triggers** (> 12 months old): These are filtered out of context. If you see any date that is clearly older than 12 months from today's date, do NOT reference it.
+- If the account has NO recent triggers, anchor to the business priority identified from news, funding, or Command of the Message instead.
+- Always verify trigger recency against today's date before using any data point. Data from more than 12 months ago is stale and must not be used as the basis for outreach.
 
 ### INTERNAL DIAGNOSTIC ENGINE
 
@@ -221,6 +231,7 @@ function prepareAccountContext(account: Account, researchContext: 'auth0' | 'okt
   parts.push(`COMPANY: ${account.company_name}`);
   parts.push(`INDUSTRY: ${account.industry || 'Unknown'}`);
   if (account.domain) parts.push(`DOMAIN: ${account.domain}`);
+  parts.push(`\nTODAY'S DATE: ${new Date().toISOString().split('T')[0]}`);
   parts.push(`\nRESEARCH PERSPECTIVE: ${researchContext === 'auth0' ? 'Auth0 CIAM' : 'Okta Workforce Identity'}`);
 
   // Include Auth0-focused categorization data regardless of context (useful background info)
@@ -344,6 +355,7 @@ function prepareAccountContext(account: Account, researchContext: 'auth0' | 'okt
 function buildPrompt(request: EmailRequest, accountContext: string): string {
   const parts: string[] = [];
 
+  parts.push(`TODAY'S DATE: ${new Date().toISOString().split('T')[0]}`);
   parts.push('Generate a personalized cold email with the following parameters:\n');
   parts.push(`RECIPIENT NAME: ${request.recipientName}`);
   parts.push(`RECIPIENT PERSONA: ${request.recipientPersona}`);

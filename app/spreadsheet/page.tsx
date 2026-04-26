@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { Upload } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Upload, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import AccountTabBar from '@/components/spreadsheet/AccountTabBar';
 import PerspectiveSection from '@/components/spreadsheet/PerspectiveSection';
@@ -36,6 +37,7 @@ function loadViewMode(): ViewMode {
 }
 
 export default function SpreadsheetPage() {
+  const router = useRouter();
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<AccountSummary | null>(null);
   const [spreadsheetData, setSpreadsheetData] = useState<SpreadsheetData | null>(null);
@@ -172,11 +174,21 @@ export default function SpreadsheetPage() {
               : 'Manage prospects, perspective, and messaging per account'}
           </p>
         </div>
-        {!isCross && (
-          <Button size="sm" variant="outline" onClick={() => setShowImport(true)} className="gap-1.5">
-            <Upload className="h-4 w-4" /> Import Salesforce Report
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => router.push('/bulk-email')}
+            className="gap-1.5"
+          >
+            <Mail className="h-4 w-4" /> Bulk Email
           </Button>
-        )}
+          {!isCross && (
+            <Button size="sm" variant="outline" onClick={() => setShowImport(true)} className="gap-1.5">
+              <Upload className="h-4 w-4" /> Import Salesforce Report
+            </Button>
+          )}
+        </div>
       </div>
 
       <CSVImportDialog

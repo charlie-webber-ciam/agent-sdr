@@ -13,6 +13,7 @@ import { usePerspective, OktaPatch } from '@/lib/perspective-context';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import CommandPalette from '@/components/CommandPalette';
 
 const PATCH_OPTIONS: { value: OktaPatch; label: string; shortLabel: string }[] = [
@@ -38,26 +39,45 @@ function PerspectiveControls({
 }) {
   return (
     <div className="space-y-3">
-      <div className={cn('grid gap-2', collapsed ? 'grid-cols-1' : 'grid-cols-2')}>
-        <Button
-          variant={perspective === 'auth0' ? 'default' : 'outline'}
-          size={collapsed ? 'icon' : 'sm'}
-          onClick={() => setPerspective('auth0')}
-          className={cn(collapsed && 'mx-auto')}
-        >
-          <span className="font-semibold">A</span>
-          {!collapsed && <span>Auth0</span>}
-        </Button>
-        <Button
-          variant={perspective === 'okta' ? 'default' : 'outline'}
-          size={collapsed ? 'icon' : 'sm'}
-          onClick={() => setPerspective('okta')}
-          className={cn(collapsed && 'mx-auto')}
-        >
-          <span className="font-semibold">O</span>
-          {!collapsed && <span>Okta</span>}
-        </Button>
-      </div>
+      {!collapsed && (
+        <p className="px-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Research perspective</p>
+      )}
+      <TooltipProvider delayDuration={300}>
+        <div className={cn('grid gap-2', collapsed ? 'grid-cols-1' : 'grid-cols-2')}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={perspective === 'auth0' ? 'default' : 'outline'}
+                size={collapsed ? 'icon' : 'sm'}
+                onClick={() => setPerspective('auth0')}
+                className={cn(collapsed && 'mx-auto')}
+              >
+                <span className="font-semibold">A</span>
+                {!collapsed && <span>Auth0</span>}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Auth0 CIAM: Customer identity research</p>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={perspective === 'okta' ? 'default' : 'outline'}
+                size={collapsed ? 'icon' : 'sm'}
+                onClick={() => setPerspective('okta')}
+                className={cn(collapsed && 'mx-auto')}
+              >
+                <span className="font-semibold">O</span>
+                {!collapsed && <span>Okta</span>}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Okta Workforce: Employee identity research</p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
 
       {perspective === 'okta' && (
         <div className={cn('grid gap-2', collapsed ? 'grid-cols-1' : 'grid-cols-2')}>

@@ -585,6 +585,43 @@ function AccountsPageContent() {
         onSearchPendingChange={setSearchPending}
       />
 
+      {/* Quick Filter Presets */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground mr-1">Quick filters:</span>
+        {[
+          { label: 'Tier A', filter: { [isOkta ? 'oktaTier' : 'tier']: 'A' } },
+          { label: 'Needs Research', filter: { status: 'pending' } },
+          { label: 'Failed', filter: { status: 'failed' } },
+          { label: 'Needs Review', filter: { reviewStatus: 'new' } },
+        ].map((preset) => {
+          const isActive = Object.entries(preset.filter).every(
+            ([k, v]) => filters[k as keyof FilterState] === v
+          );
+          return (
+            <Button
+              key={preset.label}
+              variant={isActive ? 'default' : 'outline'}
+              size="sm"
+              className="h-7 rounded-full text-xs"
+              onClick={() => {
+                if (isActive) {
+                  // Toggle off: reset those filter keys
+                  const resetFilters = { ...filters };
+                  Object.keys(preset.filter).forEach((k) => {
+                    (resetFilters as Record<string, unknown>)[k] = DEFAULT_FILTERS[k as keyof FilterState];
+                  });
+                  handleFiltersChange(resetFilters as FilterState);
+                } else {
+                  handleFiltersChange({ ...DEFAULT_FILTERS, ...preset.filter } as FilterState);
+                }
+              }}
+            >
+              {preset.label}
+            </Button>
+          );
+        })}
+      </div>
+
       {/* Active Filter Chips */}
       {activeFilters.length > 0 && (
         <div className="mb-4 flex items-center gap-2 flex-wrap">

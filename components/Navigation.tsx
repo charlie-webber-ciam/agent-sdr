@@ -37,6 +37,8 @@ const toolLinks = [
   { href: '/summarize-activities', label: 'Summarize Activities' },
   { href: '/parent-company', label: 'Parent Company Finder' },
   { href: '/hq-state', label: 'HQ State Assignment', activePath: '/hq-state' },
+  { href: '/enrich', label: 'Bulk Enrichment', activePath: '/enrich' },
+  { href: '/bulk-email', label: 'Bulk Email', activePath: '/bulk-email' },
   { href: '/test', label: 'System Diagnostics' },
 ];
 

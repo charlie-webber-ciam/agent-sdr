@@ -1177,6 +1177,54 @@ export function migrateDatabase(db: Database.Database) {
     console.error('Failed to add prospect columns:', error);
   }
 
+  // Add bulk_email_jobs table for batch prospect email generation
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS bulk_email_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        prospect_ids_json TEXT NOT NULL,
+        email_type TEXT NOT NULL DEFAULT 'cold',
+        research_context TEXT NOT NULL DEFAULT 'auth0',
+        custom_instructions TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        total_prospects INTEGER NOT NULL DEFAULT 0,
+        overviews_needed INTEGER NOT NULL DEFAULT 0,
+        overviews_generated INTEGER NOT NULL DEFAULT 0,
+        overviews_failed INTEGER NOT NULL DEFAULT 0,
+        emails_generated INTEGER NOT NULL DEFAULT 0,
+        emails_failed INTEGER NOT NULL DEFAULT 0,
+        current_stage TEXT,
+        current_prospect_id INTEGER,
+        error_log TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT,
+        FOREIGN KEY (current_prospect_id) REFERENCES prospects(id)
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_bulk_email_jobs_status ON bulk_email_jobs(status)');
+    console.log('✓ Ensured bulk_email_jobs table exists');
+  } catch (error) {
+    console.error('Failed to create bulk_email_jobs table:', error);
+  }
+
+  // Add bulk_job_id and export_status columns to prospect_emails if missing
+  try {
+    const peCols = db.prepare('PRAGMA table_info(prospect_emails)').all() as any[];
+    const peColNames = new Set(peCols.map((col: any) => col.name));
+    if (!peColNames.has('bulk_job_id')) {
+      db.exec('ALTER TABLE prospect_emails ADD COLUMN bulk_job_id INTEGER REFERENCES bulk_email_jobs(id)');
+      console.log('✓ Added bulk_job_id column to prospect_emails');
+    }
+    if (!peColNames.has('export_status')) {
+      db.exec("ALTER TABLE prospect_emails ADD COLUMN export_status TEXT DEFAULT 'pending'");
+      console.log('✓ Added export_status column to prospect_emails');
+    }
+  } catch (error) {
+    console.error('Failed to add bulk columns to prospect_emails:', error);
+  }
+
   // Add vector_index_jobs table for manual backfill/rebuild jobs
   try {
     db.exec(`

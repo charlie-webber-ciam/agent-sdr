@@ -40,7 +40,7 @@ export async function POST(request: Request) {
         400,
         'Concurrency must be between 1 and 50'
       );
-      selectedConcurrency = parsedConcurrency;
+      selectedConcurrency = parsedConcurrency as typeof selectedConcurrency;
     }
 
     if (oktaPatch !== undefined && (typeof oktaPatch !== 'string' || !VALID_PATCHES.includes(oktaPatch as OktaPatch))) {

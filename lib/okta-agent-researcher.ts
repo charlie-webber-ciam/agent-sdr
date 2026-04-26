@@ -39,6 +39,33 @@ export interface CompanyInfo {
   industry: string;
 }
 
+// Known fallback strings that indicate a research section failed or returned no data
+const OKTA_FALLBACK_PATTERNS = [
+  'No information found',
+  'Research agent failed',
+  'No summary available',
+  'no data available for this section',
+];
+
+/**
+ * Check whether an Okta research result contains at least one field with substantive data.
+ * Returns false when every checked field is null, empty, or matches a known fallback pattern.
+ */
+export function hasSubstantiveOktaResearchData(research: ResearchResult): boolean {
+  const fieldsToCheck = [
+    research.current_iam_solution,
+    research.workforce_info,
+    research.security_incidents,
+    research.news_and_funding,
+    research.tech_transformation,
+    research.research_summary,
+  ];
+  return fieldsToCheck.some(field => {
+    if (!field) return false;
+    return !OKTA_FALLBACK_PATTERNS.some(pattern => field.toLowerCase().includes(pattern.toLowerCase()));
+  });
+}
+
 // ─── Zod Schema for Structured Prospect Output ────────────────────────────────
 
 const ProspectSchema = z.array(

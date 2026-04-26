@@ -3,6 +3,7 @@ import { AccountOverviewRecord } from './account-overview';
 import { buildOpportunityContext } from './opportunity-context';
 import { buildActivityContext } from './activity-context';
 import { buildAttachedAccountDocumentContext } from './account-documents';
+import { filterAndAnnotateTriggers } from './trigger-recency-filter';
 
 interface AgentNote {
   content: string;
@@ -17,7 +18,8 @@ export function buildEnhancedAgentContext(
   account: Account,
   overview: AccountOverviewRecord | null | undefined,
   notes: AgentNote[],
-  researchContext: 'auth0' | 'okta' = 'auth0'
+  researchContext: 'auth0' | 'okta' = 'auth0',
+  currentDate: Date = new Date()
 ): string {
   const parts: string[] = [];
 
@@ -26,6 +28,8 @@ export function buildEnhancedAgentContext(
   parts.push(`INDUSTRY: ${account.industry || 'Unknown'}`);
   if (account.domain) parts.push(`DOMAIN: ${account.domain}`);
   parts.push(`\nRESEARCH PERSPECTIVE: ${researchContext === 'auth0' ? 'Auth0 CIAM' : 'Okta Workforce Identity'}`);
+
+  parts.push(`\nTODAY'S DATE: ${currentDate.toISOString().split('T')[0]}`);
 
   if (account.tier) parts.push(`\nTIER: ${account.tier}`);
   if (account.estimated_annual_revenue) parts.push(`ESTIMATED ARR: ${account.estimated_annual_revenue}`);
@@ -96,9 +100,17 @@ export function buildEnhancedAgentContext(
     }
 
     if (overview.triggers.length > 0) {
-      overviewParts.push('\nBUSINESS TRIGGERS:');
-      for (const t of overview.triggers) {
-        overviewParts.push(`  - ${t.title}${t.detail ? `: ${t.detail}` : ''}${t.dateLabel ? ` (${t.dateLabel})` : ''}`);
+      const annotatedTriggers = filterAndAnnotateTriggers(overview.triggers, currentDate);
+      if (annotatedTriggers.length > 0) {
+        overviewParts.push('\nBUSINESS TRIGGERS:');
+        for (const t of annotatedTriggers) {
+          const recencyTag = t.recencyLevel === 'strong'
+            ? ' [STRONG - recent]'
+            : ' [supporting context only]';
+          overviewParts.push(`  - ${t.title}${t.detail ? `: ${t.detail}` : ''}${recencyTag}${t.dateLabel ? ` (${t.dateLabel})` : ''}`);
+        }
+      } else {
+        overviewParts.push('\nBUSINESS TRIGGERS: None recent enough to reference');
       }
     }
 

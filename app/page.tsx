@@ -7,10 +7,12 @@ import { motion } from 'framer-motion';
 import {
   AlertTriangle,
   ArrowRight,
+  CheckCircle2,
   Clock3,
   Database,
   Filter,
   Loader2,
+  RotateCcw,
   ShieldAlert,
   Sparkles,
   TrendingUp,
@@ -160,6 +162,59 @@ function statusBadgeClass(status: string): string {
   return 'border-slate-200 bg-slate-100 text-slate-700';
 }
 
+function GettingStartedStepper({ stats, hasJobs }: { stats: Stats; hasJobs: boolean }) {
+  const steps = [
+    { label: 'Upload accounts', description: 'Import a CSV of company accounts.', href: '/upload', done: stats.total > 0 },
+    { label: 'Process research', description: 'Run AI research on your accounts.', href: '/upload', done: stats.completed > 0 },
+    { label: 'Review accounts', description: 'Browse research results and tiers.', href: '/accounts', done: stats.completed > 3 },
+    { label: 'Generate outreach', description: 'Create personalized emails.', href: '/bulk-email', done: false },
+  ];
+
+  const allDone = steps.every((s) => s.done);
+  if (allDone) return null;
+
+  return (
+    <motion.div variants={fadeSlide} initial="hidden" animate="show">
+      <Card className="border-primary/20 bg-primary/[0.02]">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Getting Started</CardTitle>
+          <CardDescription>Follow these steps to set up your research pipeline.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {steps.map((step, i) => (
+              <Link
+                key={step.label}
+                href={step.href}
+                className={cn(
+                  'group relative rounded-lg border p-3 transition-colors',
+                  step.done
+                    ? 'border-emerald-200 bg-emerald-50/50'
+                    : 'border-border hover:border-primary/40 hover:bg-muted/50'
+                )}
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  {step.done ? (
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                  ) : (
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full border border-muted-foreground/30 text-xs font-medium text-muted-foreground">
+                      {i + 1}
+                    </span>
+                  )}
+                  <span className={cn('text-sm font-medium', step.done && 'text-emerald-700')}>
+                    {step.label}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">{step.description}</p>
+              </Link>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { perspective } = usePerspective();
@@ -172,6 +227,8 @@ export default function DashboardPage() {
   const [interruptedJobs, setInterruptedJobs] = useState<InterruptedJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshingStale, setRefreshingStale] = useState(false);
+  const [emptyCompletedCount, setEmptyCompletedCount] = useState(0);
+  const [resettingEmpty, setResettingEmpty] = useState(false);
   const [interruptedActionLoading, setInterruptedActionLoading] = useState<number | null>(null);
   const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
   const [archivingJobId, setArchivingJobId] = useState<number | null>(null);
@@ -180,10 +237,11 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [statsRes, jobsRes, preprocessRes] = await Promise.all([
+      const [statsRes, jobsRes, preprocessRes, emptyRes] = await Promise.all([
         fetch('/api/stats'),
         fetch(`/api/jobs?limit=12${showArchivedJobs ? '&includeArchived=1' : ''}`),
         fetch('/api/preprocess/jobs'),
+        fetch('/api/accounts/reset-empty'),
       ]);
 
       let fetchedJobs: Job[] = [];
@@ -205,6 +263,11 @@ export default function DashboardPage() {
         const preprocessData = await preprocessRes.json();
         fetchedPreprocessJobs = preprocessData.jobs ?? [];
         setPreprocessingJobs(fetchedPreprocessJobs);
+      }
+
+      if (emptyRes.ok) {
+        const emptyData = await emptyRes.json();
+        setEmptyCompletedCount(emptyData.count ?? 0);
       }
 
       const hasActiveResearch = fetchedJobs.some((job) => job.status === 'processing' || job.status === 'pending');
@@ -282,6 +345,25 @@ export default function DashboardPage() {
       toast.error('Failed to refresh stale accounts');
     } finally {
       setRefreshingStale(false);
+    }
+  };
+
+  const handleResetEmpty = async () => {
+    setResettingEmpty(true);
+    try {
+      const res = await fetch('/api/accounts/reset-empty', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Reset ${data.resetCount} account${data.resetCount !== 1 ? 's' : ''} for re-processing`);
+        setEmptyCompletedCount(0);
+        await fetchData();
+      } else {
+        toast.error('Failed to reset accounts');
+      }
+    } catch {
+      toast.error('Failed to reset accounts');
+    } finally {
+      setResettingEmpty(false);
     }
   };
 
@@ -401,6 +483,10 @@ export default function DashboardPage() {
         </motion.div>
       )}
 
+      {stats && stats.total < 10 && (
+        <GettingStartedStepper stats={stats} hasJobs={recentJobs.length > 0} />
+      )}
+
       <motion.div
         className="grid grid-cols-1 gap-4 xl:grid-cols-3"
         variants={stagger}
@@ -475,6 +561,31 @@ export default function DashboardPage() {
                   </Button>
                 )}
               </div>
+
+              {emptyCompletedCount > 0 && (
+                <div className="rounded-lg border border-red-200 bg-red-50/50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-red-800">Empty research data detected</p>
+                      <p className="text-xs text-muted-foreground">
+                        {emptyCompletedCount} account{emptyCompletedCount !== 1 ? 's' : ''} marked as completed but contain{emptyCompletedCount === 1 ? 's' : ''} no
+                        actual research data. Likely caused by token budget exhaustion during processing.
+                      </p>
+                    </div>
+                    <Badge variant="destructive">{emptyCompletedCount}</Badge>
+                  </div>
+                  <Button
+                    onClick={handleResetEmpty}
+                    disabled={resettingEmpty}
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                  >
+                    {resettingEmpty ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                    {resettingEmpty ? 'Resetting...' : 'Reset for re-processing'}
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>
